@@ -1,0 +1,139 @@
+########################################################################
+#
+### Instructions for setting up and running MLCP, cpu-dev version    ###
+#
+########################################################################
+
+1) MLCP comes with libraries included (in the 'lib') directory and is
+   configured to be compiled using the gfortran compiler. To compile
+   the libraries and the main code, one can use the convenience script
+
+   $ bash install
+
+   to compile and link everything. Alternatively, once can compile the
+   libraries individually and use the Makefile to compile MLCP (i.e. if
+   a different compiler such as ifort is desired)
+
+2) To run MLCP, two input files are read, as well as a number of 
+   potential files, depending on the PES used:
+
+   a) The file 'layers.inp' is used to enter the structure of the 
+      multilayer tree:
+
+      -In the $resort section, one chooses the order of the modes, where
+       the numbering corresponds to that in the potential files
+      -In the $basis section, one chooses the numbers of basis functions:
+       first line: number of 1D harmonic oscillator functions
+       subsequent lines: number of n-D eigenfunctions to keep in the 2nd,
+       3rd, ... layers, which must not exceed the size of the direct product 
+       basis of the previous layer
+      -In the $layers section, the grouping of the coordinates is provided,
+       beginning with the second layer
+
+   b) The file "CP.inp" lists control parameters for the calculation:
+
+      -System: five-character name 'XXXXX' of the PES to use. Potential
+               files for the system must match the name given here.
+               For more details on how To add a new PES, see section 3 below.
+               -Systems 'dummy', 'Henon' (modified Henon-Heiles), and 'CpOsc'
+                are available for testing and require no potential files.
+
+      -NCPU: number of processors to use
+
+      -red2D: type of rank-reduction to use for modes containing two 
+              submodes. Acceptable choices are:
+              SVD-singular value decomposition (recommended)
+              ALS-alternating least squares
+              SR1-successive rank-1 updates
+              OPS-orthogonal rank-1 projections plus sorting
+
+      -redND: type of rank-reduction to use for modes containing more
+              than two submodes. Acceptable choices are:
+              ALS-alternating least squares (recommended)
+              SR1-successive rank-1 updates 
+              OPS-orthogonal rank-1 projections plus sorting
+
+      -psirank: target rank for the wavefunction
+
+      -hrank: target rank for the Hamiltonian. Set hrank=0 to skip
+              reduction of the Hamiltonian (recommended)
+
+      -psinals: number of ALS iterations used in wavefunction rank reduction
+
+      -hnals: number of ALS iterations used in Hamiltonian rank reduction
+
+      -solver: solver type to use. Acceptable values are:
+               powr-power method
+               cheb-Chebyshev-filtered power method
+               pals-intertwined power method ("intertwining")
+                    (for modes with D=2, setting red2D='SVD' implies
+                    'powr' for those modes)
+               pist-preconditioned inexact spectral transform
+                    (note that PIST only applies to top layer; this 
+                    choice implies 'powr' for lower layers)
+
+      -ncycle: number of cycles. One cycle implies npow power iterations
+               + Gram Schmidt orthogonalization + vector updates
+
+      -npow: number of power/Chebyshev/intertwining/PIST iterations per
+             cycle
+
+      -lowmem: memory-saving option to use with intertwining (solver=pals).
+               Options range from 0 (fastest, most memory usage)
+                               to 3 (slowest, least memory usage)
+               Options 1 and 2 are recommended for high and low memory runs,
+                               respectively
+
+      -update: set to 1 to use vector updates (recommended). Setting to 0
+               sorts vectors by Rayleigh Quotient instead of by eigenvalue
+
+      -optimize PES: rotate PES to minimize terms which couple multiple DOFs
+                     (recommended setting=F)
+
+      -Etarget: target energy (only applicable for top-layer, solver=pist)
+
+      -solvtol: solver tolerence; calculation exit earlier when
+                (E_previous-iteration - E_this-iteration)/E_this-iteration < solvtol
+                for ALL eigenvalues
+
+      -resfile: name for files to write restart data to/read restart data from. Choose
+                'none' to avoid generating restart files; otherwise the following
+                files are generated:
+                XXXXX_1_eigv.rst, XXXXX_2_eigv.rst (two copies of eigenvalues)
+                XXXXX_1_oper.rst, XXXXX_2_oper.rst (two copies of operators)
+                XXXXX_1_psi.rst, XXXXX_2_psi.rst   (two copies of wavefunction blocks)
+                XXXXX_CP.rst                       (copy of CP.inp used in run)
+                XXXXX_layers.rst                   (copy of layers.inp used in run)
+                (two copies of eigv, oper and psi are generated in case of system
+                failure during a write, which would result in a corrupt file)
+
+   c) Once everything is set up, run the code using the command
+
+      $ mlcp.x > output.out &
+
+      Enjoy!
+
+3) Adding a new PES
+
+   Including a new PES requires following four steps:
+
+   a) pick a five character name for the new PES, e.g. 'XXXXX'
+
+   b) add the following files to the pes directory:
+      f2XXXXX.dat (quadratic constants)
+      f3XXXXX.dat (cubic constants)
+        ...
+      fnXXXXX.dat (n-th order constants)
+
+   c) Modify the subroutine GetPotential() in source file Source/FFPES.f90
+      by adding an 'ELSEIF' statement for the new PES. This includes a 
+      call to  ReadFFHamiltonian(V,'XXXXX',n,divide), where n is the highest
+      order for which terms are included. Setting the 'divide' parameter 
+      to .TRUE. causes potential terms to be divided by Taylor series factors
+      and then multiplied by degeneracy factors
+
+   d) recompile MLCP
+
+########################################################################
+#  Instructions by Phillip Thomas 14 September 2023
+########################################################################
