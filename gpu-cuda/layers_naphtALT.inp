@@ -1,0 +1,57 @@
+# Resort section: desired order of modes on layer 1, to allow
+# arbitrary mode-combination schemes. The numbers entered in
+# the basis and layers sections apply to the resorted order
+
+$resort
+ 1  2 37 38 17 18 29 30    3  4  5 39 40 19 20 31 32   21 41 33  7 35  8  6 42 22 34   43 23  9 36 24 44   25 10 45 14 26 11 46 15   27 12 16 47 28 13 48 /
+$end-resort
+
+# Basis section: number of basis functions per DOF/mode
+# first line: primitive basis for individual DOFs
+# subsequent lines: basis for modes which combine DOFs
+
+$basis
+#  C-H stretch modes          C-C stretch modes         Rocking and ring breathing     in-plane skeletal      out-of-plane C-H        out-of-plane skel
+#  495 -> all v=4             220 -> all v=3            286 -> all v=2                 210/462 all v4/v5      165/495 -> all v3/v4    120/330 -> v3/v4
+99 99 99 99 99 99 99 99   99 99 99 99 99 99 99 99 99   99 99 99 99 99 99 99 99 99 99   99 99 99 99 99 99   99 99 99 99 99 99 99 99   99 99 99 99 99 99 99 /
+12 12 12 12 12 12 12 12   12 12 12 12 12 12 12 12 12   12 12 12 12 12 12 12 12 12 12   12 12 12 12 12 12   12 12 12 12 12 12 12 12   12 12 12 12 12 12 12 /
+ 144   144   144   144    12  144   144   144   144    12  144   144  12  144   144     144   144   144     144   144   144   144     144  12  144   144  /
+  55    55    55    55    12   55    55    55    55    12   55    55  12   55    55      55    55    15      55    55    55    55      55  12   55    55  /
+    128         128          56      55      126          56        56       126           126       15        126         126           56       126     /
+    128         128          35      55       70          35        35        70            70       15         70          70           35        70     /
+    128         128              210          70              210             70                84                   165                     120          /
+    128         128              126          70               84             70                28                    45                      36          /
+    128         128                    220                           286                        28                                200                     /
+    128         128                     55                            66                        28                                136                     /
+    128         128                     55                            66                                         200                                      /
+    128         128                     55                            66                                         120                                      /
+    128         128                     55                                               200                                                              /
+    128         128                     55                                               120                                                              /
+    128         128                                           120                                                                                         /
+    128         128                                            64                                                                                         /
+128 /
+$end-basis
+
+# Layers section: number of DOFs/modes to combine from previous layer
+# The first (primitive basis) layer is implied, with 1,1,...,1, so
+# input begins with the second layer
+
+$layers
+1 1 1 1 1 1 1 1   1 1 1 1 1 1 1 1 1   1 1 1 1 1 1 1 1 1 1   1 1 1 1 1 1   1 1 1 1 1 1 1 1   1 1 1 1 1 1 1 /
+ 2   2   2   2    1  2   2   2   2    1  2   2  1  2   2     2   2   2     2   2   2   2     2  1  2   2  /
+ 1   1   1   1    1  1   1   1   1    1  1   1  1  1   1     1   1   1     1   1   1   1     1  1  1   1  / 
+   2       2        2    1     2        2      2     2         2     1       2       2         2     2    /
+   1       1        1    1     1        1      1     1         1     1       1       1         1     1    /
+   1       1          2        1           2         1            2              2                2       /
+   1       1          1        1           1         1            1              1                1       /
+   1       1              2                     2                 1                       2               /
+   1       1              1                     1                 1                       1               /
+   1       1              1                     1                             2                           /
+   1       1              1                     1                             1                           /
+   1       1              1                                   2                                           /
+   1       1              1                                   1                                           /
+   1       1                                2                                                             /
+   1       1                                1                                                             /
+3 /
+$end-layers
+

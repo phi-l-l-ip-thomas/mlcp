@@ -1,0 +1,34 @@
+System
+        forma
+NCPU
+            1
+red2D
+          SVD
+redND
+          ALS
+psirank
+          128
+hrank
+            0
+psinals
+           10
+hnals
+          200
+solver
+         pals
+ncycle
+            1
+npow
+            1
+lowmem
+            4
+truncation
+            0
+update
+            F
+optimize PES
+            F
+solvtol
+       1.d-10
+resfile
+         none

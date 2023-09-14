@@ -1,0 +1,35 @@
+# Resort section: desired order of modes on layer 1, to allow
+# arbitrary mode-combination schemes. The numbers entered in
+# the basis and layers sections apply to the resorted order
+
+$resort
+ 1 20  2 21  3 15   22  4  5  6   11 24 23  7 25   12 16 13 18 14 19 17   27 10 26  9  8 /
+$end-resort
+
+# Basis section: number of basis functions per DOF/mode
+# first line: primitive basis for individual DOFs
+# subsequent lines: basis for modes which combine DOFs
+
+$basis
+# C-H stretch       C-C stretch    C-H rocking     out-of-plane rocking    ring breathe
+99 99 99 99 99 99   99 99 99 99   99 99 99 99 99   99 99 99 99 99 99 99   99 99 99 99 99 /
+20 20 20 20 20 20   20 20 20 20   20 20 20 20 20   30 30 30 30 30 30 30   30 30 30 30 30 /
+ 400   400   400     400   400     400  20  400     900   900   900  30    900   900  30 /
+ 105   105   101     105   105     108  20  105     103   108   116  30    105   105  30 /
+    210      101        210          121    105        165        166      105     120   /
+        210             210             220            165        166           220      /
+192 /
+$end-basis
+
+# Layers section: number of DOFs/modes to combine from previous layer
+# The first (primitive basis) layer is implied, with 1,1,...,1, so
+# input begins with the second layer
+
+$layers
+ 1  1  1  1  1  1    1  1  1  1    1  1  1  1  1    1  1  1  1  1  1  1    1  1  1  1  1  /
+   2     2     2       2     2       2   1    2       2     2     2   1      2     2   1  /
+   1     1     1       1     1       1   1    1       1     1     1   1      1     1   1  /
+      2        1          2            2      1          2          2        1       2    /
+          2               1               2              1          1            2        /
+6 /
+$end-layers

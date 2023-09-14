@@ -1,0 +1,45 @@
+# grids.inp: specifies grid parameters for cspes calculation
+
+# Basis section: Chebyshev order for each DOF
+# (Must be > 0)
+$basis
+8 8 8 8 8 8 /
+#8 8 8 /
+#13 13 13 11 11 19 13 13 21 /
+# 7  7 13  6  6 19  7  7 11 / (Course grid)
+$end-basis
+
+# Boundary conditions for each DOF:
+# 0 for finite: a <= x <= b
+# 1 for semi-infinite a <= x <= infinity
+# 2 for infinite -infinity <= x <= infinity (centered at c)
+# 3 for periodic between a <= x <= b
+# 4 for cosine mapping between a <= x <= b
+$boundary
+0 0 0 0 0 0 /
+#0 0 0 /
+# 4  4  4  4  4  4  4  4  3 /
+$end-boundary
+
+# Grid type:
+# 0 for Chebyshev nodes (order 0...N-1 from basis)
+# 1 for Chebyshev extrema (order 0...N from basis)
+$gridtype
+0 0 0 0 0 0 /
+#0 0 0 /
+# 0  0  0  0  0  0  0  0  0 /
+$end-gridtype
+
+# Grid-defining parameters
+#        finite b.c.: 1st parameter = a, 2nd parameter = b
+# semi-infinite b.c.: 1st parameter = a, 2nd parameter = width
+#      infinite b.c.: 1st parameter = c, 2nd parameter = width
+#      periodic b.c.: 1st parameter = a, 2nd parameter = b
+$parameters
+-3.0 -3.0 -3.0 -3.0 -3.0 -3.0 /
+ 3.0  3.0  3.0  3.0  3.0  3.0 /
+# 1.0  1.0  1.0 /
+#1.4 1.4 4.2 -0.8 -0.8 -0.5 -0.80 -0.35 0.000000 /
+#2.4 2.4 5.5  0.8  0.8  0.5  0.35  0.80 6.283186 /
+$end-parameters
+

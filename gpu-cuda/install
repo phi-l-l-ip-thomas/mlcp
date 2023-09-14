@@ -1,0 +1,24 @@
+### MLCP installation script ###
+
+# First remove libraries, if present
+cd lib
+rm -f *.a
+
+# Recompile the libraries
+cd INSTALL
+make clean
+make
+cd ../BLAS
+make clean
+make
+cd ../LAPACK
+make clean
+make
+cd ../IDLIB
+make clean
+make
+
+# Compile the code
+cd ../..
+make clean
+make

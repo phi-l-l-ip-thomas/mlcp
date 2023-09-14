@@ -1,0 +1,28 @@
+System
+        forma
+usegrid
+            T
+nmcfg
+            F
+NCPU
+            1
+NSAMPLES
+          500
+PESRANK
+           70
+NCYCLE
+          200
+MAXNMODE
+            3
+sigma
+        1.d-3
+ctol
+        5.d-4
+gtol
+        1.d-4
+dtol
+        1.d-5
+readfile
+   pespts.dat
+resfile
+         none
