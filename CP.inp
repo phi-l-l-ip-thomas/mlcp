@@ -7,7 +7,7 @@ red2D
 redND
           ALS
 psirank
-          128
+           16
 hrank
             0
 psinals
@@ -17,9 +17,9 @@ hnals
 solver
          pals
 ncycle
-            1
+           10
 npow
-            1
+           10
 lowmem
             4
 truncation
