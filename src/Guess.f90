@@ -94,7 +94,7 @@
 
 !     Get the list of sorted N-D eigenvalues and quantum numbers
 !!!
-      call GetStatesinWindow(nbloc,evalsND,qns,evals1D,nbas,0.d0)
+!      call GetStatesinWindow(nbloc,evalsND,qns,evals1D,nbas,0.d0)
 !!!
       call sortDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
 !      call structuredDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
