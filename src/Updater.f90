@@ -60,7 +60,7 @@
       TYPE (CPpar)       :: cpp
       TYPE (MLtree)      :: ML
       TYPE (Hamiltonian) :: H
-      TYPE (CPvec), INTENT(IN) :: Q(:)
+      TYPE (CP), INTENT(IN) :: Q(:)
       real*8, allocatable, intent(in) :: eigv(:)
       integer, intent(in) :: il,im
       integer :: i,j,imode,nev,mpl,mstart,trm
@@ -84,6 +84,7 @@
 
 !     Update operators if mode is not pre-solved or if mode is 
 !     presolved and the basis is truncated in the current layer
+
       IF ((H%ndof(trm,il).gt.1 .or. H%nop(trm,il).gt.1 .or. &
           SIZE(H%eig(il-1,mstart)%evals).gt.nev) .and. &
           cpp%ncycle.gt.0) THEN
@@ -114,12 +115,11 @@
 
       implicit none
       TYPE (OperMat), INTENT(INOUT) :: X
-      TYPE (CPvec), INTENT(IN) :: Q(:)
-      TYPE (CPvec) :: XQ
+      TYPE (CP), INTENT(IN) :: Q(:)
+      TYPE (CP) :: XQ
       real*8, allocatable :: QXQ(:,:)
       integer, intent(in) :: imode
       integer :: i,j,nbloc
-      real*8  :: t1,t2
 
       nbloc=SIZE(Q)
 
@@ -129,7 +129,6 @@
       DO i=1,nbloc
 !        XQ=X*Q(i)
          call PRODXV(imode,Q(i),XQ,X)
-         call CPU_TIME(t1)
 !$omp parallel
 !$omp do private(j)
          DO j=i,nbloc
@@ -138,9 +137,7 @@
          ENDDO
 !$omp end do
 !$omp end parallel 
-         call CPU_TIME(t2)
-         update_time=update_time-t2+t1 ! Subtract PVV from update times
-         call FlushCPvec(XQ)
+         call FlushCP(XQ)
       ENDDO
 
 !     Replace the operator matrix
@@ -161,8 +158,8 @@
 
       implicit none
       TYPE (OperMat), INTENT(IN) :: X
-      TYPE (CPvec), INTENT(IN)   :: F
-      TYPE (CPvec), INTENT(OUT)  :: G
+      TYPE (CP), INTENT(IN)   :: F
+      TYPE (CP), INTENT(OUT)  :: G
       integer, intent(in) :: imode
       integer :: i,rF,gdim,gst,gi,gf
 
@@ -178,7 +175,7 @@
       gi=gst+1
       gf=gst+gdim
 
-      call CopyWtoV(G,F)
+      G=CopyCP(F)
 
 !     Operation X*V
       DO i=1,rF

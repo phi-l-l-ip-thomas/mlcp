@@ -3,8 +3,7 @@
       MODULE MUNKRES
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! This module contains the Munkres algorithm for solving the assignment
-! problem
+! This module contains wrappers for LAPACK subroutines
 
       USE ERRORTRAP
       USE UTILS
@@ -88,7 +87,7 @@
 !     Process A so that largest value corresponds to minimum cost
       A(:,:)=-M(:,:)
 
-!     (Step 1) subtract minimum row element
+!     (Step 1) subtract minimun row element
       DO i=1,nr
          tmp=MINVAL(A(i,:))
          A(i,:)=A(i,:)-tmp
@@ -144,37 +143,6 @@
       munkres_time=munkres_time+t2-t1
 
       end function AssignMatrix
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function GetMunkresAssignVec(A) result(w)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Convenience function for extracting vector with col indices 
-! corresponding to assignments from Munkres assignment matrix
-
-      implicit none
-      real*8, intent(in) :: A(:,:)
-      real, parameter :: tol=1.d-15
-      integer, allocatable :: w(:)
-      integer :: i,j,r,c
-
-      r=SIZE(A,1)
-      c=SIZE(A,2)
-
-      ALLOCATE(w(r))
-      w(:)=0
-
-      DO i=1,r
-         DO j=1,c
-            IF (abs(A(i,j)-1.d0) .lt. tol) THEN
-               w(i)=j
-               EXIT
-            ENDIF
-         ENDDO
-      ENDDO
-
-      end function GetMunkresAssignVec
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -291,8 +259,6 @@
             IF (A(r,c).lt.minA) minA=A(r,c)
          ENDDO
       ENDDO
-
-      IF (minA.eq.0.d0) RETURN
 
 !     Add minimum uncovered value to covered rows
 !     Subtract minimum uncovered value from uncovered cols

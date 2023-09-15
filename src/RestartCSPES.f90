@@ -5,14 +5,14 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Restart a crashed CSPES calculation
 
-      use ERRORTRAP
-      use UTILS
-      use MODEGRID
-      use INPUTFIELDS
-      use SAMPLEPES
-      use CHEBLIB
-      use SEPDREPN
-      use CPCONFIG
+      USE ERRORTRAP
+      USE UTILS
+      USE MODEGRID
+      USE INPUTFIELDS
+      USE SAMPLEPES
+      USE CHEBLIB
+      USE SEPDREPN
+      USE CPCONFIG
 
       CONTAINS
 
@@ -28,7 +28,7 @@
       TYPE (GridPar), INTENT(IN)  :: GP
       TYPE (ChebObj), INTENT(IN)  :: CGrid(:)
       TYPE (Configs), INTENT(OUT) :: X,B
-      TYPE (CPvec), INTENT(OUT)   :: BB
+      TYPE (CP), INTENT(OUT)   :: BB
       character(len=64) :: fnm
       logical :: success,found
 
@@ -355,7 +355,7 @@
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
       TYPE (CSpar), INTENT(IN)   :: csp
-      TYPE (CPvec), INTENT(IN)   :: BB
+      TYPE (CP), INTENT(IN)   :: BB
       TYPE (Configs), INTENT(IN) :: B
       character(len=64) :: fnm
 

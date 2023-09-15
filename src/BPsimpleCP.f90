@@ -27,10 +27,10 @@
       implicit none
       TYPE (CSpar), INTENT(IN)      :: csp
       TYPE (Configs), INTENT(INOUT) :: C
-      TYPE (CPvec), INTENT(IN)      :: A,B
-      TYPE (CPvec), INTENT(OUT)     :: X,G,R
+      TYPE (CP), INTENT(IN)      :: A,B
+      TYPE (CP), INTENT(OUT)     :: X,G,R
       TYPE (Configs) :: Xc,Gc,Gc2,Gc3
-      TYPE (CPvec)   :: Ax,Xnew,Gnew,Rnew,Xt
+      TYPE (CP)   :: Ax,Xnew,Gnew,Rnew,Xt
       integer :: iter,maxit,rkx,i,maxnmode,l0
       real*8  :: sigma,gtol,ctol,dtol,fold,fnew,fdelta
       real*8  :: gg,dgg,gam,l1
@@ -64,7 +64,7 @@
 !     Initialize residual config. list and objective function value
       call CPMatVecProd(A,X,Ax,.FALSE.)
       call GetResidual(B,Ax,R,fnew)
-      call FlushCPvec(Ax)
+      call FlushCP(Ax)
       fold=fnew
       fdelta=1.d0
 
@@ -78,7 +78,7 @@
       call CopyConfigsWtoV(Gc2,Gc)
       call CopyConfigsWtoV(Gc3,Gc)
 
-      call FlushCPvec(G)
+      call FlushCP(G)
 !      write(*,'(X,A/)') 'Projection of initial G onto guess configs:'
 !      call PrintConfigs(Gc)
       call Config2CP(G,Gc)
@@ -112,7 +112,7 @@
          call FlushConfigs(Xc)
          call ConfigSetOverlap(C,Xc,Xnew)
          call SavePESCoef(csp,Xc)
-         call FlushCPvec(Xnew)
+         call FlushCP(Xnew)
          call Config2CP(Xnew,Xc)
 
          l1=onenorm(Xc)
@@ -122,7 +122,7 @@
 !        for the projected Xnew 
          call CPMatVecProd(A,Xnew,Ax,.FALSE.)
          call GetResidual(B,Ax,Rnew,fnew)
-         call FlushCPvec(Ax)
+         call FlushCP(Ax)
 
          fdelta=(fold-fnew)/fnew
          write(*,'(I10,3(X,ES12.4),X,I8)') &
@@ -135,7 +135,7 @@
 !        Project gradient onto guess configurations
          call FlushConfigs(Gc)
          call ConfigSetOverlap(C,Gc,Gnew)
-         call FlushCPvec(Gnew)
+         call FlushCP(Gnew)
 
 !        Modify the line search direction using the Polak-Ribiere update
          gg=0.d0
@@ -184,8 +184,8 @@
 ! Computes the gradient of the CP-format CS solution
 
       implicit none
-      TYPE (CPvec), INTENT(IN)   :: R,A
-      TYPE (CPvec), INTENT(OUT)  :: G
+      TYPE (CP), INTENT(IN)   :: R,A
+      TYPE (CP), INTENT(OUT)  :: G
 
 !     Convert to gradient using matrix-vector product and sign change
       call CPMatVecProd(A,R,G,.TRUE.)
@@ -201,15 +201,15 @@
 ! Calculates the residual r = b - Ax, in CP-format, and its l-2 norm.
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: Ax,b
-      TYPE (CPvec), INTENT(OUT) :: r
+      TYPE (CP), INTENT(IN)  :: Ax,b
+      TYPE (CP), INTENT(OUT) :: r
       real*8, intent(out) :: f
       integer :: i,j,rkb,rkA
 
       rkb=SIZE(b%coef)
       rkA=SIZE(Ax%coef)
 
-      call CopyWtoV(r,b)
+      r=CopyCP(b)
 
       f=0.d0
 !$omp parallel
@@ -243,9 +243,9 @@
 ! Calculates the residual r = b - Ax, in CP-format, and its l-2 norm.
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: X,G,A,B
-      TYPE (CPvec), INTENT(OUT) :: Xnew,R
-      TYPE (CPvec) :: Ax,Ag
+      TYPE (CP), INTENT(IN)  :: X,G,A,B
+      TYPE (CP), INTENT(OUT) :: Xnew,R
+      TYPE (CP) :: Ax,Ag
       real*8, intent(inout) :: fnew
       real*8, allocatable   :: bxcoef(:),bgcoef(:),solncoef(:)
       real*8  :: aax,bx,cx,step,rav,gav,fac
@@ -256,8 +256,8 @@
       rkx=SIZE(X%coef)
 
 !     Get rid of the old Xnew and residual, if they are allocated
-      call FlushCPvec(Xnew)
-      call FlushCPvec(R)
+      call FlushCP(Xnew)
+      call FlushCP(R)
 
       ALLOCATE(bxcoef(rkb),bgcoef(rkb),solncoef(rkb))
       bxcoef(:)=B%coef(:)
@@ -286,8 +286,8 @@
 !$omp end do
 !$omp end parallel
 
-      call FlushCPvec(Ax)
-      call FlushCPvec(Ag)
+      call FlushCP(Ax)
+      call FlushCP(Ag)
 
 !     For a system with many DOFs, the coefs-of-Bg may be less than
 !     (machine-precision)*coefs-of-R, in which case Bg will get rounded
@@ -307,11 +307,11 @@
       call PESCPminimize(bxcoef,bgcoef,solncoef,aax,bx,cx,step,fnew)
 
 !     Calculate Xnew = X + step*G
-      call CopyWtoV(Xnew,X)
+      Xnew=CopyCP(X)
       call SUMVECVEC(Xnew,1.d0,G,fac*step)
 
 !     Calculate Rnew = B with new coefs
-      call CopyWtoV(R,B)
+      R=CopyCP(B)
       R%coef(:)=solncoef(:)
 !     Change sign to keep coefs positive
       DO i=1,rkb

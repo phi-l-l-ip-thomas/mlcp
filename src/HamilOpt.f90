@@ -5,14 +5,14 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Rotates Hamiltonian to optimal coordinate system
 
-      use ERRORTRAP
-      use UTILS
-      use MODECOMB
-      use OPFUNCS
-      use LINALG
-      use MODVECVEC
-      use CPCONFIG
-      use REDORTHO
+      USE ERRORTRAP
+      USE UTILS
+      USE MODECOMB
+      USE OPFUNCS
+      USE LINALG
+      USE MODVECVEC
+      USE CPCONFIG
+      USE REDORTHO
 
       CONTAINS
 
@@ -26,7 +26,7 @@
 
       implicit none
       TYPE (Configs), ALLOCATABLE, INTENT(INOUT) :: W(:)
-      TYPE (CPvec), ALLOCATABLE :: V(:)
+      TYPE (CP), ALLOCATABLE :: V(:)
       real*8, allocatable :: freqs(:)
       integer :: i,j,k,ncoup,ndof
 
@@ -107,8 +107,8 @@
 ! Master subroutine for transforming H into new coordinate system
 
       implicit none
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: V(:)
-      TYPE (CPvec), ALLOCATABLE :: W(:)
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: V(:)
+      TYPE (CP), ALLOCATABLE :: W(:)
       TYPE (Configs) :: wc
       real*8, allocatable :: theta(:),dtheta(:)
       integer :: i,j,k,m,n,nsweep,ndof,ntns,npairs,ip,nnewcoef
@@ -167,7 +167,7 @@
          nnewcoef=ndof**m
          call GetConfigList(V(m),nnewcoef,wc)
          call collectconfigs(wc,.FALSE.)
-         call FlushCPvec(V(m))
+         call FlushCP(V(m))
          call Config2CP(V(m),wc)
          call FlushConfigs(wc)
       ENDDO
@@ -186,9 +186,9 @@
 ! diagonal terms 
 
       implicit none
-      TYPE (CPvec), ALLOCATABLE, INTENT(IN)    :: V(:)
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: W(:)
-      TYPE (CPvec) :: F,G
+      TYPE (CP), ALLOCATABLE, INTENT(IN)    :: V(:)
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: W(:)
+      TYPE (CP) :: F,G
       TYPE (Configs)       :: wc
       integer, intent(in)  :: i,j
       real*8, intent(in)   :: dtheta
@@ -216,8 +216,8 @@
          IF (SIZE(V(m)%coef).eq.1 .and. V(m)%coef(1).eq.0.d0) CYCLE
 
 !        Maximize the sum-of-squares of the diagonal elements
-         call FlushCPvec(W(m))
-         call CopyWtoV(W(m),V(m))
+         call FlushCP(W(m))
+         W(m)=CopyCP(V(m))
          call ApplyHRotation(W(m),i,j,dtheta)
 
 !        Extract (omega_j)^(1/2) values for scaling
@@ -253,7 +253,7 @@
 !        Objective fxn: Frobenius norm of off-diagonal elements
          nodiag=nodiag+PRODVV(F)/REAL(ndof**m)
 
-         call FlushCPvec(F)
+         call FlushCP(F)
          call FlushConfigs(wc)
       ENDDO
 
@@ -269,7 +269,7 @@
 ! Applies 2D rotation of dofs di and dj by angle dtheta (in radians)
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: V
+      TYPE (CP), INTENT(INOUT) :: V
       integer, intent(in) :: di,dj
       real*8, intent(in)  :: dtheta
       integer :: i,j,k,ntns,rV,otens,gst
@@ -309,8 +309,8 @@
 ! See Bracketmethod() in Numerical Recipes, 3rd Ed (2007) p. 491
 
       implicit none
-      TYPE (CPvec), ALLOCATABLE, INTENT(IN)    :: V(:)
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: W(:)
+      TYPE (CP), ALLOCATABLE, INTENT(IN)    :: V(:)
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: W(:)
       integer, intent(in)   :: i,j
       real*8, intent(in)    :: fx
       real*8, intent(out)   :: ax,bx,cx
@@ -427,8 +427,8 @@
 ! See brent() in Numerical Recipes, 3rd Ed (2007) p. 498
 
       implicit none
-      TYPE (CPvec), ALLOCATABLE, INTENT(IN)    :: F(:)
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: G(:)
+      TYPE (CP), ALLOCATABLE, INTENT(IN)    :: F(:)
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: G(:)
       integer, intent(in)   :: i,j
       real*8, intent(in)  :: ax,bx,cx
       real*8, intent(out) :: xmin,fmin
@@ -554,7 +554,7 @@
 ! with all dimensions equal
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       integer :: i,j,k,l,n,rF,ndof
       real*8, intent(inout) :: diags(:)
       real*8  :: prod1
@@ -612,12 +612,12 @@
       ZPVE=0.d0
       DO j=1,ndof
 !        Beginning with the KEO, add the potential operator matrices
-         HM=GetPrimitiveOperMat(j,N,-2)
+         HM=GetPrimitiveOperMat(j,N,-2,0,0.d0)
          HM%mat=diags(j,1)*HM%mat
 !         call SumOperMats(HM,OM,diags(j,1))
 !         call FlushOperMat(OM)
          DO m=1,ntns
-            OM=GetPrimitiveOperMat(j,N,m+1)
+            OM=GetPrimitiveOperMat(j,N,m+1,0,0.d0)
             call SumOperMats(HM,1.d0,OM,diags(j,m))
             call FlushOperMat(OM)
          ENDDO

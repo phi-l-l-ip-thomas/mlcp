@@ -7,10 +7,11 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE CHEBLIB
 
       TYPE OperMat
          integer :: dof
-         character(7) :: label
+         character(64) :: label
          real*8, allocatable :: mat(:)
       END TYPE OperMat
 
@@ -23,7 +24,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function GetPrimitiveOperMat(dof,N,P)
+      function GetPrimitiveOperMat(dof,N,P,typ,alpha)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Fills type OperMat with a primitive operator matrix (p_i^2 or q_i^P)
@@ -33,28 +34,46 @@
 
       implicit none
       TYPE (OperMat)      :: GetPrimitiveOperMat
-      integer, intent(in) :: dof,N,P
+      integer, intent(in) :: dof,N,P,typ
+      real*8, intent(in)  :: alpha
       real*8, allocatable :: Md(:,:),Mt(:,:)
-      character(7) :: lab
+      integer, parameter  :: ip=0
+      real*8, parameter   :: rp=0.d0
+      character(64) :: lab
 
 !     Operator defs and calls
       IF (P.ge.0) THEN      ! Harmonic oscillator q_i^P
-         write(lab,'(A,I0,A)') '(q^',P,')_'
-         call xnop(N,P,Md)
+         IF (typ.eq.0) THEN
+            write(lab,'(A,I0,A)') '(q^',P,')_'
+!           Power of q
+            call xnop(N,P,Md)
+            call MatDiag2Utriang(Md,Mt,MOD(abs(P),2),.FALSE.)
+            DEALLOCATE(Md)
+
+         ELSE
+!           Arbitrary PES type
+!           For now only one integer parameter and one real parameter
+!           are used; the rest are called with dummy arguments
+            write(lab,'(3A,I0,A)') '(',&
+                  TRIM(ADJUSTL(GetFunctionLabel(typ))),'^',P,')_'
+            call GenFunctionHOmat(N,Mt,typ,P,ip,alpha,rp,rp,rp,rp)
+         ENDIF
       ELSEIF (P.eq.-2) THEN ! Harmonic oscillator KEO
          lab='(p^2)_'
          call top(N,Md)
+         call MatDiag2Utriang(Md,Mt,MOD(abs(P),2),.FALSE.)
+         DEALLOCATE(Md)
+
       ELSE
          write(*,*) 'Operator type not recognized'
          call AbortWithError('Error in GetPrimitiveOperMat()')
       ENDIF
 
-      call MatDiag2Utriang(Md,Mt,MOD(abs(P),2),.FALSE.)
       call SymPackMat2Vec(GetPrimitiveOperMat%mat,Mt)
-      DEALLOCATE(Md,Mt)
-
       GetPrimitiveOperMat%dof=dof
       GetPrimitiveOperMat%label=lab
+
+      DEALLOCATE(Mt)
 
       end function GetPrimitiveOperMat
 
@@ -88,33 +107,6 @@
       ENDDO
 
       end function GetEigenOperMat
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function GetIdentityOperMat(dof,n)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Fills type OperMat with n x n identity operator matrix
-! dof = degree-of-freedom/mode that operator acts upon
-
-      implicit none
-      TYPE (OperMat)      :: GetIdentityOperMat
-      integer, intent(in) :: dof,n
-      integer :: i,s
-
-      GetIdentityOperMat%dof=dof
-      GetIdentityOperMat%label='I'
-
-!     Fill the operator matrix with 1s and 0s
-      ALLOCATE(GetIdentityOperMat%mat(n*(n+1)/2))
-      GetIdentityOperMat%mat=0.d0
-      s=0
-      DO i=1,n
-         s=s+i
-         GetIdentityOperMat%mat(s)=1.d0
-      ENDDO
-
-      end function GetIdentityOperMat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -189,9 +181,9 @@
       end subroutine FlushOperMat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-!
+
       subroutine xnop(N,P,Hmat)
-!
+
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Generates the Hamiltonian matrix for <phi|x^P|phi> in harmonic
 ! oscillator basis. Returns an array whose columns correspond to 
@@ -246,9 +238,9 @@
       end subroutine xnop
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-!
+
       subroutine top(N,Hmat)
-!
+
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Generates the operator matrix for <phi|T|phi> in harmonic
 ! oscillator basis, using a call to xnop()
@@ -265,6 +257,108 @@
       IF (SIZE(Hmat,2).gt.1) Hmat(:,2)=-Hmat(:,2)
 
       end subroutine top
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GenFunctionHOmat(N,Hmat,typ,ip1,ip2,&
+                                  rp1,rp2,rp3,rp4,rp5)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Generates the operator matrix for <phi'|function|phi> for a general
+! function in harmonic oscillator basis, using numerical integration
+! N is the basis set size (HO basis: 0-->N-1)
+
+      implicit none
+      TYPE (ChebObj) :: chb
+      real*8, allocatable, intent(out) :: Hmat(:,:)
+      integer, intent(in)  :: N,typ,ip1,ip2
+      real*8, intent(in)   :: rp1,rp2,rp3,rp4,rp5
+      real*8, allocatable  :: v(:),phi(:),dummy(:)
+      real*8, allocatable  :: phim(:,:)
+      integer, parameter   :: ncheb=257
+      real*8, parameter    :: tol=1.d-15
+      integer :: i,j,k
+      real*8  :: xlim
+
+!     Get the limits of integration. These must exceed the classical
+!     turning point of the highest-order HO function in the basis.
+      xlim=sqrt(2.d0*(N-1)+1)
+      DO
+!        Step away from the origin until the amplitudes of the lowest,
+!        highest HO functions in the basis are negligible
+         IF (ABS(HObasisfxn(0,xlim)).lt.tol .and. &
+             ABS(HObasisfxn(N-1,xlim)).lt.tol) EXIT
+         xlim=xlim+1.d0
+      ENDDO
+
+!     Generate a new Chebyshev object for doing numerical integration
+!     via Clenshaw-Curtis quadrature
+      call NewChebObject(chb,ncheb-1,-xlim,xlim,.TRUE.,'fin')
+
+!     Evaluate the PES and the HO basis at the quadrature points
+      ALLOCATE(v(ncheb),phim(N,ncheb))
+!$omp parallel
+!$omp do private(k) schedule(static)
+      DO k=1,ncheb
+         v(k)=my1Dfunction(typ,chb%mpt(k),ip1,ip2,&
+                           rp1,rp2,rp3,rp4,rp5)
+         call HObasisseries(chb%mpt(k),phim(:,k))
+      ENDDO
+!$omp end do
+!$omp end parallel
+
+!     Get the upper triangle of the <phi|function|phi> matrix
+      ALLOCATE(phi(ncheb),Hmat(N,N))
+      Hmat=0.d0
+      DO i=1,N
+!        Construct v|phi_i>
+         DO k=1,ncheb
+             phi(k)=v(k)*phim(i,k)
+         ENDDO
+         DO j=i,N
+!           Construct <phi_j|v|phi_i>
+!$omp parallel
+!$omp do private(k) schedule(static)
+            DO k=1,ncheb
+               chb%fpt(k)=phim(j,k)*phi(k)
+            ENDDO
+!$omp end do
+!$omp end parallel
+!           Compute the matrix element
+            call ChebCalculus(chb,0,dummy)
+            Hmat(i,j)=chb%defint
+         ENDDO
+      ENDDO
+
+      call FlushChebObject(chb)
+      DEALLOCATE(v,phim,phi)
+
+      end subroutine GenFunctionHOmat
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function GetFunctionLabel(id)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      integer, intent(in) :: id
+      character(len=32)   :: GetFunctionLabel
+
+      IF (id.eq.0) THEN
+         GetFunctionLabel='q'
+      ELSEIF (id.eq.1) THEN
+         GetFunctionLabel='tanh(a*q)'
+      ELSEIF (id.eq.2) THEN
+         GetFunctionLabel='1-exp(-a*q)'
+      ELSEIF (id.eq.3) THEN
+         GetFunctionLabel='sqrt(1-exp(-a*q^2))'
+      ELSE
+         write(*,*) 'function id = ',id
+         call AbortWithError("GetFunctionLabel(): unknown function id")
+      ENDIF
+
+      end function GetFunctionLabel
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

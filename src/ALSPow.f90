@@ -5,12 +5,12 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Power method guided by Alternating Least Squares reduction
 
-      use ERRORTRAP
-      use UTILS
-      use SEPDREPN
-      use MODVECVEC
-      use LINALG
-      use MODHVEC
+      USE ERRORTRAP
+      USE UTILS
+      USE SEPDREPN
+      USE MODVECVEC
+      USE LINALG
+      USE CPMMM
 
       implicit none
       real*8, private  :: alspow_time=0.d0
@@ -87,8 +87,8 @@
 ! value of 'lowmem'
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: H
+      TYPE (CP), INTENT(INOUT) :: F
       integer, intent(in) :: nitn,ishift,lowmem
       real*8, intent(in)  :: Eshift
 
@@ -100,7 +100,7 @@
          call ALS_POW1(H,F,nitn,ishift,Eshift)
       ELSEIF (lowmem.eq.2) THEN
          call ALS_POW2(H,F,nitn,ishift,Eshift)
-      ELSEIF (lowmem.eq.3.or.lowmem.eq.4) THEN
+      ELSEIF (lowmem.eq.3) THEN
          call ALS_POW3(H,F,nitn,ishift,Eshift)
       ELSE
          write(*,'(/X,A)') 'ALS_POW_alg(): invalid low-mem choice'
@@ -120,9 +120,9 @@
 ! depending on the value of 'lowmem'
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(IN)  :: Fold
-      TYPE (CPvec), INTENT(OUT) :: F
+      TYPE (CP), INTENT(IN)  :: H
+      TYPE (CP), INTENT(IN)  :: Fold
+      TYPE (CP), INTENT(OUT) :: F
       integer, intent(in) :: nitn,ishift,lowmem
       real*8, intent(in)  :: Eshift
 
@@ -153,21 +153,20 @@
 ! (FASTEST, largest memory usage)
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec) :: G
+      TYPE (CP), INTENT(IN)    :: H
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP) :: G
       integer, intent(in)  :: nitn,ishift
       real*8, intent(in)   :: Eshift
-      integer, allocatable :: IPV(:)
       real*8, allocatable  :: bjk(:,:),BBmem(:,:)
       real*8, allocatable  :: BB(:,:,:),PS(:,:,:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: rG,rF,ndim,i,j,ir,imod,k,l,n,info,gst,itn,kp
+      real*8  :: valpen,gtmp,t1,t2
+      integer :: rG,rF,ndim,i,j,ir,imod,k,l,n,gst,itn,kp
 
       IF (nitn.eq.0) return
 
 !     First, generate G using a matrix-vector product
-      call PRODHV(F,G,H,ishift,Eshift)
+      call CPMM(H,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,G)
 
       call CPU_TIME(t1)
 
@@ -179,13 +178,13 @@
       allocate(BB(rF,rF,ndim),PS(rG,rF,ndim))
 
 !     Penalty to avoid bad conditioning
-      valpen=maxval(G%coef)*1.d-15
+      valpen=maxval(F%coef)*1.d-10
 
 !     BB(l,l',k) = < F_i^l , F_i^l' > for all but 1st DOF
 !     PS(l,l',k) = < G_i^l , F_i^l' > for all but 1st DOF
       DO k=2,ndim
-         call CONSTBBk(F,k,BB(:,:,k))
-         call CONSTPSk(F,G,k,PS(:,:,k))
+         call CONSTPk(F,k,BB(:,:,k))
+         call CONSTPk(F,G,k,PS(:,:,k))
       ENDDO
 
 !     Main loop over ALS iterations
@@ -208,11 +207,6 @@
                PS(:,:,k)=PS(:,:,k)*PS(:,:,kp)
             ENDDO
 
-!           Add penalty to avoid ill-conditioning (section 3.2, Beylkin)
-            do i=1,rF
-               BB(i,i,k)=BB(i,i,k)+valpen
-            enddo
-
 !           Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4)
             allocate(bjk(rF,n))
             bjk=0.d0
@@ -228,18 +222,10 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            allocate(IPV(rF))
-            call dgetrf(rF,rF,BB(:,:,k),rF,IPV,info)
-            call dgetrs('N',rF,n,BB(:,:,k),rF,IPV,bjk,rF,INFO)
-            deallocate(IPV)
+            call SolveLinSysLU(BB(:,:,k),bjk,valpen)
 
 !           Construct improved F
-            do i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               F%base(gst+1:gst+n,i)=bjk(i,1:n)/rnorm
-            enddo
+            call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
             call CPU_TIME(t2)
@@ -247,21 +233,18 @@
 
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
-            IF (k.eq.ndim) THEN
-               rnorm=1/sqrt(abs(PRODVV(F)))
-               F%coef=F%coef*rnorm
-            ENDIF
+            IF (k.eq.ndim) call NORMCOEF(F)
 
             call CPU_TIME(t1)
 
 !           Matrix-vector product on the k-th DOF
             IF (itn.lt.nitn .or. k.lt.ndim) &
-               call PRODHV1(F,G,H,k,ishift,Eshift)
+               call CPMM(H,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,G,k)
 
 !           Calculate BB and PS for the k-th DOF
             IF (itn.lt.nitn .or. k.lt.ndim) THEN
-               call CONSTBBk(F,k,BB(:,:,k))
-               call CONSTPSk(F,G,k,PS(:,:,k))
+               call CONSTPk(F,k,BB(:,:,k))
+               call CONSTPk(F,G,k,PS(:,:,k))
             ENDIF
 
             gst=gst+n
@@ -270,7 +253,7 @@
       ENDDO  ! loop over iterations
 
       deallocate(BB,PS)
-      call FlushCPvec(G)
+      call FlushCP(G)
 
       call CPU_TIME(t2)
       alspow_time=alspow_time+t2-t1
@@ -288,21 +271,20 @@
 ! generates a 'long' G vector and stores up to two rG x rF 'PS' matrices
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec) :: G
+      TYPE (CP), INTENT(IN)    :: H
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP) :: G
       integer, intent(in)  :: nitn,ishift
       real*8, intent(in)   :: Eshift
-      integer, allocatable :: IPV(:)
       real*8, dimension (:,:), allocatable :: BB,PS,bjk,BBmem
-      real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: rG,rF,ndim,i,j,ir,imod,k,l,n,info,gst,itn,kp
+      real*8  :: valpen,gtmp,t1,t2
+      integer :: rG,rF,ndim,i,j,ir,imod,k,l,n,gst,itn,kp
       logical :: update
 
       IF (nitn.eq.0) return
 
 !     First, generate G using a matrix-vector product
-      call PRODHV(F,G,H,ishift,Eshift)
+      call CPMM(H,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,G)
 
       call CPU_TIME(t1)
 
@@ -320,15 +302,15 @@
       allocate(BB(rF,rF),BBmem(rF,rF),PS(rG,rF))
 
 !     Penalty to avoid bad conditioning
-      valpen=maxval(G%coef)*1.d-15
+      valpen=maxval(F%coef)*1.d-10
 
 !     BB(l,l') = Pi_{i=2}^ndim < F_i^l , F_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
 !     If the ALS matrices BB and PS are to be updated, initialize
 !     them here with the first DOF removed
       IF (update) THEN
-         call CONSTBBTOT(F,1,BBmem)
-         call CONSTPSTOT(F,G,1,PS)
+         call CONSTPT(F,1,BBmem)
+         call CONSTPT(F,G,1,PS)
       ENDIF
 
 !     Main loop over ALS iterations
@@ -344,21 +326,16 @@
 !           also requires copying BBmem <-- BB since LAPACK destroys BB
             IF (update) THEN
                IF (kp.ne.0) then
-                  call UpdateBB(F,k,BBmem,.TRUE.)
-                  call UpdatePS(F,G,k,PS,.TRUE.)
+                  call UPDATEP(F,k,BBmem,.TRUE.)
+                  call UPDATEP(F,G,k,PS,.TRUE.)
                ENDIF
                BB=BBmem
 
 !           Alternatively, build BB and PS from scratch
             ELSE
-               call CONSTBBTOT(F,k,BB)
-               call CONSTPSTOT(F,G,k,PS)
+               call CONSTPT(F,k,BB)
+               call CONSTPT(F,G,k,PS)
             ENDIF
-
-!           Add penalty to avoid ill-conditioning (section 3.2, Beylkin)
-            do i=1,rF
-               BB(i,i)=BB(i,i)+valpen
-            enddo
 
 !           Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4)
             allocate(bjk(rF,n))
@@ -375,18 +352,10 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            ALLOCATE(IPV(rF))
-            call dgetrf(rF,rF,BB,rF,IPV,info)
-            call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-            DEALLOCATE(IPV)
+            call SolveLinSysLU(BB,bjk,valpen)
 
 !           Construct improved F
-            do i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               F%base(gst+1:gst+n,i)=bjk(i,1:n)/rnorm
-            enddo
+            call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
             call CPU_TIME(t2)
@@ -394,31 +363,25 @@
 
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
-            IF (k.eq.ndim) THEN
-               rnorm=1/sqrt(abs(PRODVV(F)))
-               F%coef=F%coef*rnorm
-            ENDIF
+            IF (k.eq.ndim) call NORMCOEF(F)
 
             call CPU_TIME(t1)
 
 !           Matrix-vector product on the k-th DOF
-            call PRODHV1(F,G,H,k,ishift,Eshift)
+            call CPMM(H,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,G,k)
 
-!           Check coefs of F for NaN values resulting from zero
-!           division. If there are any, restart ALS without updating
-            DO i=1,rF
-               IF (F%coef(i).ne.F%coef(i)) THEN
-                  write(*,*) 'ALS_POW1(): NaN on update; itn = ',itn,&
-                             '; k = ',k
-                  call AbortWithError('ALS_POW1 crashed')
-               ENDIF
-            ENDDO
+!           Check coefs for NaN values resulting from zero division.
+            IF (.NOT. CHECKCOEFS(F)) THEN
+               write(*,*) 'ALS_POW1(): NaN on update; itn = ',itn,&
+                          '; mode = ',k
+               call AbortWithError('ALS_POW1 crashed')
+            ENDIF
 
 !           Update BB and PS with new Fs
             IF (update) THEN
                IF (itn.lt.nitn .or. k.lt.ndim) THEN
-                  call UpdateBB(F,k,BBmem,.FALSE.)
-                  call UpdatePS(F,G,k,PS,.FALSE.)
+                  call UPDATEP(F,k,BBmem,.FALSE.)
+                  call UPDATEP(F,G,k,PS,.FALSE.)
                ENDIF
             ENDIF
 
@@ -428,7 +391,7 @@
       ENDDO  ! loop over iterations
 
       deallocate(BB,BBmem,PS)
-      call FlushCPvec(G)
+      call FlushCP(G)
 
       call CPU_TIME(t2)
       alspow_time=alspow_time+t2-t1
@@ -447,14 +410,14 @@
 ! "long" G vector, and stores one rG x rF PS matrix
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: H
+      TYPE (CP), INTENT(INOUT) :: F
       integer, intent(in)  :: nitn,ishift
       real*8, intent(in)   :: Eshift
       real*8, dimension (:,:), allocatable :: BB,PS,bjk,BBmem
-      integer, allocatable :: nbas(:),IPV(:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: rG,rF,ndim,i,j,ir,k,l,n,info,gst,itn,kp
+      integer, allocatable :: nbas(:)
+      real*8  :: valpen,gtmp,t1,t2
+      integer :: rG,rF,ndim,i,j,ir,k,l,n,itn,kp
 
       IF (nitn.eq.0) return
 
@@ -463,7 +426,7 @@
 !     Set parameters
       ndim=SIZE(F%nbas)
       rF=SIZE(F%coef)
-      rG=rF*SIZE(H%opcoef,1)
+      rG=rF*SIZE(H%coef)
       IF (ishift.ne.0) rG=rG+rF
 
       allocate(BB(rF,rF),BBmem(rF,rF),PS(rG,rF))
@@ -474,7 +437,7 @@
 !     BB(l,l') = Pi_{i=2}^ndim < F_i^l , F_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
 !     (Initialize with the first DOF removed)
-      call CONSTBBTOT(F,1,BBmem)
+      call CONSTPT(F,1,BBmem)
 
 !     Build PS without storing G
       PS(:,:)=1.d0
@@ -487,21 +450,15 @@
       DO itn=1,nitn
 
 !        Loop over dimension k
-         gst=0
          do k=1,ndim
             n=F%nbas(k)
 
 !           Update the BBmem matrix of the linear system. Copy to BB and
 !           pass BB to LAPACK since LAPACK destroys BB
             IF (kp.ne.0) then
-               call UpdateBB(F,k,BBmem,.TRUE.)
+               call UPDATEP(F,k,BBmem,.TRUE.)
             ENDIF
             BB=BBmem
-
-!           Add penalty to avoid ill-conditioning (section 3.2, Beylkin)
-            do i=1,rF
-               BB(i,i)=BB(i,i)+valpen
-            enddo
 
 !           Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4) and remove
 !           inner products for the k-th DOF from PS
@@ -510,18 +467,10 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            allocate(IPV(rF))
-            call dgetrf(rF,rF,BB,rF,IPV,info)
-            call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-            deallocate(IPV)
+            call SolveLinSysLU(BB,bjk,valpen)
 
 !           Construct improved F
-            do i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               F%base(gst+1:gst+n,i)=bjk(i,1:n)/rnorm
-            enddo
+            call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
             call CPU_TIME(t2)
@@ -529,30 +478,23 @@
 
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
-            IF (k.eq.ndim) THEN
-               rnorm=1/sqrt(abs(PRODVV(F)))
-               F%coef=F%coef*rnorm
-            ENDIF
+            IF (k.eq.ndim) call NORMCOEF(F)
 
             call CPU_TIME(t1)
 
-!           Check coefs of F for NaN values resulting from zero
-!           division. If there are any, restart ALS without updating
-            DO i=1,rF
-               IF (F%coef(i).ne.F%coef(i)) THEN
-                  write(*,*) 'ALS_POW2(): NaN on update; itn = ',itn,&
-                             '; k = ',k
-                  call AbortWithError('ALS_POW2 crashed')
-               ENDIF
-            ENDDO
+!           Check coefs for NaN values resulting from zero division.
+            IF (.NOT. CHECKCOEFS(F)) THEN
+               write(*,*) 'ALS_POW2(): NaN on update; itn = ',itn,&
+                          '; mode = ',k
+               call AbortWithError('ALS_POW2 crashed')
+            ENDIF
 
 !           Update BB and PS with the new Fs
             IF (itn.lt.nitn .or. k.lt.ndim) THEN
-               call UpdateBB(F,k,BBmem,.FALSE.)
+               call UPDATEP(F,k,BBmem,.FALSE.)
                call UpdateXPS(F,F,H,PS,k,ishift,Eshift)
             ENDIF
 
-            gst=gst+n
             kp=k
          enddo  ! loop over k
       ENDDO  ! loop over iterations
@@ -577,14 +519,14 @@
 ! along with bjk (SLOWEST, least memory usage)
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: H
+      TYPE (CP), INTENT(INOUT) :: F
       integer, intent(in)  :: nitn,ishift
       real*8, intent(in)   :: Eshift
       real*8, allocatable  :: BB(:,:),bjk(:,:)
-      integer, allocatable :: nbas(:),IPV(:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: rF,ndim,i,j,k,ir,l,n,info,gst,itn
+      integer, allocatable :: nbas(:)
+      real*8  :: valpen,gtmp,t1,t2
+      integer :: rF,ndim,i,j,k,ir,l,n,itn
 
       IF (nitn.eq.0) return
 
@@ -601,32 +543,19 @@
       DO itn=1,nitn
 
 !        Loop over dimension k
-         gst=0
          do k=1,ndim
             n=F%nbas(k)
 
 !           Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4) and BB
             call BuildbjkDirectX(F,F,H,BB,bjk,k,ishift,Eshift,.FALSE.)
 
-!           Add penalty to avoid ill-conditioning (section 3.2, Beylkin)
-            do i=1,rF
-               BB(i,i)=BB(i,i)+valpen
-            enddo
-
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            allocate(IPV(rF))
-            call dgetrf(rF,rF,BB,rF,IPV,info)
-            call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-            deallocate(BB,IPV)
+            call SolveLinSysLU(BB,bjk,valpen)
+            deallocate(BB)
 
 !           Construct improved F
-            do i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               F%base(gst+1:gst+n,i)=bjk(i,1:n)/rnorm
-            enddo
+            call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
             call CPU_TIME(t2)
@@ -634,23 +563,17 @@
 
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
-            IF (k.eq.ndim) THEN
-               rnorm=1/sqrt(abs(PRODVV(F)))
-               F%coef=F%coef*rnorm
-            ENDIF
+            IF (k.eq.ndim) call NORMCOEF(F)
 
             call CPU_TIME(t1)
 
-!           Check coefs of F for NaN values resulting from zero
-!           division. If there are any, error out
-            DO i=1,rF
-               IF (F%coef(i).ne.F%coef(i)) THEN
-                  write(*,*) 'ALS_POW3(): NaN on update; itn = ',itn
-                  call AbortWithError('ALS_POW3 crashed')
-               ENDIF
-            ENDDO
+!           Check coefs for NaN values resulting from zero division.
+            IF (.NOT. CHECKCOEFS(F)) THEN
+               write(*,*) 'ALS_POW3(): NaN on update; itn = ',itn,&
+                          '; mode = ',k
+               call AbortWithError('ALS_POW3 crashed')
+            ENDIF
 
-            gst=gst+n
          enddo  ! loop over k
       ENDDO  ! loop over iterations
 
@@ -671,26 +594,26 @@
 ! "long" G vector, and stores one rG x rF PS matrix.
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(IN)  :: Fold
-      TYPE (CPvec), INTENT(OUT) :: F
+      TYPE (CP), INTENT(IN)  :: H
+      TYPE (CP), INTENT(IN)  :: Fold
+      TYPE (CP), INTENT(OUT) :: F
       integer, intent(in)  :: ishift,nitn
       real*8, intent(in)   :: Eshift
       real*8, dimension (:,:), allocatable :: BB,PS,bjk,BBmem
-      integer, allocatable :: nbas(:),IPV(:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: rG,rF,ndim,i,ir,k,l,n,info,gst,itn,kp
+      integer, allocatable :: nbas(:)
+      real*8  :: valpen,gtmp,t1,t2
+      integer :: rG,rF,ndim,i,ir,k,l,n,itn,kp
 
       IF (nitn.eq.0) return
 
       call CPU_TIME(t1)
 
-      call CopyWtoV(F,Fold)
+      F=CopyCP(Fold)
 
 !     Set parameters
       ndim=SIZE(F%nbas)
       rF=SIZE(F%coef)
-      rG=rF*SIZE(H%opcoef,1)
+      rG=rF*SIZE(H%coef)
       IF (ishift.ne.0) rG=rG+rF
 
       allocate(BB(rF,rF),BBmem(rF,rF),PS(rG,rF))
@@ -702,7 +625,7 @@
 !     PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
 !     If the ALS matrices BB and PS are to be updated, initialize
 !     them here with the first DOF removed
-      call CONSTBBTOT(F,1,BBmem)
+      call CONSTPT(F,1,BBmem)
 
 !     Build PS without storing G
       PS(:,:)=1.d0
@@ -715,21 +638,15 @@
       DO itn=1,nitn
 
 !        Loop over dimension k
-         gst=0
          do k=1,ndim
             n=F%nbas(k)
 
 !           Update the BBmem matrix of the linear system. Copy to BB and
 !           pass BB to LAPACK since LAPACK destroys BB
             IF (kp.ne.0) then
-               call UpdateBB(F,k,BBmem,.TRUE.)
+               call UPDATEP(F,k,BBmem,.TRUE.)
             ENDIF
             BB=BBmem
-
-!           Add penalty to avoid ill-conditioning (section 3.2, Beylkin)
-            do i=1,rF
-               BB(i,i)=BB(i,i)+valpen
-            enddo
 
 !           Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4) and remove
 !           inner products for the k-th DOF from PS
@@ -738,36 +655,25 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            allocate(IPV(rF))
-            call dgetrf(rF,rF,BB,rF,IPV,info)
-            call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-            deallocate(IPV)
+            call SolveLinSysLU(BB,bjk,valpen)
 
 !           Construct improved F
-            do i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               F%base(gst+1:gst+n,i)=bjk(i,1:n)/rnorm
-            enddo
+            call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
-!           Check coefs of F for NaN values resulting from zero
-!           division. If there are any, restart ALS without updating
-            DO i=1,rF
-               IF (F%coef(i).ne.F%coef(i)) THEN
-                  write(*,*) 'PRODHV_ALS2(): NaN on update; itn = ',itn
-                  call AbortWithError('PRODHV_ALS2 crashed')
-               ENDIF
-            ENDDO
+!           Check coefs for NaN values resulting from zero division.
+            IF (.NOT. CHECKCOEFS(F)) THEN
+               write(*,*) 'PRODHV_ALS2(): NaN on update; itn = ',itn,&
+                          '; mode = ',k
+               call AbortWithError('PRODHV_ALS2 crashed')
+            ENDIF
 
 !           Update BB and PS with the new Fs (except on the last iteration)
             IF (itn.lt.nitn .or. k.lt.ndim) THEN
-               call UpdateBB(F,k,BBmem,.FALSE.)
+               call UPDATEP(F,k,BBmem,.FALSE.)
                call UpdateXPS(Fold,F,H,PS,k,ishift,Eshift)
             ENDIF
 
-            gst=gst+n
             kp=k
          enddo  ! loop over k
       ENDDO  ! loop over iterations
@@ -791,21 +697,21 @@
 ! the PS matrix (SLOWEST, least memory usage)
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(IN)  :: Fold
-      TYPE (CPvec), INTENT(OUT) :: F
+      TYPE (CP), INTENT(IN)  :: H
+      TYPE (CP), INTENT(IN)  :: Fold
+      TYPE (CP), INTENT(OUT) :: F
       integer, intent(in)  :: nitn,ishift
       real*8, intent(in)   :: Eshift
       real*8, allocatable  :: BB(:,:),bjk(:,:)
-      integer, allocatable :: nbas(:),IPV(:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: rF,ndim,i,j,k,ir,l,n,info,gst,itn
+      integer, allocatable :: nbas(:)
+      real*8  :: valpen,gtmp,t1,t2
+      integer :: rF,ndim,i,j,k,ir,l,n,itn
 
       IF (nitn.eq.0) return
 
       call CPU_TIME(t1)
 
-      call CopyWtoV(F,Fold)
+      F=CopyCP(Fold)
 
 !     Set parameters
       ndim=SIZE(F%nbas)
@@ -818,44 +724,28 @@
       DO itn=1,nitn
 
 !        Loop over dimension k
-         gst=0
          do k=1,ndim
             n=F%nbas(k)
 
 !           Calculate BB and b_j_k ( l', nr) (Beylkin, eq. 3.4)
             call BuildbjkDirectX(Fold,F,H,BB,bjk,k,ishift,Eshift,.TRUE.)
 
-!           Add penalty to avoid ill-conditioning (section 3.2, Beylkin)
-            do i=1,rF
-               BB(i,i)=BB(i,i)+valpen
-            enddo
-
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            allocate(IPV(rF))
-            call dgetrf(rF,rF,BB,rF,IPV,info)
-            call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-            deallocate(BB,IPV)
+            call SolveLinSysLU(BB,bjk,valpen)
+            deallocate(BB)
 
 !           Construct improved F
-            do i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               F%base(gst+1:gst+n,i)=bjk(i,1:n)/rnorm
-            enddo
+            call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
-!           Check coefs of F for NaN values resulting from zero
-!           division. If there are any, restart ALS without updating
-            DO i=1,rF
-               IF (F%coef(i).ne.F%coef(i)) THEN
-                  write(*,*) 'PRODHV_ALS3(): NaN on update; itn = ',itn
-                  call AbortWithError('PRODHV_ALS3 crashed')
-               ENDIF
-            ENDDO
+!           Check coefs for NaN values resulting from zero division.
+            IF (.NOT. CHECKCOEFS(F)) THEN
+               write(*,*) 'PRODHV_ALS3(): NaN on update; itn = ',itn,&
+                          '; mode = ',k
+               call AbortWithError('PRODHV_ALS3 crashed')
+            ENDIF
 
-            gst=gst+n
          enddo  ! loop over k
       ENDDO  ! loop over iterations
 
@@ -874,16 +764,17 @@
 ! applies the matrix-vector product only to the 'idof'-th DOF
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(IN)    :: F
-      TYPE (CPvec), INTENT(INOUT) :: G
+      TYPE (CP), INTENT(IN)    :: H
+      TYPE (CP), INTENT(IN)    :: F
+      TYPE (CP), INTENT(INOUT) :: G
       integer, intent(in) :: idof,ishift
       real*8, intent(in)  :: Eshift
-      integer :: i,j,k,ik,rF,rG,rH,rFH,gi,gf
+      integer :: i,j,k,ik,n,rF,rG,rH,rFH
 
 !     Set parameters
-      rF=SIZE(F%coef)     ! rank of F
-      rH=SIZE(H%opcoef,1) ! rank of H
+      n=F%rows(idof)
+      rF=SIZE(F%coef) ! rank of F
+      rH=SIZE(H%coef) ! rank of H
       rFH=rF*rH
       rG=rFH
       IF (ishift.ne.0) rG=rG+rF
@@ -893,13 +784,6 @@
          call AbortWithError('PRODHV1(): unexpected rank of G')
       ENDIF
 
-!     Find the index range for DOF 'idof'
-      gi=1
-      DO j=1,idof-1
-         gi=gi+F%nbas(j)
-      ENDDO
-      gf=gi+F%nbas(idof)-1
-
 !     Loop over terms in H
       ik=1
       DO k=1,rH
@@ -907,16 +791,19 @@
          DO i=1,rF
 !           Replace the coefficients since the calling subroutine
 !           changes the coefficients after operating on each DOF
-            G%coef(ik)=F%coef(i)
-            call HVBaseProd(F%base(gi:gf,i),G%base(gi:gf,ik),H,idof,k)
+            G%coef(ik)=H%coef(k)*F%coef(i)
+            call DGEMM('N','N',n,1,n,1.d0,&
+                 H%base(H%ibas(idof):H%fbas(idof),k),n,&
+                 F%base(F%ibas(idof):F%fbas(idof),i),n,0.d0,&
+                 G%base(G%ibas(idof):G%fbas(idof),ik),n)
             ik=ik+1
          ENDDO
       ENDDO
 
 !     Energy shift if applicable
       IF (ishift.ne.0) THEN
-         G%base(gi:gf,rFH+1:rG)=F%base(gi:gf,1:rF)
-
+         G%base(G%ibas(idof):G%fbas(idof),rFH+1:rG)=&
+         F%base(F%ibas(idof):F%fbas(idof),1:rF)
 !        As above, replace the coefficients and apply energy shift for
 !        all DOFs, not just the first
          G%coef(rFH+1:rG)=F%coef(1:rF)
@@ -943,18 +830,19 @@
 ! multiplied by PS. 
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(IN) :: Fold,F
+      TYPE (CP), INTENT(IN) :: H
+      TYPE (CP), INTENT(IN) :: Fold,F
       integer, intent(in)   :: idof,ishift
       real*8, intent(in)    :: Eshift
       real*8, intent(inout) :: PS(:,:)
-      real*8, allocatable   :: T(:)
-      integer :: i,j,k,ik,l,rF,rG,rH,rFH,gi,gf
+      real*8, allocatable   :: T(:,:)
+      integer :: i,j,k,ik,l,n,rF,rG,rH,rFH
       real*8  :: prod
 
 !     Set parameters
-      rF=SIZE(F%coef)     ! rank of F
-      rH=SIZE(H%opcoef,1) ! rank of H
+      n=F%rows(idof)
+      rF=SIZE(F%coef) ! rank of F
+      rH=SIZE(H%coef) ! rank of H
       rFH=rF*rH
       rG=rFH
       IF (ishift.ne.0) rG=rG+rF
@@ -973,14 +861,7 @@
          call AbortWithError('UpdateXPS(): mismatch between rF,PS')
       ENDIF
 
-!     Find the index range for DOF 'idof'
-      gi=1
-      DO j=1,idof-1
-         gi=gi+F%nbas(j)
-      ENDDO
-      gf=gi+F%nbas(idof)-1
-
-      ALLOCATE(T(F%nbas(idof)))
+      ALLOCATE(T(F%nbas(idof),1))
 
 !     Loop over terms in H
       ik=1
@@ -988,13 +869,14 @@
 !        Loop over terms in Fold
          DO i=1,rF
 !           Matrix-vector product: H*Fold=G
-            call HVBaseProd(Fold%base(gi:gf,i),T,H,idof,k)
+            call DGEMM('N','N',n,1,n,1.d0,&
+                 H%base(H%ibas(idof):H%fbas(idof),k),n,&
+                 Fold%base(Fold%ibas(idof):Fold%fbas(idof),i),n,0.d0,&
+                 T(:,1),n)
 !           Dot product <F,H*Fold>
             DO l=1,rF
-               prod=0.d0
-               DO j=1,F%nbas(idof)
-                  prod=prod+F%base(gi+j-1,l)*T(j)
-               ENDDO
+               prod=dot_product(T(:,1),&
+                                F%base(F%ibas(idof):F%fbas(idof),l))
                PS(ik,l)=PS(ik,l)*prod
             ENDDO
             ik=ik+1
@@ -1005,13 +887,11 @@
       IF (ishift.ne.0) THEN
 !        The usual case: (H-E*1)*Fold
          DO i=1,rF
-            T(:)=Fold%base(gi:gf,i)
-            IF (idof.eq.1) T(:)=-T(:)
+            T(:,1)=Fold%base(Fold%ibas(idof):Fold%fbas(idof),i)
+            IF (idof.eq.1) T(:,1)=-T(:,1)
             DO l=1,rF
-               prod=0.d0
-               DO j=1,F%nbas(idof)
-                  prod=prod+F%base(gi+j-1,l)*T(j)
-               ENDDO
+               prod=dot_product(T(:,1),&
+                                F%base(F%ibas(idof):F%fbas(idof),l))
                PS(ik,l)=PS(ik,l)*prod
             ENDDO
             ik=ik+1
@@ -1040,18 +920,19 @@
 ! divided out of PS. bjk is also computed here.
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(IN) :: Fold,F
+      TYPE (CP), INTENT(IN) :: H
+      TYPE (CP), INTENT(IN) :: Fold,F
       integer, intent(in)   :: idof,ishift
       real*8, intent(in)    :: Eshift
       real*8, intent(inout) :: PS(:,:),bjk(:,:)
-      real*8, allocatable   :: T(:)
-      integer :: i,j,k,ik,l,rF,rG,rH,rFH,gi,gf
+      real*8, allocatable   :: T(:,:)
+      integer :: i,j,k,ik,l,n,rF,rG,rH,rFH
       real*8  :: prod,tmp,tmp2
 
 !     Set parameters
-      rF=SIZE(F%coef)     ! rank of F
-      rH=SIZE(H%opcoef,1) ! rank of H
+      n=F%rows(idof)
+      rF=SIZE(F%coef) ! rank of F
+      rH=SIZE(H%coef) ! rank of H
       rFH=rF*rH
       rG=rFH
       IF (ishift.ne.0) rG=rG+rF
@@ -1078,14 +959,7 @@
          call AbortWithError('DowndateXPS(): mismatch between n,bjk')
       ENDIF
 
-!     Find the index range for DOF 'idof'
-      gi=1
-      DO j=1,idof-1
-         gi=gi+F%nbas(j)
-      ENDDO
-      gf=gi+F%nbas(idof)-1
-
-      ALLOCATE(T(F%nbas(idof)))
+      ALLOCATE(T(F%nbas(idof),1))
 
       bjk=0.d0
 
@@ -1094,19 +968,20 @@
       DO k=1,rH
 !        Loop over terms in F
          DO i=1,rF
-            call HVBaseProd(Fold%base(gi:gf,i),T,H,idof,k)
+            call DGEMM('N','N',n,1,n,1.d0,&
+                 H%base(H%ibas(idof):H%fbas(idof),k),n,&
+                 Fold%base(Fold%ibas(idof):Fold%fbas(idof),i),n,0.d0,&
+            T(:,1),n)
 !           Dot product <F,H*F>
             DO l=1,rF
 !              Downdate PS
-               prod=0.d0
-               DO j=1,F%nbas(idof)
-                  prod=prod+F%base(gi+j-1,l)*T(j)
-               ENDDO
+               prod=dot_product(T(:,1),&
+                                F%base(F%ibas(idof):F%fbas(idof),l))
                PS(ik,l)=PS(ik,l)/prod
 !              Build bjk
-               tmp=Fold%coef(i)*PS(ik,l)
+               tmp=H%coef(k)*Fold%coef(i)*PS(ik,l)
                DO j=1,F%nbas(idof)
-                  bjk(l,j)=bjk(l,j)+tmp*T(j)
+                  bjk(l,j)=bjk(l,j)+tmp*T(j,1)
                ENDDO
             ENDDO
             ik=ik+1
@@ -1118,19 +993,17 @@
 !        The usual case: (H-E*1)*v
          DO i=1,rF
             tmp=Eshift*Fold%coef(i)
-            T(:)=Fold%base(gi:gf,i)
-            IF (idof.eq.1) T(:)=-T(:)
+            T(:,1)=Fold%base(Fold%ibas(idof):Fold%fbas(idof),i)
+            IF (idof.eq.1) T(:,1)=-T(:,1)
             DO l=1,rF
 !              Downdate PS
-               prod=0.d0
-               DO j=1,F%nbas(idof)
-                  prod=prod+F%base(gi+j-1,l)*T(j)
-               ENDDO
+               prod=dot_product(T(:,1),&
+                                F%base(F%ibas(idof):F%fbas(idof),l))
                PS(ik,l)=PS(ik,l)/prod
 !              Build bjk
                tmp2=tmp*PS(ik,l)
                DO j=1,F%nbas(idof)
-                  bjk(l,j)=bjk(l,j)+tmp2*T(j)
+                  bjk(l,j)=bjk(l,j)+tmp2*T(j,1)
                ENDDO
             ENDDO
             ik=ik+1
@@ -1160,21 +1033,20 @@
 ! by computing elements of PS on the fly, to bypass storing PS.
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec), INTENT(IN) :: Fold,F
+      TYPE (CP), INTENT(IN) :: H
+      TYPE (CP), INTENT(IN) :: Fold,F
       logical, intent(in)  :: recalcB
       integer, intent(in)  :: idof,ishift
-      integer, allocatable :: ind(:,:)
       real*8, intent(in)   :: Eshift
-      real*8, allocatable  :: T(:)
+      real*8, allocatable  :: T(:,:)
       real*8, allocatable, intent(out) :: BB(:,:),bjk(:,:)
-      integer :: i,j,k,l,m,mmod,ndof,rF,rG,rH,rFH,gi,gf
+      integer :: i,j,k,l,m,n,mmod,ndof,rF,rG,rH,rFH
       real*8  :: prod1D,tmp,tmp2
 
 !     Set parameters
       ndof=SIZE(F%nbas)
-      rF=SIZE(F%coef)     ! rank of F
-      rH=SIZE(H%opcoef,1) ! rank of H
+      rF=SIZE(F%coef) ! rank of F
+      rH=SIZE(H%coef) ! rank of H
       rFH=rF*rH
       rG=rFH
       IF (ishift.ne.0) rG=rG+rF
@@ -1185,16 +1057,7 @@
          call AbortWithError('BuildbjkDirectX(): rF must equal rFold')
       ENDIF
 
-!     Find the index range for DOF 'idof'
-      allocate(ind(ndof,2))
-      ind(1,1)=1
-      ind(1,2)=F%nbas(1)
-      DO m=2,ndof
-         ind(m,1)=ind(m-1,2)+1
-         ind(m,2)=ind(m-1,2)+F%nbas(m)
-      ENDDO
-
-      ALLOCATE(BB(rF,rF),bjk(rF,F%nbas(idof)),T(MAXVAL(F%nbas)))
+      ALLOCATE(BB(rF,rF),bjk(rF,F%nbas(idof)),T(MAXVAL(F%nbas),1))
       bjk=0.d0
 
 !     Loop over terms in H
@@ -1205,29 +1068,30 @@
             BB(i,:)=1.d0
             DO m=1,ndof-1
                mmod=mod(idof+m-1,ndof)+1
-               gi=ind(mmod,1)
-               gf=ind(mmod,2)
-               call HVBaseProd(Fold%base(gi:gf,i),&
-                               T(1:F%nbas(mmod)),H,mmod,k)
+               n=F%rows(mmod)
+               call DGEMM('N','N',n,1,n,1.d0,&
+                    H%base(H%ibas(mmod):H%fbas(mmod),k),n,&
+                    Fold%base(Fold%ibas(mmod):Fold%fbas(mmod),i),n,0.d0,&
+                    T(1:n,1),n)
+               
 !              Construct a row of PS and store in BB for now
                DO l=1,rF
-                  prod1D=0.d0
-                  DO j=1,F%nbas(mmod)
-                     prod1D=prod1D+F%base(gi+j-1,l)*T(j)
-                  ENDDO
+                   prod1D=dot_product(T(1:n,1),&
+                          F%base(F%ibas(mmod):F%fbas(mmod),l))
                   BB(i,l)=BB(i,l)*prod1D
                ENDDO
             ENDDO
 
 !           Build bjk (start with T for this DOF)
-            gi=ind(idof,1)
-            gf=ind(idof,2)
-            call HVBaseProd(Fold%base(gi:gf,i),&
-                            T(1:F%nbas(idof)),H,idof,k)
+            n=F%rows(idof)
+            call DGEMM('N','N',n,1,n,1.d0,&
+                 H%base(H%ibas(idof):H%fbas(idof),k),n,&
+                 Fold%base(Fold%ibas(idof):Fold%fbas(idof),i),n,0.d0,&
+                 T(1:n,1),n)
             DO l=1,rF
-               tmp=Fold%coef(i)*BB(i,l)
-               DO j=1,F%nbas(idof)
-                  bjk(l,j)=bjk(l,j)+tmp*T(j)
+               tmp=H%coef(k)*Fold%coef(i)*BB(i,l)
+               DO j=1,n
+                  bjk(l,j)=bjk(l,j)+tmp*T(j,1)
                ENDDO
             ENDDO
          ENDDO
@@ -1241,28 +1105,24 @@
 !        Build PS including all DOF except idof
          DO m=1,ndof-1
             mmod=mod(idof+m-1,ndof)+1
-            gi=ind(mmod,1)
-            gf=ind(mmod,2)
-            T(1:F%nbas(mmod))=Fold%base(gi:gf,i)
+            n=F%rows(mmod)
+            T(1:n,1)=Fold%base(Fold%ibas(mmod):Fold%fbas(mmod),i)
 !           Construct a row of PS
             DO l=1,rF
-               prod1D=0.d0
-               DO j=1,F%nbas(mmod)
-                  prod1D=prod1D+F%base(gi+j-1,l)*T(j)
-               ENDDO
+               prod1D=dot_product(T(1:n,1),&
+                                F%base(F%ibas(mmod):F%fbas(mmod),l))
                BB(i,l)=BB(i,l)*prod1D
             ENDDO
          ENDDO
 
 !        Build bjk (start with T for this DOF)
          IF (ishift.ne.0) THEN
-            gi=ind(idof,1)
-            gf=ind(idof,2)
-            T(1:F%nbas(idof))=Fold%base(gi:gf,i)
+            n=F%rows(idof)
+            T(1:n,1)=Fold%base(Fold%ibas(idof):Fold%fbas(idof),i)
             DO l=1,rF
                tmp2=tmp*BB(i,l)
                DO j=1,F%nbas(idof)
-                  bjk(l,j)=bjk(l,j)+tmp2*T(j)
+                  bjk(l,j)=bjk(l,j)+tmp2*T(j,1)
                ENDDO
             ENDDO
          ENDIF
@@ -1283,15 +1143,12 @@
 !           Build BB including all DOF except idof
             DO m=1,ndof-1
                mmod=mod(idof+m-1,ndof)+1
-               gi=ind(mmod,1)
-               gf=ind(mmod,2)
-               T(1:F%nbas(mmod))=F%base(gi:gf,i)
+               n=F%rows(mmod)
+               T(1:n,1)=F%base(F%ibas(mmod):F%fbas(mmod),i)
 !              Construct a row of BB (upper triangle only)
                DO l=i,rF
-                  prod1D=0.d0
-                  DO j=1,F%nbas(mmod)
-                     prod1D=prod1D+F%base(gi+j-1,l)*T(j)
-                  ENDDO
+                  prod1D=dot_product(T(1:n,1),&
+                                F%base(F%ibas(mmod):F%fbas(mmod),l))
                   BB(i,l)=BB(i,l)*prod1D
                ENDDO
             ENDDO
@@ -1305,7 +1162,7 @@
          ENDDO
       ENDIF
 
-      DEALLOCATE(ind,T)
+      DEALLOCATE(T)
 
       end subroutine BuildbjkDirectX
 

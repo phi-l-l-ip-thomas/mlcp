@@ -21,7 +21,7 @@
       TYPE (CSpar)   :: csp
       TYPE (GridPar) :: gp
       TYPE (ChebObj), ALLOCATABLE :: CGrid(:)
-      TYPE (CPvec)   :: A,X,G,BB,RR,XX
+      TYPE (CP)   :: A,X,G,BB,RR,XX
       TYPE (Configs) :: C,B,R
       integer :: rs(33),d(3),t(3),i,ndof
       real*8  :: t1,t2
@@ -98,7 +98,7 @@
 !         call SetReductionParameters(i,30,1.d-12,.FALSE.,'SVD','ALS')
 !         call reduc(XX,X)
 !         write(*,*) 'rank(X) = ',i,calc_FmG(X,XX)
-!         call FlushCPvec(XX)
+!         call FlushCP(XX)
 !      ENDDO
 
 !     Polynomial coefficients as powers of x_i
@@ -111,11 +111,11 @@
 !      call PrintConfigs(C)
 
 !     Clean up
-      call FlushCPvec(BB)
-      call FlushCPvec(RR)
-      call FlushCPvec(X)
-      call FlushCPvec(G)
-      call FlushCPvec(A)
+      call FlushCP(BB)
+      call FlushCP(RR)
+      call FlushCP(X)
+      call FlushCP(G)
+      call FlushCP(A)
 
       call FlushConfigs(B)
       call FlushConfigs(R)

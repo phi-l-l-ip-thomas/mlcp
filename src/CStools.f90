@@ -21,7 +21,7 @@
 
       implicit none
       TYPE (Configs), INTENT(OUT) :: C
-      TYPE (CPvec), INTENT(OUT)   :: X
+      TYPE (CP), INTENT(OUT)   :: X
       integer, intent(in)  :: nbas(:)
       integer, intent(in)  :: rkx,maxnmode
       logical, intent(in)  :: nmcfg
@@ -43,7 +43,7 @@
       ENDDO
 
 !     Initialize zero solution vector for BP-sigma
-      call GetZeroCPvec(X,nbas)
+      X=ZeroCPvec(nbas)
 
       end subroutine NewCSGuess
 
@@ -56,7 +56,7 @@
 
       implicit none
       TYPE (Configs), INTENT(INOUT) :: C
-      TYPE (CPvec), INTENT(OUT)     :: X
+      TYPE (CP), INTENT(OUT)     :: X
       integer, intent(in)  :: rkx,maxnmode
       logical, intent(in)  :: nmcfg
       integer, allocatable :: cfg(:)

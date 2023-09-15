@@ -19,12 +19,12 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE NewConfigs(v,nbas,rnk)
+      subroutine NewConfigs(v,nbas,rnk)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Makes a new configuration list. Entries are initialized to zero
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(OUT) :: v
       INTEGER, INTENT(IN) :: nbas(:)
       INTEGER, INTENT(IN) :: rnk
@@ -51,7 +51,7 @@
       v%coef=0.d0
       v%qns=0
 
-      END SUBROUTINE NewConfigs
+      end subroutine NewConfigs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -82,19 +82,19 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE FlushConfigs(v)
+      subroutine FlushConfigs(v)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Disposes configuration list
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs) :: v
 
       IF (ALLOCATED(v%nbas)) DEALLOCATE(v%nbas)
       IF (ALLOCATED(v%qns)) DEALLOCATE(v%qns)
       IF (ALLOCATED(v%coef)) DEALLOCATE(v%coef)
 
-      END SUBROUTINE FlushConfigs
+      end subroutine FlushConfigs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -103,7 +103,7 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Checks configurations for input errors
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(IN) :: v
       INTEGER :: i,j,ndof,nrk
 
@@ -155,28 +155,28 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE ReplaceConfigsVwithW(v,w)
+      subroutine ReplaceConfigsVwithW(v,w)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Copies W into V, disposing W afterwards
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs) :: v,w
 
       call FlushConfigs(v)
       call CopyConfigsWtoV(v,w)
       call FlushConfigs(w)
 
-      END SUBROUTINE ReplaceConfigsVwithW
+      end subroutine ReplaceConfigsVwithW
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE CopyConfigsWtoV(v,w)
+      subroutine CopyConfigsWtoV(v,w)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Copies W into V, leaving W intact.
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs) :: v,w
       INTEGER :: nrk
 
@@ -184,17 +184,17 @@
       call NewConfigs(v,w%nbas,nrk)
       call GenCopyConfigsWtoV(v,w,1,nrk,1,nrk)
 
-      END SUBROUTINE CopyConfigsWtoV
+      end subroutine CopyConfigsWtoV
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE GenCopyConfigsWtoV(v,w,vi,ve,wi,we)
+      subroutine GenCopyConfigsWtoV(v,w,vi,ve,wi,we)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Copies a group of consecutive terms in W to consecutive slots in V, 
 ! leaving W intact. v must be allocated beforehand.
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs) :: v,w
       INTEGER, INTENT(in) :: vi,ve,wi,we
       INTEGER :: rkv,rkw
@@ -213,18 +213,18 @@
       v%qns(vi:ve,:)=w%qns(wi:we,:)
       v%coef(vi:ve)=w%coef(wi:we)
 
-      END SUBROUTINE GenCopyConfigsWtoV
+      end subroutine GenCopyConfigsWtoV
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE ResizeConfigList(v,nrk)
+      subroutine ResizeConfigList(v,nrk)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Resizes vector v, either by truncating at a smaller rank or by adding
 ! space for extra terms. If the size is set to zero, a zero vector of
 ! rank-1 is generated
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       TYPE (Configs) :: w
       INTEGER, INTENT(IN) :: nrk
@@ -241,17 +241,17 @@
          call GenCopyConfigsWtoV(v,w,1,MIN(rkv,nrk),1,MIN(rkv,nrk))
       call FlushConfigs(w)
 
-      END SUBROUTINE ResizeConfigList
+      end subroutine ResizeConfigList
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE TrimZeroConfigs(v,tol)
+      subroutine TrimZeroConfigs(v,tol)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Resize vector v by trimming columns with coefficients with absolute
 ! values smaller than tol
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       TYPE (Configs) :: w
       real*8, intent(in) :: tol
@@ -279,16 +279,16 @@
 
       DEALLOCATE(iok)
 
-      END SUBROUTINE TrimZeroConfigs
+      end subroutine TrimZeroConfigs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE TrimZeroQns(v)
+      subroutine TrimZeroQns(v)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Resize vector v by trimming columns with containing a zero qn
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       TYPE (Configs) :: w
       integer, allocatable :: iok(:)
@@ -315,7 +315,7 @@
 
       DEALLOCATE(iok)
 
-      END SUBROUTINE TrimZeroQns
+      end subroutine TrimZeroQns
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -324,7 +324,7 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Checks config list and changes signs to make all qns positive
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       INTEGER :: i,j,ndof,nrk
 
@@ -349,7 +349,7 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Checks config list and changes signs to make all coefficients positive
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       INTEGER :: i,j,ndof,nrk
       real*8, parameter :: tol=1.d-12
@@ -375,7 +375,7 @@
 ! Constructs CP-vector from list of configurations
 
       implicit none
-      TYPE (CPvec), INTENT(OUT)  :: F
+      TYPE (CP), INTENT(OUT)  :: F
       TYPE (Configs), INTENT(IN) :: v
       integer :: ndof,i,j,rF,gst
 
@@ -385,12 +385,12 @@
 
 !     If v is a zero config, get a zero CP-vec
       IF (rF.eq.1 .and. ALL(v%qns(1,:).eq.0)) THEN
-         call GetZeroCPvec(F,v%nbas)
+         F=ZeroCPvec(v%nbas)
          RETURN
       ENDIF
 
 !     Reconstruct F
-      call NewCPvec(F,v%nbas,rF)
+      F=NewCP(rF,v%nbas)
       F%base=1.d-15
       DO i=1,rF
          F%coef(i)=abs(v%coef(i))
@@ -416,7 +416,7 @@
 ! tensor to list of indices.
 
       implicit none
-      TYPE (CPvec), INTENT(IN)    :: F
+      TYPE (CP), INTENT(IN)    :: F
       TYPE (Configs), INTENT(OUT) :: v
       integer :: i,j,k,gst,ndof,rF
       logical :: found
@@ -480,7 +480,7 @@
       implicit none
       TYPE (Configs), INTENT(IN)  :: B
       TYPE (Configs), INTENT(OUT) :: C
-      TYPE (CPvec), INTENT(IN)    :: F
+      TYPE (CP), INTENT(IN)    :: F
       integer :: i,rk
 
       rk=SIZE(B%coef)
@@ -508,7 +508,7 @@
 ! Here G is just a list of indices, not an object of TYPE "Configs"
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       integer, intent(in) :: G(:)
       real*8  :: PRODVConfig,prod
       integer :: i,j,ndof,rF,gst
@@ -711,7 +711,7 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Puts the R terms in a configuration list in random order
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       TYPE (Configs) :: w
       REAL*8, ALLOCATABLE :: tabindx(:),rndnr(:)
@@ -748,7 +748,7 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sorts configurations in descending order of coefficients
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       INTEGER, INTENT(IN)  :: i,j
       INTEGER, ALLOCATABLE :: qnt(:)
@@ -785,7 +785,7 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sorts configurations in descending order of coefficients
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       INTEGER, ALLOCATABLE :: qnt(:,:)
       REAL*8, ALLOCATABLE  :: ord(:)
@@ -833,7 +833,7 @@
 ! Sorts configurations in ascending order of indices, with the first
 ! index changing the slowest
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       integer, allocatable :: ist(:),iend(:)
       integer :: nrk,ndof,j
@@ -885,7 +885,7 @@
 ! Sorts configurations in v in ascending order of index i
 ! Negative signs must be on coefficients (not on qns) on entry
 
-      IMPLICIT NONE
+      implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       integer, intent(in)  :: i,ri,rf
       integer, allocatable :: qnt(:,:)

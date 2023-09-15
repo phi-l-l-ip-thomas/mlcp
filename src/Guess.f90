@@ -10,8 +10,9 @@
       USE LINALG
       USE SEPDREPN
       USE HAMILSETUP
-      USE GENCONFIG
-
+!!!
+      USE TARGETEDSTATES
+!!!
       implicit none
       real*8, private  :: guess_time=0.d0
       logical, private :: GUESS_SETUP=.FALSE.
@@ -49,7 +50,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GuessPsi(il,im,trunctyp,evalsND,Q,H,ML)
+      subroutine GuessPsi(il,im,evalsND,Q,H,ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for generating the initial guess
@@ -58,8 +59,8 @@
       implicit none
       TYPE (Hamiltonian), INTENT(IN)  :: H
       TYPE (MLtree), INTENT(IN)       :: ML
-      TYPE (CPvec), ALLOCATABLE, INTENT(OUT) :: Q(:)
-      integer, intent(in)  :: il,im,trunctyp
+      TYPE (CP), ALLOCATABLE, INTENT(OUT) :: Q(:)
+      integer, intent(in)  :: il,im
       integer, allocatable :: qns(:,:),nbas(:)
       real*8, allocatable  :: evals1D(:,:)
       real*8, allocatable, intent(out) :: evalsND(:)
@@ -92,8 +93,11 @@
       ENDDO
 
 !     Get the list of sorted N-D eigenvalues and quantum numbers
+!!!
+      call GetStatesinWindow(nbloc,evalsND,qns,evals1D,nbas,0.d0)
+!!!
       call sortDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
-      call TruncateByQN(il,im,trunctyp,evalsND,qns,H,ML)
+!      call structuredDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
 
       IF (nsubm.gt.1) THEN
          write(*,'(/3X,A/)') 'Initial guess product functions:'
@@ -113,6 +117,107 @@
       guess_time=guess_time+t2-t1
 
       end subroutine GuessPsi
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function GuessWeights(il,im,T,H,ML) result(W)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Guesses Boltzmann weights for separable H energies at temperature T,
+! for weighting rank-reduction of CP matrices with multiple states. If 
+! temperature is negative then identity matrix is guessed.
+
+      implicit none
+      TYPE (Hamiltonian), INTENT(IN)  :: H
+      TYPE (MLtree), INTENT(IN) :: ML
+      TYPE (CP) :: W
+      real*8, intent(in)   :: T
+      real*8, parameter    :: kb=0.69503476 ! cm^-1/K
+      integer, intent(in)  :: il,im
+      integer, allocatable :: nbas(:)
+      logical, allocatable :: sym(:)
+      integer :: i,j,mi,nsubm,mstart
+      real *8 :: t1,t2,val
+
+      IF (.NOT. GUESS_SETUP) call InitializeGuessModule()
+
+      call CPU_TIME(t1)
+
+!     Set parameters
+      nsubm=ML%modcomb(il,im)   ! number of sub-modes in mode 'im'
+      mstart=ML%modstart(il,im) ! start index of sub-modes of 'im'
+      ALLOCATE(nbas(nsubm),sym(nsubm))
+      nbas(1:nsubm)=ML%gdim(il-1,mstart:mstart+nsubm-1)
+      sym(:)=.FALSE.
+
+      W=IdentityCPMatrix(nbas,nbas,sym)
+
+      IF (T.ge.0.d0) THEN
+!        Use the eigenvalues of the sub-modes to compute the weights
+!        If T=0, force weights of 1 for g.s. and 0 for all other states
+         DO i=1,nsubm
+            mi=mstart+i-1
+            DO j=1,nbas(i)
+               IF (T.gt.0.d0) THEN
+                  val=exp((H%eig(il-1,mi)%evals(1)-&
+                           H%eig(il-1,mi)%evals(j))/(kb*T))
+               ELSEIF (j.eq.1) THEN
+                  val=1.d0
+               ELSE
+                  val=0.d0
+               ENDIF
+               W%base(W%ibas(i)+(j-1)*(W%rows(i)+1),1)=val   
+            ENDDO
+         ENDDO
+      ENDIF
+
+      DEALLOCATE(nbas,sym)
+
+      call CPU_TIME(t2)
+      guess_time=guess_time+t2-t1
+
+      end function GuessWeights
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine structuredDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Generates all vecs in the direct-product representation (for testing)
+
+      implicit none
+      integer, allocatable, intent(out) :: qns(:,:)
+      real*8, intent(inout):: evalsND(:)
+      integer, intent(in)  :: nbas(:)
+      real*8, intent(in)   :: evals1D(:,:)
+      integer, allocatable :: indx(:)
+      integer, intent(in)  :: nbloc
+      integer :: i,j,ndof
+
+      ndof=SIZE(nbas)
+
+      IF (nbloc.ne.PRODUCT(nbas)) THEN
+         write(*,'(2(A,I0),A)') 'nbloc (',nbloc,&
+         ') must equal size of DP basis (',PRODUCT(nbas),')'
+      ENDIF
+
+      ALLOCATE(qns(nbloc,ndof),indx(ndof))
+      indx(:)=nbas(:)
+
+!     Run through DP-basis via calls to NextIndex and assemble the guess
+!     eigenvalues
+      DO i=1,nbloc
+         call NextIndex(indx,nbas)
+         qns(i,:)=indx(:)
+         evalsND(i)=0.d0
+         DO j=1,ndof
+            evalsND(i)=evalsND(i)+evals1D(j,indx(j))
+         ENDDO
+      ENDDO
+
+      DEALLOCATE(indx)
+
+      end subroutine structuredDPeigvals
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -203,228 +308,13 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine showprodfxns(D,nmax)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Generates list of states to keep
-
-      implicit none
-      integer, intent(in) :: D,nmax
-      integer, allocatable :: qn(:),qmax(:)
-      integer :: i,j,oldsum,newsum
-      logical :: success
-      character*60 :: frmt
-
-      ALLOCATE(qn(D),qmax(D))
-      qn(:)=1
-      qmax(:)=nmax
-
-      write(frmt,*) '(I5,A,X,',D,'(I2,X))'
-      i=1
-      oldsum=SUM(qn)
-      DO
-         write(*,frmt) i,')',(qn(j)-1,j=1,D)
-!        Generate the next function in the "canonical" order
-         call nextconfig(qn,qmax,D,.FALSE.,success)
-         newsum=SUM(qn)
-         IF (.not.success) EXIT
-         IF (newsum.gt.oldsum) write(*,*) 'nextqn'
-         oldsum=newsum
-         i=i+1
-         IF (i.gt.99999) EXIT
-      ENDDO
-
-      call AbortWithError('Done')
-
-      end subroutine showprodfxns
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine TruncateByQN(il,im,trunctyp,evals,qns,Ham,ML)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Generates list of states to keep for single-mode truncation layers,
-! where states are kept by canonical quantum number order rather than by
-! increasing energy
-
-      implicit none
-      TYPE (MLtree), INTENT(IN) :: ML
-      TYPE (Hamiltonian), INTENT(IN) :: Ham
-      real*8, intent(inout)  :: evals(:)
-      integer, intent(inout) :: qns(:,:)
-      integer, intent(in) :: il,im,trunctyp
-      integer, allocatable :: qnc(:),qnt(:),maxqn(:),qnf(:,:)
-      integer, allocatable :: istate(:),pstate(:),dupd(:)
-      real*8, allocatable  :: eigv(:)
-      integer :: i,j,k,nmode,nsubm,mstart,nbloc,nblocprev,tmp
-      integer :: idup,fdup,ndup,mst,mfi,nagn,nmmax,cstate
-      logical :: nmcfg,success
-      character*64 :: frmt
-
-!     Set parameters
-      mstart=ML%modstart(il,im) ! start index of sub-modes of 'im'
-      nsubm=ML%modcomb(il,im)   ! number of sub-modes in mode 'im'
-      nbloc=ML%gdim(il,im)      ! block size (# eigfxns for 'im')
-      nblocprev=ML%gdim(il-1,mstart)    ! # prev-layer basis functions
-      mst=firstmode(il,1,im,ML) ! start index of bottom-layer modes
-      mfi=lastmode(il,1,im,ML)  ! end index of bottom layer modes
-      nagn=mfi-mst+1            ! number of bottom layer modes in 'im'
-
-!     Exit if this is not a truncation layer or if truncating the bottom
-!     layer functions (in which case the states are already in order) or
-!     if truncating by energy (trunctyp=0)
-      IF (nsubm.gt.1 .or. nbloc.eq.nblocprev .or. il.le.2 .or. &
-          trunctyp.eq.0) RETURN
-
-      write(*,'(3X,2(A,I0),A)') &
-      'Truncating basis from ',nblocprev,' to ',nbloc,' functions'
-
-!     Get energies for printing and for ordering duplicate states
-      ALLOCATE(eigv(nblocprev))
-      eigv(:)=Ham%eig(il-1,mstart)%evals(:)
-
-!     Get the list of nblocprev functions computed in the previous layer
-      ALLOCATE(qnf(nblocprev,nagn),istate(nblocprev),dupd(nblocprev))
-      dupd(:)=0
-      DO i=1,nblocprev
-         istate(i)=i
-         call GetFullAssignment(il-1,mstart,Ham,ML,&
-              Ham%eig(il-1,mstart)%assgn(i,:),qnt)
-         qnf(i,:)=qnt(:)
-         DEALLOCATE(qnt)
-      ENDDO
-
-      ALLOCATE(maxqn(nagn))
-      nmmax=0
-      DO i=1,nagn
-         maxqn(i)=MAXVAL(qnf(:,i))
-         IF (maxqn(i).gt.1) nmmax=nmmax+1
-      ENDDO
-
-!     Truncation options
-      IF (trunctyp.lt.0) THEN ! Truncate by sum of qns
-         nmode=MIN(nagn,nmmax)
-         nmcfg=.FALSE.
-         write(*,'(4X,A/)') &
-         'prioritizing lower sums of quantum numbers...'
-      ELSE ! Truncate by # of active modes, then by sum of qns
-         nmode=MIN(MIN(trunctyp,nagn),nmmax)
-         nmcfg=.TRUE.
-         write(*,'(4X,A,I0,A/)') &
-         'prioritizing limiting nr. of excited modes to ',nmode,'...'
-      ENDIF
-
-!!! TEST
-!      write(frmt,*) '(X,A,X,',nagn,'(I2,X))'
-!      write(*,frmt) 'Max qns:',(maxqn(k)-1,k=1,nagn)
-!      write(*,*) 'Looking for states...'
-!!!
-
-!     Generate list of functions in canonical order
-      ALLOCATE(qnc(nagn),qnt(nagn))
-      qnc(:)=1 ! canonical state to match
-      cstate=1 ! current state index
-      DO i=1,nblocprev
-
-!        Match "canonical" state to previously computed states, keeping
-!        track of duplicate matches
-         ndup=0
-         DO j=cstate,nblocprev
-            IF (ALL(qnc(:).eq.qnf(j,:))) THEN
-
-!!! TEST
-!               write(frmt,*) '(I4,X,I4,A,X,',nagn,'(I2,X))'
-!               write(*,frmt) i,j,') found ',(qnc(k)-1,k=1,nagn)
-!!!
-               ndup=ndup+1
-               IF (j.gt.cstate) THEN ! swap cstate and j-th state
-                  qnt(:)=qnf(cstate,:)
-                  qnf(cstate,:)=qnf(j,:)
-                  qnf(j,:)=qnt(:)
-                  tmp=istate(cstate)
-                  istate(cstate)=istate(j)
-                  istate(j)=tmp
-               ENDIF
-               cstate=cstate+1
-            ENDIF
-
-         ENDDO
-
-!!! TEST
-!         IF (ndup.eq.0) THEN
-!            write(frmt,*) '(I4,X,I4,A,X,',nagn,'(I2,X))'
-!            write(*,frmt) i,j,') not found ',(qnc(k)-1,k=1,nagn)
-!         ENDIF
-!!!
-
-!        Reorder duplicate states by increasing energy
-         IF (ndup.gt.1) THEN
-            idup=cstate-ndup
-            fdup=cstate-1
-            dupd(idup:fdup)=1
-            DO j=idup,fdup-1
-               DO k=j+1,fdup
-                  IF (eigv(istate(j)).gt.eigv(istate(k))) THEN
-                     tmp=istate(j)
-                     istate(j)=istate(k)
-                     istate(k)=tmp
-                  ENDIF
-               ENDDO
-            ENDDO
-         ENDIF
-
-!        Generate the next function in the "canonical" order
-         call nextconfig(qnc,maxqn,nmode,nmcfg,success)
-         IF (.not.success) EXIT
-      ENDDO
-      DEALLOCATE(qnc,qnt,maxqn)
-
-!     Get priority ordering of original states. This step is necessary
-!     since we still want to keep states in order of increasing energy, but
-!     only retaining those with priorities not exceeding nbloc
-      ALLOCATE(pstate(nblocprev))
-      DO i=1,nblocprev
-         pstate(istate(i))=i
-      ENDDO
-
-!     Print state info
-      write(frmt,*) '(A,X,',nagn,'(I2,X),5X,A,14X,A,11X,A)'
-      write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi),'Energy',&
-                    'E-E0','Priority'
-      k=1
-      evals(:)=0
-      qns(:,:)=0
-      DO i=1,nblocprev
-          IF (pstate(i).le.nbloc) THEN
-            evals(k)=eigv(i)
-            qns(k,1)=i
-            k=k+1
-            write(frmt,*) '(I4,A,X,',nagn,&
-                 '(I2,X),2(f19.12,X),I5)'
-            write(*,frmt) i,')',(qnf(pstate(i),j)-1,j=1,nagn),&
-                 eigv(i),eigv(i)-eigv(1),pstate(i)
-         ELSE
-            write(frmt,*) '(I4,A,X,',nagn,&
-                 '(I2,X),2(f19.12,X),I5,X,A)'
-            write(*,frmt) i,')',(qnf(pstate(i),j)-1,j=1,nagn),&
-                 eigv(i),eigv(i)-eigv(1),pstate(i),'(discard)'
-         ENDIF
-      ENDDO
-      write(*,*)
-
-      DEALLOCATE(qnf,eigv,istate,pstate,dupd)
-
-      end subroutine TruncateByQN
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
       subroutine BuildProdFunctions(Q,nbas,qns)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Fills block with products of eigenfunctions
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: Q(:)
+      TYPE (CP), INTENT(INOUT) :: Q(:)
       integer, intent(in) :: qns(:,:),nbas(:)
       integer :: i,j,jmod,nbloc,ndof,gstart
 
@@ -432,7 +322,7 @@
       ndof=SIZE(nbas)
 
       DO i=1,nbloc
-         call NewCPvec(Q(i),nbas,1)
+         Q(i)=NewCP(1,nbas)
          Q(i)%coef(1)=1.d0
          Q(i)%base(:,1)=5.d-16 ! Not exactly zero so ALS does not crash
          gstart=0
@@ -454,7 +344,7 @@
 ! Warning: the orthogonality of the vectors is not checked
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: Q(:)
+      TYPE (CP), INTENT(INOUT) :: Q(:)
       real*8, allocatable :: svals(:),M(:,:),U(:,:),VT(:,:)
       integer, intent(in) :: nbas(:)
       integer :: i,j,n,nbloc,ndof,gi,gf,rind
@@ -464,7 +354,7 @@
 
 !     Initialize the columns of Q
       DO i=1,nbloc
-         call NewCPvec(Q(i),nbas,1)
+         Q(i)=NewCP(1,nbas)
          Q(i)%coef(1)=1.d0
       ENDDO
 

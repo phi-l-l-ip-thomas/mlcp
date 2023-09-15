@@ -9,28 +9,31 @@
       USE UTILS
       USE INPUTFIELDS
       USE SEPDREPN
-      USE HAMILSETUP
       USE RESTART
       USE BLOCKPOWER
-      USE BLOCKUTILS
-      USE CHEB
       USE ALSPOW
       USE ALSUTILS
-      USE GPUINTERTWINE
-
+      USE ALSDRVR
+!!!
+      USE LINSOLVER
+      USE CPMATH
+      USE HG
+      USE TOY
+      USE MSBII
+      USE INVITN
+!!!
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolverAlg(eigv,delta,cpp,Q,H,HL,il,nlayr)
+      subroutine SolverAlg(eigv,delta,cpp,Q,H,W,il,nlayr)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       TYPE (CPpar), INTENT(INOUT) :: cpp
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: Q(:)
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (HopList), INTENT(IN)     :: HL
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
+      TYPE (CP), INTENT(IN) :: H,W
       real*8, allocatable, intent(inout) :: eigv(:)
       real*8, allocatable, intent(out)   :: delta(:)
       integer, intent(in) :: il,nlayr
@@ -39,24 +42,26 @@
 !     Determine styp
       IF (cpp%solver .seq. 'powr') THEN
          styp=1
-      ELSEIF (cpp%solver .seq. 'cheb') THEN
-         styp=2
       ELSEIF (cpp%solver .seq. 'pALS') THEN
 !        Use ALS-guided power method unless 2D with SVD reduction
          IF (SIZE(Q(1)%nbas).eq.2 .and. cpp%red2D.eq.'SVD') THEN
             call ShowWarning(&
             'SVD reduction selected; using ordinary power iterations')
             styp=1
-         ELSEIF (cpp%lowmem.eq.4) THEN ! GPU code selected
-            styp=-2
          ELSE
             styp=-1
          ENDIF
+      ELSEIF (cpp%solver .seq. 'dave') THEN
+         styp=-2
+      ELSEIF (cpp%solver .seq. 'msbi') THEN
+         styp=-3
+      ELSEIF (cpp%solver .seq. 'inv1') THEN
+         styp=-4
       ELSE
          call AbortWithError('SolverAlg(): Solver not recognized')
       ENDIF
 
-      call SolveHPsi(eigv,delta,cpp,Q,H,HL,styp)
+      call SolveHPsi(eigv,delta,cpp,Q,H,W,styp)
 
       end subroutine SolverAlg
 
@@ -68,14 +73,12 @@
 ! This is the master routine for computing the eigenfunctions and 
 ! eigenvalues using the solver of choice:
 ! styp=0 -> power iteration
-! styp=1 -> Chebyshev iteration
-! styp=-1 -> ALS-guided power method ("intertwining")
-! styp=-2 -> intertwining on GPUs)
+! styp=3 -> ALS-guided power method ("intertwining")
 
       implicit none
       TYPE (CPpar), INTENT(IN) :: cpp
-      TYPE (CPvec), INTENT(IN) :: Q(:)
-      TYPE (Hamiltonian), INTENT(IN) :: H
+      TYPE (CP), INTENT(IN) :: Q(:)
+      TYPE (CP), INTENT(IN) :: H
       integer, intent (in) :: styp
       real*8, intent(in)   :: eigv(:)
       integer, allocatable :: nbas(:)
@@ -84,7 +87,7 @@
       logical :: useSVD
 
 !     Initializations
-      htrm=H%redterms+1 ! Plus 1 due to E-shift
+      htrm=SIZE(H%coef)+1 ! Plus 1 due to E-shift
       ndof=SIZE(Q(1)%nbas)
       nmax=maxval(Q(1)%nbas)
       rF=cpp%psirank
@@ -129,7 +132,7 @@
            '(T*V*R):',mvlen*GB,' GB'
 
 !     Memory cost for the solver of choice (parallelized over vectors)
-      IF (cpp%npow.gt.0 .and. styp.ne.-2) THEN
+      IF (cpp%npow.gt.0) THEN
 
 !        Memory for the iteration
          IF (abs(styp).eq.1) THEN
@@ -162,17 +165,12 @@
                write(*,'(7X,A,22X,A,X,f12.6,A)') &
                     'BlockPower iteration TOTAL',':',mvGB,' GB'
             ENDIF
-         ELSEIF (styp.eq.2) THEN  ! Chebyshev
-            rG=(htrm+1)*rF
-            mvGB=(Blen+npara*REAL(rG)*veclen)*GB
-            write(*,'(7X,A,11X,A,X,f12.6,A)') &
-                 'Chebyshev iteration,','([B+P*(T+1)]*V*R):',mvGB,' GB'
-            redGB=getRednMem(rG,rF,nbas,npara,useSVD)*GB
-            write(*,'(7X,A,16X,A,X,f12.6,A)') &
-                 'Extra memory for rank-reductions',':',redGB,' GB'
-            mvGB=mvGB+redGB
-            write(*,'(7X,A,23X,A,X,f12.6,A)') &
-                 'Chebyshev iteration TOTAL',':',mvGB,' GB'
+         ELSEIF (styp.eq.-2) THEN
+            write(*,*) 'Davidson mem coming soon!!!'
+         ELSEIF (styp.eq.-3) THEN
+            write(*,*) 'MSBII mem coming soon!!!'
+         ELSEIF (styp.eq.-4) THEN
+            write(*,*) 'Inverse itn mem coming soon!!!'
          ELSE
             call AbortWithError('ShowPsiMem(): Solver not recognized')
          ENDIF
@@ -184,7 +182,7 @@
             write(*,'(7X,A,19X,A,X,f12.6,A)') &
                  'Gram-Schmidt storage,','(2B*V*R):',GSGB,' GB'
             redGB=getRednMem(rG,rF,nbas,1,useSVD)*GB
-         ELSEIF (styp.eq.-1) THEN
+         ELSE  !!! Add styp=-2
             GSGB=Blen*GB
             write(*,'(7X,A,20X,A,X,f12.6,A)') &
                  'Gram-Schmidt storage,','(B*V*R):',GSGB,' GB'
@@ -215,7 +213,7 @@
                     'Vector update storage,',&
                     '([2+P]*B*V*R):',upGB,' GB'
                redGB=getRednMem(rG,rF,nbas,npara,useSVD)*GB
-            ELSEIF (styp.eq.-1) THEN
+            ELSE !!! Add styp=-2,-3
                QHQGB=(Blen+npara*REAL(veclen)*rF)*GB
                write(*,'(7X,A,13X,A,X,f12.6,A)') &
                     'QHQ calculation storage,',&
@@ -240,31 +238,12 @@
                  'Vector update TOTAL',':',upGB,' GB'
          ELSE
             QHQGB=(Blen+npara*REAL(veclen))*GB
-            write(*,'(7X,A,15X,A,X,f12.6,A)') &
-                    'QHQ calculation TOTAL,',&
+            write(*,'(7X,A,13X,A,X,f12.6,A)') &
+                    'QHQ calculation storage,',&
                     '(B*V*R+P*V):',QHQGB,' GB'
             upGB=(Blen+npara*REAL(veclen)*rF)*GB
-            write(*,'(7X,A,16X,A,X,f12.6,A)') &
-                 'Vector sorting TOTAL,',&
-                 '([B+P]*V*R):',upGB,' GB'
-         ENDIF
-
-!     Host memory usage for the GPU code
-      ELSEIF (cpp%npow.gt.0 .and. styp.eq.-2) THEN
-         mvGB=2*Blen*GB
-         write(*,'(7X,A,15X,A,X,f12.6,A)') &
-              'Host block vector TOTAL,','(2*B*V*R):',mvGB,' GB'
-
-!        If vector updates are turned off, then the QHQ diagonal
-!        and vector sort calculations are done with the CPU code
-         IF (.not.cpp%update) THEN
-            QHQGB=(Blen+npara*REAL(veclen))*GB
-            write(*,'(7X,A,15X,A,X,f12.6,A)') &
-                    'QHQ calculation TOTAL,',&
-                    '(B*V*R+P*V):',QHQGB,' GB'
-            upGB=(Blen+npara*REAL(veclen)*rF)*GB
-            write(*,'(7X,A,16X,A,X,f12.6,A)') &
-                 'Vector sorting TOTAL,',&
+            write(*,'(7X,A,14X,A,X,f12.6,A)') &
+                 'Vector sorting storage,',&
                  '([B+P]*V*R):',upGB,' GB'
          ENDIF
       ENDIF
@@ -284,7 +263,7 @@
 ! Determines if diagonalization should be used
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: Q(:)
+      TYPE (CP), INTENT(IN) :: Q(:)
       logical, intent(out) :: diag
       integer :: j,nev,ndof,prod
 
@@ -304,7 +283,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolveHPsi(eigv,delta,cpp,Q,H,HL,styp)
+      subroutine SolveHPsi(eigv,delta,cpp,Q,H,W,styp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for computing the eigenfunctions and 
@@ -312,18 +291,21 @@
 
       implicit none
       TYPE (CPpar), INTENT(INOUT) :: cpp
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: Q(:)
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (HopList), INTENT(IN)     :: HL
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
+      TYPE (CP), ALLOCATABLE :: Qg(:)
+      TYPE (CP), INTENT(IN)  :: H,W
       integer, intent(in) :: styp
       real*8, allocatable, intent(inout) :: eigv(:)
       real*8, allocatable, intent(out)   :: delta(:)
-      real*8, allocatable  :: eigtmp(:),ccoef(:)
+      real*8, allocatable  :: eigg(:),eigtmp(:),ccoef(:)
       real*8  :: bounds(2)
       integer :: i,j,nev,nup,ndown,nsame,nloc,ist
       logical :: conv,showFmG,diag,readsuccess
       real*8  :: rmsdelta,oldrms,maxdelta,sumdelta
       real*8, parameter :: redtol=1.d-12
+
+!      TYPE (CP) :: w,v
+!      real*8 :: rq
 
 !     Initializations
       nev=SIZE(eigv)
@@ -334,9 +316,18 @@
       ALLOCATE(delta(nev))
       delta=0.d0
 
+
+!     For Davidson alg, save guess eigenvalues and vectors
+      IF (styp.eq.-2) THEN
+         ALLOCATE(Qg(nev),eigg(nev))
+         eigg(:)=eigv(:)
+         DO j=1,nev
+            Qg(j)=CopyCP(Q(j))
+         ENDDO
+      ENDIF
+
       call DetermineDiag(Q,diag)
       call ShowPsiMem(eigv,cpp,Q,H,styp)
-      IF (styp.eq.-2) call Get_GPU_Memory(Q,HL,cpp)
       call ReadPsi(ist,bounds,eigv,delta,Q,cpp,readsuccess)
 
 !     Calculate the spectral range of H
@@ -357,15 +348,11 @@
          write(*,*) 'Eigenvalues read: ',ist,(eigv(j),j=1,nev)
       ELSE
          write(*,*) 'Initial guess   : ',0,(eigv(j),j=1,nev)
-!        Avoid diagonalizing if the GPU code is being called as this
-!        can generate a vector which gives a singular linear system when
-!        ALS is called
-         IF (.not.((styp.eq.-2) .and. (.not.diag) .and. cpp%update)) THEN
-            IF (cpp%ncycle.gt.0 .and. (cpp%update.or.diag)) THEN
-               call Diagonalize(Q,H,eigv,.FALSE.,cpp%psinals,cpp%lowmem)
-               write(*,*)
-               write(*,*) 'Diagonalization : ',0,(eigv(j),j=1,nev)
-            ENDIF
+         IF (cpp%ncycle.gt.0 .and. ((cpp%update.and.(styp.ne.-2)) &
+             .or.diag)) THEN
+            call Diagonalize(Q,H,eigv,.FALSE.,cpp%psinals,cpp%lowmem)
+            write(*,*)
+            write(*,*) 'Diagonalization : ',0,(eigv(j),j=1,nev)
          ENDIF
          call SavePsi(0,bounds,eigv,delta,Q,cpp)
       ENDIF
@@ -379,7 +366,7 @@
 !     rank of nev. Since intertwining does not change the rank of the 
 !     input vectors, the step below ensures that we apply intertwining
 !     to vectors with the correct rank
-      IF (styp.lt.0) call AugmentQWithRandom(Q,cpp%psirank)
+      IF (styp.lt.0 .and. styp.ne.-3) call AugmentQWithRandom(Q,cpp%psirank)
 
       ALLOCATE(eigtmp(nev))
       IF (ist.eq.0) delta=1.d99
@@ -394,7 +381,9 @@
          eigtmp=eigv
 
 !        Run iterations using the solver of choice
-         call Iterate(Q,H,HL,eigtmp,eigv,cpp,bounds,nloc,i,styp)
+         call Iterate(Qg,Q,H,W,eigg,eigtmp,eigv,cpp,bounds,nloc,i,styp)
+
+         IF (styp.eq.-3) EXIT
 
 !        Check for convergence (rms change < tol for all eigenvalues  
 !        excluding the top) and exit if achieved
@@ -441,30 +430,38 @@
       ENDDO  ! Loop over cycles
 
       DEALLOCATE(eigtmp)
+      IF (ALLOCATED(Qg)) DEALLOCATE(Qg)
+      IF (ALLOCATED(eigg)) DEALLOCATE(eigg)
+
 
       end subroutine SolveHPsi
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine Iterate(Q,H,HL,eigvo,eigv,cpp,bounds,nconv,i,styp)
+      subroutine Iterate(Qg,Q,H,W,eigg,eigvo,eigv,cpp,bounds,nconv,i,styp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Performs iterations of various types, depending on the value of styp:
 
       implicit none
       TYPE (CPpar), INTENT(IN)    :: cpp
-      TYPE (CPvec), INTENT(INOUT) :: Q(:)
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (HopList), INTENT(IN)     :: HL
+      TYPE (CP), INTENT(INOUT) :: Q(:)
+      TYPE (CP), INTENT(IN)    :: Qg(:),H,W
+!!! 
+      TYPE (CP) :: F,G,G1,Hmod ! Test
+      integer :: conv
+!!!
       integer, intent(inout) :: nconv
       integer, intent(in)    :: i,styp
       real*8, intent(inout)  :: eigv(:)
-      real*8, intent(in)     :: eigvo(:),bounds(2)
-      real*8, allocatable    :: av(:),df(:)
+      real*8, intent(in)     :: eigg(:),eigvo(:),bounds(2)
+      real*8 :: exact(9)
       real*8, parameter      :: tol=1.d-15
       character(len=18)      :: tag
       real*8  :: Eshift
       integer :: j,nbloc
+
+!      write(*,'(/X,A/)') 'Iterate() called...'
 
 !     Easy exit for zero iterations
       IF (cpp%npow.lt.1) RETURN
@@ -477,73 +474,87 @@
          tag='BlockPower cycle: '
 !        Power method: get estimate of optimal E-shift
          call GetBlockShift(eigv,bounds,Eshift)
-      ELSEIF (styp.eq.2) THEN
-         tag='Chebyshev cycle : '
-!        Chebyshev: compute shift for each eigenvalue
-         allocate(av(nbloc),df(nbloc))
-         call GetChebParams(eigv,bounds,av,df)
       ELSEIF (styp.eq.-1) THEN
          call GetBlockShift(eigv,bounds,Eshift)
          tag='ALS-Power cycle : '
       ELSEIF (styp.eq.-2) THEN
          call GetBlockShift(eigv,bounds,Eshift)
-         tag='GPU-ALSPOW cycle: '
+         tag='Davidson  cycle : '
+      ELSEIF (styp.eq.-3) THEN
+         call GetBlockShift(eigv,bounds,Eshift)
+         tag='MSBII solution  : '
+      ELSEIF (styp.eq.-4) THEN
+         call GetBlockShift(eigv,bounds,Eshift)
+         tag='Inv-itn cycle   : '
       ELSE
          call AbortWithError('Iterate(): invalid solver type')
       ENDIF
 
+!!! TEST
+      exact(1)=5781.019410744418
+      exact(2)=6937.345474297758
+      exact(3)=7030.002658466121
+      exact(4)=7283.838891204568
+      exact(5)=7530.384810906951
+      exact(6)=8088.252255440537
+      exact(7)=8196.850787019019
+      exact(8)=8273.954635158201
+      exact(9)=8437.645462876293
+!!! END TEST
 
-!     Use the GPU solver
-      IF (styp.eq.-2) THEN
-         call GPU_Intertwine(Q,HL,eigv,cpp,1,Eshift)
-!        Since the following subroutines have not yet been implemented
-!        for the GPU version, use their CPU counterparts instead
-         IF (.not.cpp%update) THEN
-            call GetQHQdiag(Q,H,eigv,nconv)
-            call SortVecs(Q,eigv,nconv,bounds(1))
-         ENDIF
 
-!     Use a CPU-solver
-      ELSE
-!     Run power/Chebyshev iterations on each vector in the block
+!     Run power iterations on each vector in the block
 !$omp parallel
 !$omp do private(j)
-         DO j=nconv+1,nbloc
-            IF (styp.eq.1) THEN
-               call PowrRecurse(Q(j),H,cpp%npow,Eshift)
-            ELSEIF (styp.eq.2) THEN
-               call ChebRecurse(Q(j),H,av(j),df(j),eigv(1),cpp%npow)
-            ELSEIF (styp.eq.-1) THEN
-               call ALS_POW_alg(H,Q(j),cpp%npow,1,Eshift,cpp%lowmem)
-            ENDIF
-         ENDDO
+      DO j=nconv+1,nbloc
+!         write(*,'(4X,A,I3)') 'Operating on vector nr:',j
+         IF (styp.eq.1) THEN
+            call PowrRecurse(Q(j),H,cpp%npow,Eshift)
+         ELSEIF (styp.eq.-1) THEN
+            call ALS_POW_alg(H,Q(j),cpp%npow,1,Eshift,cpp%lowmem)
+!            call ALS_pow(H,Q(j),cpp%npow,1,Eshift) ! Obj oriented vsn
+         ELSEIF (styp.eq.-2) THEN
+            call FilterSolver(H,Qg(j),Q(j),eigv(j),cpp%npow,cpp%psinals,cpp%lowmem) 
+         ELSEIF (styp.eq.-4) THEN
+!            call InvItn_wrapper(H,Q(j),eigv(j),cpp%psinals)
+!!! TEST (only for max 8 eigenvals)
+             call InvItn_shift_test(H,Q(j),exact(j),exact(j+1),cpp%psinals)
+!!! END TEST
+         ENDIF
+      ENDDO
 !$omp end do
 !$omp end parallel
 
-!        Orthogonalization and update/vector sort
-         IF (cpp%update) THEN
-            IF (styp.eq.-1) THEN
-               call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
-               call Diagonalize(Q,H,eigv,.TRUE.,cpp%psinals,cpp%lowmem)
-            ELSE
-               call GRAMORTHO(Q)
-               call Diagonalize(Q,H,eigv,.FALSE.,cpp%psinals,cpp%lowmem)
-            ENDIF
-         ELSE
-            IF (styp.eq.-1) THEN
-               call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
-            ELSE
-               call pGRAMORTHO(Q,nconv)
-            ENDIF
-            call GetQHQdiag(Q,H,eigv,nconv)
-            call SortVecs(Q,eigv,nconv,bounds(1))
-         ENDIF
+      IF (styp.eq.-3) THEN
+         call MSBII_solve(Q,H,eigv,cpp)
+      ELSE
 
-!        More solver specific procedures
-         IF (styp.eq.2) THEN
-            deallocate(av,df)
+!     Orthogonalization and update/vector sort
+      IF (cpp%update) THEN
+         IF (styp.eq.-1) THEN
+            call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
+            call Diagonalize(Q,H,eigv,.TRUE.,cpp%psinals,cpp%lowmem)
+         ELSEIF (styp.eq.-2 .or. styp.eq.-4) THEN
+            call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
+         ELSE
+            call GRAMORTHO(Q)
+            call Diagonalize(Q,H,eigv,.FALSE.,cpp%psinals,cpp%lowmem)
          ENDIF
+      ELSE
+         IF (styp.eq.-1) THEN
+            call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
+         ELSEIF (styp.eq.-2) THEN
+            call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
+         ELSEIF (styp.eq.-4) THEN
+            call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
+         ELSE
+            call pGRAMORTHO(Q,nconv)
+         ENDIF
+         call GetQHQdiag(Q,H,eigv,nconv)
+         call SortVecs(Q,eigv,nconv,bounds(1))
       ENDIF
+
+      ENDIF ! MSBII MOD
 
 !     Test convergence on eigenvalues and "lock" converged vectors
       nconv=0
@@ -556,7 +567,171 @@
       write(*,*)
       write(*,*) tag,i,(eigv(j),j=1,nbloc)
 
+!!! TEST
+
+!      IF (i.eq.1) THEN
+!         DO j=nconv+1,nbloc
+!            G=CopyCP(Q(j))
+!            G=RandomCP(Q(j),Q(j)%R())
+!            call NORMALIZE(G)
+!            call FilterSolver(H,G,cpp%npow,cpp%psinals,cpp%lowmem)
+!            call LinSolver_alg(H,Q(j),G,cpp%psinals,1,eigv(j),1,.TRUE.)
+!            conv=ALS_solve(H,G,Q(j),cpp%psinals,0,eigv(j),'grilch')
+!            call FlushCP(G)
+!            call LintertwinedInvItn_1(H,Q(j),cpp%psinals,eigv(j))
+!            write(*,*)
+!         ENDDO
+!          call AbortWithError('Done fooling around')
+!      ENDIF
+!      call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
+!      call GetQHQdiag(Q,H,eigv,nconv)
+!      call SortVecs(Q,eigv,nconv,bounds(1))
+!      write(*,*)
+!      write(*,*) tag,i,(eigv(j),j=1,nbloc)
+!      call toyproblem()
+!     HG test
+!      F=HGGuess(H,cpp%psirank,(/2,2,2,2,2,2/))
+!      DO j=1,cpp%ncycle
+!         call HGPowrRecurse(H,F,10*cpp%npow,cpp%psinals,1,bounds(2))
+!         call HGPowrRecurse(H,F,cpp%npow,cpp%psinals,1,bounds(2),W)
+!      ENDDO
+!!! TEST (linear solver)
+!      G=IdentityCPMatrix(H%rows,H%cols,H%sym)
+!      DO j=1,nbloc
+!         write(*,*) 'Inverting (H - ',eigv(j),'*I)'
+!         write(*,*) 'Inverting H'
+!         F=ALS_solve_adaptive(150,H,G,1.d-8,200,1,eigv(j))
+!         F=ALS_solve_adaptive(150,H,G,1.d-8,200,0,0.d0)
+!         write(*,*)
+!         call FlushCP(F)
+!      ENDDO
+!      call FlushCP(G)
+!      call AbortWithError('done inverting H')
+!!!
+
       end subroutine Iterate
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine FilterSolver(A,G,F,eig,npow,nals,lowmem)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Compute the eigenvector (F) closest to guess vector (G)
+
+!!! UC 07-20-2021
+
+      implicit none
+      TYPE (CP), INTENT(IN) :: A,G
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP), ALLOCATABLE :: Q(:)
+      TYPE (CP) :: X2,X,P,ID
+      integer, intent(in) :: npow,nals,lowmem
+      integer :: i,j,npp,iloc,conv
+      real*8, intent(inout) :: eig
+      real*8, allocatable :: QHQ(:,:),S(:,:),avec(:)
+      real*8, allocatable :: QHQtmp(:,:),Stmp(:,:)
+      real*8 :: eigold,mxovrlap,RQ
+
+      write(*,*) 'Filter Solver'
+
+      npp=npow+1
+      ALLOCATE(Q(npp))
+      ALLOCATE(QHQ(npp,npp),S(npp,npp),avec(npp))
+      ALLOCATE(QHQtmp(npp,npp),Stmp(npp,npp))
+      QHQ(:,:)=0.d0
+      S(:,:)=0.d0
+
+!     Initialize block and eigenvalue estimate
+      call NORMALIZE(F)
+      X=CopyCP(F)
+      call PRODHV_ALS_alg(F,X,A,0,eig,nals,lowmem)
+      eig=PRODVV(F,X)
+      eigold=1.d99
+      call FlushCP(X)
+
+!!! PRECONDITIONED VSN
+      X=CopyCP(A)
+      X2=IdentityCPMatrix(A%rows,A%cols,A%sym)
+      P=RandomCP(A,1)
+      ID=IdentityCPMatrix(A%rows,A%cols,A%sym)
+      call SUMVECVEC(X,-1.d0,ID,eig)
+      write(*,*) 'FS: reducing shifted H to rank-1'
+      conv=ALS_reduce(X2,X,10*nals)
+      write(*,*) 'FS: invert shifted H'
+      call LinSolver_alg(X2,P,ID,nals,0,eig,lowmem,.FALSE.)
+      call FlushCP(X)
+      call FlushCP(X2)
+      call FlushCP(ID)
+!!!
+      write(*,*) 'FS: iterating'
+
+      Q(1)=CopyCP(G)
+
+      DO i=1,npp
+
+!        Augment Q^THQ, S
+         X=CopyCP(F)
+         call PRODHV_ALS_alg(Q(i),X,A,0,eig,nals,lowmem)
+         DO j=1,i
+            QHQ(j,i)=PRODVV(Q(j),X)
+            S(j,i)=PRODVV(Q(j),Q(i))
+         ENDDO
+         call FlushCP(X)
+
+!        Solve generalized eigenvalue problem
+         QHQtmp(:i,:i)=QHQ(:i,:i)
+         Stmp(:i,:i)=S(:i,:i)
+         call SolveGenEigval(avec(:i),Stmp(:i,:i),QHQtmp(:i,:i),'V')
+
+!        Select the eigenvector with the max overlap with Q(1)
+         iloc=1
+         mxovrlap=abs(QHQtmp(1,1))
+         DO j=2,i
+            IF (abs(QHQtmp(1,j)).gt.mxovrlap) THEN
+               mxovrlap=abs(QHQtmp(1,j))
+               iloc=j
+            ENDIF
+         ENDDO
+
+!        Next iterate of eigenvalue and eigenvec
+         eigold=eig
+         eig=avec(iloc)
+         rq=RayleighQuotient(F,A)
+         call ALS_SUMLCVEC_alg(F,Q(:i),QHQtmp(:i,iloc),nals,lowmem)
+         write(*,'(X,A,I4,A,2(X,f16.8),3X,ES16.8)') &
+         'i = ',i-1,")",eig,rq,(eigold-eig)/eig
+
+         IF (i.eq.npp) EXIT
+
+!        Compute the next vector in the search space
+!        Shifted matrix-vector product on eigenvector estimate
+         Q(i+1)=CopyCP(F)
+         call PRODHV_ALS_alg(F,Q(i+1),A,1,eig,nals,lowmem)
+
+!        Orthogonalize to previous vectors and negate for residual
+         call ALS_ORTHO_alg(Q(:i+1),nals,lowmem,i+1)
+         call VecSignChange(Q(i+1),1,Q(i+1)%R())
+
+!        Solve linear system
+         X=CopyCP(Q(i+1))
+!         call LinSolver_alg(A,Q(i+1),X,nals,1,eig,lowmem,.FALSE.)
+!         call FlushCP(X)
+!!! PRECONDITIONED VSN
+         call PRODHV_ALS_alg(X,Q(i+1),P,1,eig,nals,lowmem)
+!!!
+
+!        Orthogonalize to previous vectors
+         call ALS_ORTHO_alg(Q(:i+1),nals,lowmem,i+1)
+      ENDDO
+
+      DEALLOCATE(Q,QHQ,S,QHQtmp,Stmp,avec)
+
+
+      call FlushCP(P)
+
+!!! EC
+
+      end subroutine FilterSolver
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -566,9 +741,9 @@
 ! Estimates the spectral range of the Hamiltonian using power method
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (CPvec) :: Q(:),T
-      TYPE (CPvec), allocatable :: Qt(:)
+      TYPE (CP), INTENT(IN)  :: H
+      TYPE (CP) :: Q(:),T
+      TYPE (CP), allocatable :: Qt(:)
       integer, intent(in) :: rk,npow,ncyc,lowmem
       real*8, intent(out) :: bounds(2)
       integer :: i,j,gst,ndof
@@ -583,8 +758,8 @@
       ALLOCATE(Qt(2))
 
 !     Guesses for upper and lower eigenvectors
-      call GetZeroCPvec(Qt(1),Q(1)%nbas)
-      call GetZeroCPvec(Qt(2),Q(1)%nbas)
+      Qt(1)=ZeroCPvec(Q(1)%nbas)
+      Qt(2)=ZeroCPvec(Q(1)%nbas)
       Qt(1)%coef(1)=1.d0
       Qt(2)%coef(1)=1.d0
       Qt(1)%base=1.d-15
@@ -600,12 +775,12 @@
 !     change the rank, each vector must be initiated with rank rk, so
 !     fill Qt(1) and Qt(2) up to rank rk with random terms
       IF (SIZE(Q(1)%nbas).gt.2 .and. rk.gt.1) THEN
-         call GetRandomCPvec(T,Q(1)%nbas,rk-1)
+         T=RandomCP(Q(1),rk-1)
          call NORMBASE(T)
          T%coef=1.d-7
          call SUMVECVEC(Qt(1),1.d0,T,1.d0)
          call SUMVECVEC(Qt(2),1.d0,T,1.d0)
-         call FlushCPvec(T)
+         call FlushCP(T)
       ENDIF
 
 !     Initial bounds

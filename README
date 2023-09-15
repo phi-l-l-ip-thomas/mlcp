@@ -1,6 +1,6 @@
 ########################################################################
 #
-### Instructions for setting up and running MLCP, version 'ML2e'  ###
+### Instructions for setting up and running MLCP, cpu-dev version    ###
 #
 ########################################################################
 
@@ -11,9 +11,8 @@
    $ bash install
 
    to compile and link everything. Alternatively, once can compile the
-   libraries individually and modify the Makefile to compile MLCP using
-   a different compiler (currently gfortran is supported for the CPU code
-   and nvcc for the CUDA portion)
+   libraries individually and use the Makefile to compile MLCP (i.e. if
+   a different compiler such as ifort is desired)
 
 2) To run MLCP, two input files are read, as well as a number of 
    potential files, depending on the PES used:
@@ -56,7 +55,12 @@
 
       -psirank: target rank for the wavefunction
 
+      -hrank: target rank for the Hamiltonian. Set hrank=0 to skip
+              reduction of the Hamiltonian (recommended)
+
       -psinals: number of ALS iterations used in wavefunction rank reduction
+
+      -hnals: number of ALS iterations used in Hamiltonian rank reduction
 
       -solver: solver type to use. Acceptable values are:
                powr-power method
@@ -64,6 +68,9 @@
                pals-intertwined power method ("intertwining")
                     (for modes with D=2, setting red2D='SVD' implies
                     'powr' for those modes)
+               pist-preconditioned inexact spectral transform
+                    (note that PIST only applies to top layer; this 
+                    choice implies 'powr' for lower layers)
 
       -ncycle: number of cycles. One cycle implies npow power iterations
                + Gram Schmidt orthogonalization + vector updates
@@ -74,12 +81,16 @@
       -lowmem: memory-saving option to use with intertwining (solver=pals).
                Options range from 0 (fastest, most memory usage)
                                to 3 (slowest, least memory usage)
+               Options 1 and 2 are recommended for high and low memory runs,
+                               respectively
 
       -update: set to 1 to use vector updates (recommended). Setting to 0
                sorts vectors by Rayleigh Quotient instead of by eigenvalue
 
       -optimize PES: rotate PES to minimize terms which couple multiple DOFs
                      (recommended setting=F)
+
+      -Etarget: target energy (only applicable for top-layer, solver=pist)
 
       -solvtol: solver tolerence; calculation exit earlier when
                 (E_previous-iteration - E_this-iteration)/E_this-iteration < solvtol

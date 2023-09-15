@@ -12,7 +12,6 @@
       USE HAMILSETUP
       USE REDUCTION
       USE MODVECVEC
-      USE MUNKRES
       USE CPCONFIG
 
       implicit none
@@ -58,7 +57,7 @@
 
       implicit none
       TYPE (MLtree), INTENT(IN) :: ML
-      TYPE (CPvec), INTENT(IN)  :: Q(:)
+      TYPE (CP), INTENT(IN)  :: Q(:)
       TYPE (Hamiltonian), INTENT(INOUT) :: Ham
       integer, intent(in) :: il,im
       real*8, intent(in)  :: eigv(:),delta(:)
@@ -66,23 +65,21 @@
       IF (.NOT. ANAL_SETUP) call InitializeAnalModule()
 
       call AnalyzeConfigs(Q,il,im,eigv,Ham,ML)
-!      call AssignConfigs(Q,Ham%eig(il,im)%assgn)
-      call AssignConfigsPlus(Q,Ham%eig(il,im)%assgn,il,im,Ham,eigv,ML)
-!      call AssignRank1(Q,Ham%eig(il,im)%assgn)
+      call AnalyzeRank1(Q,Ham%eig(il,im)%assgn)
       call PrintAssignments(il,im,eigv,delta,Ham,ML)
 
       end subroutine AnalyzePsi
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine AssignRank1(Q,qns)
+      subroutine AnalyzeRank1(Q,qns)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Computes leading configuration of the rank-1 approximation
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: Q(:)
-      TYPE (CPvec) :: v
+      TYPE (CP), INTENT(IN)  :: Q(:)
+      TYPE (CP) :: v
       integer, allocatable, intent(out) :: qns(:,:)
       real*8, parameter   :: redtol=1.d-12
       integer :: i,j,k,ndof,nev,maxind,gst
@@ -107,11 +104,11 @@
 !     each sub-mode basis function
 
       DO i=1,nev
-         call CopyWtoV(v,Q(i))
+         v=CopyCP(Q(i))
          call CPU_TIME(t2)
          anal_time=anal_time+t2-t1
          call reduc(v)
-         call NORMCOEF(v)
+         call NORMALIZE(v)
          call CPU_TIME(t1)
 
          gst=0
@@ -127,13 +124,13 @@
             qns(i,j)=maxind
             gst=gst+v%nbas(j)
          ENDDO
-         call FlushCPvec(v)
+         call FlushCP(v)
       ENDDO
 
       call CPU_TIME(t2)
       anal_time=anal_time+t2-t1
 
-      end subroutine AssignRank1
+      end subroutine AnalyzeRank1
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -143,7 +140,7 @@
 ! Computes/prints dominant product configurations of the wavefunction
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: Q(:)
+      TYPE (CP), INTENT(IN)  :: Q(:)
       TYPE (MLtree), INTENT(IN) :: ML
       TYPE (Hamiltonian), INTENT(IN) :: Ham
       TYPE (Configs) :: v
@@ -155,6 +152,9 @@
       integer, parameter :: ncoefmax=16
       real*8, parameter  :: printtol=5.d-2
       real*8  :: t1,t2
+!!!
+      real*8, allocatable :: BB(:,:)
+!!!
 
       nev=SIZE(Q)
       nsubm=SIZE(Q(1)%nbas)
@@ -167,7 +167,19 @@
 !      write(*,*)
 !      DO i=1,nev
 !         write(*,*) 'Eigenvector: ',i,'; Condition Nr: ',COND(Q(i))
-!        call PrintCPvec(Q(i))
+!         call Q(i)%printvec()
+!!! TEST
+!         ALLOCATE(BB(Q(i)%R(),Q(i)%R()))
+!         DO j=1,nsubm
+!            write(*,*) 'Eigenvector: ',i,'; BBk for mode: ',j
+!            call CONSTPk(Q(i),j,BB)
+!            call PrintMatrix(BB)
+!            write(*,*)
+!            write(*,*) 'Factor matrix SVD:'
+!            call PrintSVD(Q(i)%base(Q(i)%ibas(j):Q(i)%fbas(j),:))
+!         ENDDO
+!         DEALLOCATE(BB)
+!!!
 !      ENDDO
 
       write(*,'(/X,A,ES11.4,A,I0,A/)') &
@@ -213,620 +225,6 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine AssignConfigs(Q,qns)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Assign states via dominant configurations, using Munkres algorithm
-
-      implicit none
-      TYPE (CPvec), INTENT(IN)  :: Q(:)
-      TYPE (Configs) :: v,w
-      integer, allocatable, intent(out) :: qns(:,:)
-      integer, allocatable :: avec(:)
-      real*8, allocatable  :: weights(:,:),wtmp(:,:)
-      integer :: i,j,k,nev,nsubm,nfound,assgn
-      integer, parameter :: cmax=100
-      logical :: found,success
-      real*8  :: t1,t2
-
-      nev=SIZE(Q)
-      nsubm=SIZE(Q(1)%nbas)
-
-      call CPU_TIME(t1)
-
-!!!  TO DO: change below to avoid unnecessarily large arrays
-      ALLOCATE(weights(nev,nev*cmax))
-      weights(:,:)=0.d0
-      call NewConfigs(w,Q(1)%nbas,nev*cmax)
-
-      nfound=0
-      DO i=1,nev
-!        Get the list of dominant configurations for this eigenvalue
-         call GetConfigList(Q(i),cmax,v)
-!!! NORMALIZATION OF v (might be needed if some configs are large) ???
-
-         DO j=1,SIZE(v%coef)
-
-            found=.FALSE.
-            DO k=1,nfound
-!              Config found in master list
-               IF (ALL(v%qns(j,:).eq.w%qns(k,:))) THEN
-                  weights(i,k)=v%coef(j)**2
-                  found=.TRUE.
-                  EXIT
-               ENDIF
-            ENDDO
-
-!           Config not found: extend the master list
-            IF (.not.found) THEN
-               nfound=nfound+1
-               w%qns(nfound,:)=v%qns(j,:)
-               w%coef(nfound)=1.d0 ! Set coef to 1 for trimming later
-               weights(i,nfound)=v%coef(j)**2
-            ENDIF
-
-         ENDDO
-         call FlushConfigs(v)
-      ENDDO
-
-!     Resize configuration list and weights matrix and assign states
-      call ResizeConfigList(w,nfound)
-      ALLOCATE(wtmp(nev,nfound))
-      wtmp(:,:)=weights(:,:nfound)
-      DEALLOCATE(weights)
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
-      weights=AssignMatrix(wtmp) ! <--Munkres called here
-      call CPU_TIME(t1)
-      DEALLOCATE(wtmp)
-
-!     Extract assignments and store in qns array
-      ALLOCATE(qns(nev,nsubm))
-      avec=GetMunkresAssignVec(weights)
-      DO i=1,nev
-         IF (avec(i).eq.0) &
-            call AbortWithError('AssignConfigs(): j not found')
-         qns(i,:)=w%qns(avec(i),:)
-      ENDDO
-
-      DEALLOCATE(weights,avec)
-      call FlushConfigs(w)
-
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
-
-      end subroutine AssignConfigs
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine AssignConfigsPlus(Q,qns,il,im,Ham,eigv,ML)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Assign states via dominant configurations, using Munkres algorithm
-
-      implicit none
-      TYPE (CPvec), INTENT(IN)  :: Q(:)
-      TYPE (MLtree), INTENT(IN) :: ML
-      TYPE (Hamiltonian), INTENT(IN) :: Ham
-      TYPE (Configs) :: v,w
-      real*8, intent(in)   :: eigv(:)
-      integer, intent(in)  :: il,im
-      integer, allocatable, intent(out) :: qns(:,:)
-      integer, allocatable :: avec(:),avec2(:),qtmp(:),ntmp(:)
-      real*8, allocatable  :: weights(:,:),wtmp(:,:)
-      integer :: i,j,k,nev,nsubm,vsubm,nfound,assgn,mst,mfi
-      integer, parameter :: cmax=100
-      logical :: found,success
-      real*8  :: t1,t2
-      character*72 :: frmt
-
-      nev=SIZE(Q)
-      nsubm=SIZE(Q(1)%nbas)
-
-      call CPU_TIME(t1)
-
-!!!  TO DO: change below to avoid unnecessarily large arrays
-      ALLOCATE(weights(nev,nev*cmax))
-      weights(:,:)=0.d0
-      call NewConfigs(w,Q(1)%nbas,nev*cmax)
-
-      nfound=0
-      DO i=1,nev
-!        Get the list of dominant configurations for this eigenvalue
-         call GetConfigList(Q(i),cmax,v)
-!!! NORMALIZATION OF v (might be needed if some configs are large) ???
-
-         DO j=1,SIZE(v%coef)
-
-            found=.FALSE.
-            DO k=1,nfound
-!              Config found in master list
-               IF (ALL(v%qns(j,:).eq.w%qns(k,:))) THEN
-                  weights(i,k)=v%coef(j)**2
-                  found=.TRUE.
-                  EXIT
-               ENDIF
-            ENDDO
-
-!           Config not found: extend the master list
-            IF (.not.found) THEN
-               nfound=nfound+1
-               w%qns(nfound,:)=v%qns(j,:)
-               w%coef(nfound)=1.d0 ! Set coef to 1 for trimming later
-               weights(i,nfound)=v%coef(j)**2
-            ENDIF
-
-         ENDDO
-         call FlushConfigs(v)
-      ENDDO
-
-!     Resize configuration list and weights matrix and assign states
-      call ResizeConfigList(w,nfound)
-      ALLOCATE(wtmp(nev,nfound))
-      wtmp(:,:)=weights(:,:nfound)
-      DEALLOCATE(weights)
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
-      weights=AssignMatrix(wtmp) ! <--Munkres called here
-      call CPU_TIME(t1)
-
-!     Extract assignments and store in qns array
-      ALLOCATE(qns(nev,nsubm))
-      avec=GetMunkresAssignVec(weights)
-
-!     Refine assignments by energy
-      IF (nsubm.gt.1) THEN
-              
-!        Instead of w, need configs corresponding to 1D functions from
-!        GetFullAssignment(). Call using the 1st one to get correct
-!        width, then fill the rest
-         call GetFullAssignment(il,im,Ham,ML,w%qns(1,:),qtmp)
-         ALLOCATE(ntmp(SIZE(qtmp)))
-         ntmp(:)=16384
-         call NewConfigs(v,ntmp,nfound)
-         v%coef(:)=1.d0
-         v%qns(1,:)=qtmp(:)
-         DEALLOCATE(ntmp,qtmp)
-         DO i=2,nfound
-            call GetFullAssignment(il,im,Ham,ML,w%qns(i,:),qtmp)
-            v%qns(i,:)=qtmp(:)
-            DEALLOCATE(qtmp)
-         ENDDO
-
-!        Refine assignments using energies
-         call RefineByEnergy(v,eigv,wtmp,weights,avec2,success)
-
-         IF (success) THEN
-            IF (.not.ALL(avec(:).eq.avec2(:))) THEN
-               write(*,'(/X,A/)') 'States reassigned using energies:'
-               mst=firstmode(il,1,im,ML)
-               mfi=lastmode(il,1,im,ML)
-               vsubm=SIZE(v%qns,2)
-
-               write(frmt,*) '(A,X,',vsubm,'(I2,X),3X,',vsubm,&
-                             '(I2,X),5X,A)'
-               write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi),&
-                             (ML%resort(j),j=mst,mfi),'Energy'
-
-               write(frmt,*) '(I4,A,X,',vsubm,'(I2,X),A,X,',&
-                             vsubm,'(I2,X),f19.12)'
-               DO i=1,nev
-                  IF (avec2(i).ne.avec(i)) &
-                     write(*,frmt) i,')',&
-                     (v%qns(avec(i),j)-1,j=1,vsubm),'->',&
-                     (v%qns(avec2(i),j)-1,j=1,vsubm),eigv(i)
-               ENDDO
-               avec(:)=avec2(:)
-            ENDIF
-         ENDIF
-
-         DEALLOCATE(avec2)
-         call FlushConfigs(v)
-
-      ENDIF ! Assign-by-energy
-
-      DO i=1,nev
-         IF (avec(i).eq.0) THEN
-            write(*,*) 'No assignment found for state ',i
-            call AbortWithError('AssignConfigs(): config not found')
-         ENDIF
-         qns(i,:)=w%qns(avec(i),:)
-      ENDDO
-
-      DEALLOCATE(weights,wtmp,avec)
-      call FlushConfigs(w)
-
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
-
-      end subroutine AssignConfigsPlus
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine RefineByEnergy(v,eigv,wts,Mwts,avec,success)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Refine Munkres assignments using sums of energies
-
-      implicit none
-      TYPE (Configs), intent(in) :: v
-      TYPE (Configs) :: w
-      real*8, intent(in) :: eigv(:)
-      real*8, allocatable :: eigc(:)
-      real*8, allocatable, intent(inout) :: wts(:,:),Mwts(:,:)
-      logical, intent(out) :: success
-      logical :: found
-      integer, allocatable, intent(out) :: avec(:)
-      integer, allocatable :: sumcfg(:),rowidx(:),colidx(:)
-      integer :: i,j,k,l,nev,nconfig,maxsumv,nsubm,nassng,tmp
-      real*8  :: tmpE
-      character*72 :: frmt
-
-      nev=SIZE(eigv)
-      nconfig=SIZE(v%coef)
-      nsubm=SIZE(v%nbas)
-      success=.FALSE.
-
-!     Create copies of energies, configs, also indices (for permuting)
-      call CopyConfigsWtoV(w,v)
-      ALLOCATE(avec(nev),eigc(nev),rowidx(nev),colidx(nconfig))
-      avec(:)=0
-      eigc(:)=eigv(:)
-      DO i=1,nev
-         rowidx(i)=i
-      ENDDO
-      DO i=1,nconfig
-         colidx(i)=i
-      ENDDO
-
-!     Get array of qn sums and max-sum-of-qns
-      ALLOCATE(sumcfg(nconfig))
-      maxsumv=0
-      DO i=1,nconfig
-         sumcfg(i)=-nsubm !!! so that sumcfg has min value of zero
-         DO j=1,nsubm
-            sumcfg(i)=sumcfg(i)+w%qns(i,j)
-         ENDDO
-         IF (sumcfg(i).gt.maxsumv) maxsumv=sumcfg(i)
-      ENDDO
-
-      nassng=0
-
-!     Assign the ground state using input Munkres result
-      found=.FALSE.
-      DO j=1,nconfig
-         IF (sumcfg(j).eq.0) THEN
-!           Config found: make sure it is assigned to a state
-            DO i=1,nev
-               IF (Mwts(i,j).eq.1.d0) THEN
-!                 Permute the energy and config lists, the qn sum array,
-!                 and the weight/assignment matrices to place this
-!                 config first
-                  nassng=nassng+1
-                  call PermuteArrays(nassng,i,j,w,eigc,wts,Mwts,&
-                                     sumcfg,rowidx,colidx)
-                  found=.TRUE.
-                  EXIT
-               ENDIF
-            ENDDO
-            IF (found) EXIT
-         ENDIF
-      ENDDO
-
-!     If ground state is not found, exit without using the energy
-!     prediction
-      IF (.not.found) THEN
-         DEALLOCATE(eigc,sumcfg,rowidx,colidx)
-         call FlushConfigs(w)
-         RETURN
-      ENDIF
-
-!     Assign singly excited states using input Munkres result    
-      DO j=nassng+1,nconfig
-         IF (sumcfg(j).eq.1) THEN
-!           Config found: make sure it is assigned to a state
-            DO i=nassng+1,nev
-               IF (Mwts(i,j).eq.1.d0) THEN
-!                 Permute arrays to place singly excited states after
-!                 the ground state
-                  nassng=nassng+1
-                  call PermuteArrays(nassng,i,j,w,eigc,wts,Mwts,&
-                                     sumcfg,rowidx,colidx)
-                  EXIT
-               ENDIF
-               IF (nassng.eq.nev) EXIT
-            ENDDO
-            IF (nassng.eq.nev) EXIT
-         ENDIF
-      ENDDO
-
-
-!     Main loop over sum v_i
-      DO k=2,maxsumv
-
-!        Generate guess weight matrix from earlier assignments
-!        and use Munkres to get assignments for this k
-!        Also replace existing block of Mwts with new one
-         call EnergyBasedAssignments(nassng,w,eigc,wts,Mwts,sumcfg)
-
-!        Assign the next group of found states    
-         DO j=nassng+1,nconfig
-            IF (sumcfg(j).le.k) THEN
-!              Config found: make sure it is assigned to a state
-               DO i=nassng+1,nev
-                  IF (Mwts(i,j).eq.1.d0) THEN
-!                    Permute arrays to place up-to-k-excited states next
-                     nassng=nassng+1
-                     call PermuteArrays(nassng,i,j,w,eigc,wts,Mwts,&
-                                        sumcfg,rowidx,colidx)
-                     EXIT
-                  ENDIF
-                  IF (nassng.eq.nev) EXIT
-               ENDDO ! i loop over energies
-               IF (nassng.eq.nev) EXIT
-            ENDIF
-         ENDDO ! j loop over configs
-         IF (nassng.eq.nev) EXIT
-      ENDDO ! k loop over sum v_i
-
-!     Fill assignment vector
-      IF (nassng.eq.nev) THEN
-         DO i=1,nev
-            avec(rowidx(i))=colidx(i)
-         ENDDO
-         success=.TRUE.
-      ENDIF
-
-      DEALLOCATE(eigc,sumcfg,rowidx,colidx)
-      call FlushConfigs(w)
-
-      end subroutine RefineByEnergy
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine EnergyBasedAssignments(n,w,eig,wts,Mwts,sumcfg)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Generates assignments for higher excited states from guesses based on
-! lower excited states and the ground state
-
-      implicit none
-      TYPE (Configs), intent(inout) :: w
-      integer, intent(in) :: sumcfg(:)
-      real*8, intent(in) :: eig(:)
-      real*8, intent(in) :: wts(:,:)
-      real*8, intent(inout) :: Mwts(:,:)
-      real*8, allocatable :: wtstmp(:,:),Mwtstmp(:,:)
-      integer, intent(in) :: n
-      integer :: i,j,r,c,d,redr,redc
-      real*8, parameter :: fac=2.d0 ! Gaussian dropoff from Eguess
-      real*8, parameter :: mix=0.25d0 ! portion of energy weight
-      real*8  :: gap
-      character*72 :: frmt
-
-      r=SIZE(eig)
-      c=SIZE(w%qns,1)
-      d=SIZE(w%qns,2)
-      redr=r-n
-      redc=c-n
-
-      ALLOCATE(wtstmp(redr,redc))
-      wtstmp(:,:)=0.d0
-
-      call GuessEnergies(n,w)
-
-!     Compute the guess-derived weights
-      DO i=n+1,r
-         DO j=n+1,c
-!           Gap estimate: (E_state - E_gs)/(quanta_in_config)
-            gap=abs(eig(i)-eig(1))/REAL(sumcfg(j))
-            wtstmp(i-n,j-n)=exp(-fac*abs(eig(i)-w%coef(j))/gap)
-         ENDDO
-      ENDDO
-
-!     Add wavefunction-derived weights to energy-derived ones
-      wtstmp(:,:)=mix*wtstmp(:,:)+(1.d0-mix)*wts(n+1:,n+1:)
-
-!     Assign states for this block and overwrite previous assignments
-      Mwtstmp=AssignMatrix(wtstmp)
-      Mwts(n+1:,n+1:)=Mwtstmp(:,:)
-
-      DEALLOCATE(wtstmp,Mwtstmp)
-
-      end subroutine EnergyBasedAssignments
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine GuessEnergies(n,w)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Guess energies for configs in w after the n-th, where the coefs of w
-! hold the energies used for making the guess
-
-      implicit none
-      TYPE (Configs), intent(inout) :: w
-      integer, intent(in)  :: n
-      integer, allocatable :: cfg1(:),cfg2(:)
-      integer :: i,j,k,c,d,nguess,ic1,ic2
-      real*8  :: guess
-
-      c=SIZE(w%qns,1)
-      d=SIZE(w%qns,2)
-
-      ALLOCATE(cfg1(d),cfg2(d))
-
-!     Loop over configs to have their energies guessed
-      DO i=n+1,c
-
-         nguess=0
-         guess=0.d0
-         w%coef(i)=1.d99
-
-!        First (preferred) guess method, average the extrapolated
-!        guesses along each mode
-         cfg2(:)=w%qns(i,:)
-         cfg1(:)=w%qns(i,:)
-         DO j=1,d
-!           Second-previous configuration too low: skip this iteration
-            IF (cfg2(j)-2.lt.1) CYCLE
-
-!           Generate decremented configurations for guess
-            cfg2(j)=cfg2(j)-2
-            cfg1(j)=cfg1(j)-1
-
-!           If both decremented configs are found, make the guess
-            ic2=0
-            DO k=1,n
-               IF (ALL(w%qns(k,:).eq.cfg2(:))) THEN
-                  ic2=k
-                  EXIT
-               ENDIF
-            ENDDO
-            IF (ic2.eq.0) THEN ! Config not found
-               cfg2(j)=cfg2(j)+2
-               cfg1(j)=cfg1(j)+1
-               CYCLE
-            ENDIF
-
-            ic1=0
-            DO k=1,n
-               IF (ALL(w%qns(k,:).eq.cfg1(:))) THEN
-                  ic1=k
-                  EXIT
-               ENDIF
-            ENDDO
-            IF (ic1.eq.0) THEN ! Config not found
-               cfg2(j)=cfg2(j)+2
-               cfg1(j)=cfg1(j)+1
-               CYCLE
-            ENDIF
-
-!           Make the guess if extrapolation gives an energy increase
-            IF (w%coef(ic1).gt.w%coef(ic2)) THEN
-               guess=guess+2*w%coef(ic1)-w%coef(ic2)
-               nguess=nguess+1
-            ENDIF
-
-!           Restore decremented configurations to full
-            cfg2(j)=cfg2(j)+2
-            cfg1(j)=cfg1(j)+1
-         ENDDO
-
-         IF (nguess.gt.0) THEN ! First method succeeded
-            w%coef(i)=guess/REAL(nguess)
-         ELSE ! Try second method
-!           Second guess method: average sums of 1-mode, (d-1)-mode
-!           energies.
-            DO j=1,d
-!              Generate decremented configurations for guess
-               cfg2(:)=w%qns(i,:)
-               cfg2(j)=1
-               cfg1(:)=1
-               cfg1(j)=w%qns(i,j)
-
-!              If both decremented configs are found, make the guess
-               ic2=0
-               DO k=1,n
-                  IF (ALL(w%qns(k,:).eq.cfg2(:))) THEN
-                     ic2=k
-                     EXIT
-                  ENDIF
-               ENDDO
-               IF (ic2.eq.0) CYCLE
-
-               ic1=0
-               DO k=1,n
-                  IF (ALL(w%qns(k,:).eq.cfg1(:))) THEN
-                     ic1=k
-                     EXIT
-                  ENDIF
-               ENDDO
-               IF (ic1.eq.0) CYCLE
-
-!              Make the guess
-               guess=guess+w%coef(ic1)+w%coef(ic2)-w%coef(1)
-               nguess=nguess+1
-            ENDDO
-            IF (nguess.gt.0) THEN ! Second method succeeded
-               w%coef(i)=guess/REAL(nguess)
-            ENDIF
-         ENDIF
-      ENDDO
-
-      DEALLOCATE(cfg1,cfg2)
-
-      end subroutine GuessEnergies
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine PermuteArrays(n,i,j,w,eig,M1,M2,scfg,ridx,cidx)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Helper routine for rearranging arrays
-
-      implicit none
-      TYPE (Configs), intent(inout) :: w
-      real*8, intent(inout)  :: eig(:)
-      real*8, intent(inout)  :: M1(:,:),M2(:,:)
-      integer, intent(inout) :: scfg(:),ridx(:),cidx(:)
-      integer, intent(in)  :: n,i,j
-      integer, allocatable :: tmpcfg(:)
-      real*8, allocatable  :: rowperm(:),colperm(:)
-      integer :: rows,cols,ndof,tmp,k
-      real*8  :: tmpE
-
-      rows=SIZE(eig)
-      cols=SIZE(w%qns,1)
-      ndof=SIZE(w%qns,2)
-
-      ALLOCATE(rowperm(cols),colperm(rows),tmpcfg(ndof))
-      rowperm(:)=0.d0
-
-      tmpE=eig(n)
-      eig(n)=eig(i)
-      eig(i)=tmpE
-
-      tmpcfg(:)=w%qns(n,:)
-      w%qns(n,:)=w%qns(j,:)
-      w%qns(j,:)=tmpcfg(:)
-
-!     Copy the guess energy to coef of w as it is used later
-      w%coef(n)=eig(n)
-
-      tmp=scfg(n)
-      scfg(n)=scfg(j)
-      scfg(j)=tmp
-
-      tmp=ridx(n)
-      ridx(n)=ridx(i)
-      ridx(i)=tmp
-
-      tmp=cidx(n)
-      cidx(n)=cidx(j)
-      cidx(j)=tmp
-
-      rowperm(:)=M1(n,:)
-      M1(n,:)=M1(i,:)
-      M1(i,:)=rowperm(:)
-
-      colperm(:)=M1(:,n)
-      M1(:,n)=M1(:,j)
-      M1(:,j)=colperm(:)
-
-      rowperm(:)=M2(n,:)
-      M2(n,:)=M2(i,:)
-      M2(i,:)=rowperm(:)
-
-      colperm(:)=M2(:,n)
-      M2(:,n)=M2(:,j)
-      M2(:,j)=colperm(:)
-
-      DEALLOCATE(rowperm,colperm,tmpcfg)
-
-      end subroutine PermuteArrays
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
       subroutine PrintAssignments(il,im,eigv,delta,Ham,ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -836,7 +234,7 @@
       TYPE (Hamiltonian), INTENT(IN) :: Ham
       integer, intent(in)  :: il,im
       real*8, intent(in)   :: eigv(:),delta(:)
-      integer, allocatable :: qns(:),nmode(:)
+      integer, allocatable :: qns(:)
       integer :: i,j,ndof,nev,nagn,sp
       integer :: iexc,jexc,nexc,mst,mfi
       character*72 :: frmt
@@ -853,8 +251,7 @@
       call CPU_TIME(t1)
 
       write(*,'(/X,2A/)') 'Eigenvectors, assignments based on ',&
-!                          'rank-1 approximation :'
-                          'configuration analysis :'
+                          'rank-1 approximation :'
 
 !     Print mode numbers
       mst=firstmode(il,1,im,ML)
@@ -863,9 +260,6 @@
       write(frmt,*) '(A,X,',nagn,'(I2,X),5X,A,14X,A,11X,A,5X,A)'
       write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi),'Energy',&
                     'E-E0','Assignment','delta'
-
-      ALLOCATE(nmode(nagn+1))
-      nmode(:)=0
 
       DO i=1,nev
 !        Get the full assignment
@@ -881,7 +275,7 @@
                nexc=nexc+1
                iexc=qns(j)
                jexc=j
-!               IF (nexc.eq.2) EXIT
+               IF (nexc.eq.2) EXIT
             ENDIF
          ENDDO
          IF (nexc.eq.0) THEN
@@ -907,20 +301,80 @@
                     eigv(i)-eigv(1),labl,ML%resort(mst+jexc-1),delta(i)
          ENDIF
          DEALLOCATE(qns)
-         nmode(nexc+1)=nmode(nexc+1)+1
       ENDDO
-
-      write(*,*)
-      DO i=1,nagn+1
-         IF (nmode(i).gt.0) &
-         write(*,'(2X,2(A,I0))') 'Nr. ',i-1,'-mode states: ',nmode(i)
-      ENDDO
-      DEALLOCATE(nmode)
 
       call CPU_TIME(t2)
       anal_time=anal_time+t2-t1
 
       end subroutine PrintAssignments
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GetFullAssignment(il,im,Ham,ML,qns,qnfull)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      TYPE (MLtree), INTENT(IN)      :: ML
+      TYPE (Hamiltonian), INTENT(IN) :: Ham
+      integer, intent(in)    :: qns(:)
+      integer, allocatable, intent(out) :: qnfull(:)
+      integer, intent(in)    :: il,im
+      integer, allocatable   :: modind(:),qntmp(:)
+      integer :: i,j,eigind,imn,nsubm,mst,nagn
+
+!     Get the full assignment in terms of primitive DOFs
+      ALLOCATE(modind(il),qntmp(ML%nmode(1)))
+
+      qntmp=0
+      nagn=0
+      modind=1
+      DO
+         imn=im
+
+         IF (modind(1).gt.1) EXIT
+
+!        Trace each assignment to the bottom layer
+         DO j=il,2,-1
+            mst=ML%modstart(j,imn)
+
+!           Take number of sub-modes from input array on first pass,
+!           then extract the number from stored assignment array
+            IF (j.eq.il) THEN
+               nsubm=SIZE(qns)
+            ELSE
+               nsubm=SIZE(Ham%eig(j,imn)%assgn,2)
+            ENDIF
+
+            IF (modind(il-j+2).gt.nsubm) THEN
+               modind(il-j+1)=modind(il-j+1)+1
+               modind(il-j+2:)=1
+               EXIT
+            ENDIF
+
+!           Use input array to get 'eigind' on first pass here, too
+            IF (j.eq.il) THEN
+               eigind=qns(modind(2))
+            ELSE
+               eigind=Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
+            ENDIF
+
+            imn=mst+modind(il-j+2)-1
+
+            IF (j.eq.2) THEN
+               nagn=nagn+1
+               qntmp(nagn)=eigind
+               modind(il-j+2)=modind(il-j+2)+1
+            ENDIF
+         ENDDO
+      ENDDO
+
+!     Copy qntmp to qnfull
+      ALLOCATE(qnfull(nagn))
+      qnfull(:)=qntmp(:nagn)
+      DEALLOCATE(modind,qntmp)
+
+      end subroutine GetFullAssignment
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

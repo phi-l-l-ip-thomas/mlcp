@@ -475,6 +475,33 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      function resortedmode(modenr,ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Finds the index in the resorted list of mode 'modenr'
+
+      implicit none
+      TYPE (MLtree), intent(in)  :: ML
+      integer, intent(in)        :: modenr
+      integer :: resortedmode,i,n
+
+      n=ML%ndof
+
+!     Error checking
+      IF (modenr.lt.1 .or. modenr.gt.n) &
+         call AbortWithError('resortedmode(): modenr out of range')
+
+      DO i=1,n
+         IF (ML%resort(i).eq.modenr) THEN
+            resortedmode=i
+            EXIT
+         ENDIF
+      ENDDO
+
+      end function resortedmode
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine Flush_ModeComb(ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

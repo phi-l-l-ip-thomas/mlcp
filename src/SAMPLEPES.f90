@@ -31,7 +31,7 @@
 
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
-      TYPE (CPvec), INTENT(OUT)  :: A
+      TYPE (CP), INTENT(OUT)  :: A
       real*8, allocatable  :: tvec(:),tmat(:,:)
       integer, allocatable :: nbas(:)
       integer :: i,gi,gf,ndof
@@ -47,7 +47,7 @@
       ENDDO
 
 !     Set up the Chebyshev grids for each DOF and build the DCT matrices
-      call NewCPmat(A,nbas,1,.FALSE.)
+      A=NewCP(1,nbas,.FALSE.)
       A%coef(1)=1.d0
 
       gi=1
@@ -83,7 +83,7 @@
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
       TYPE (Configs), INTENT(IN) :: CV
-      TYPE (CPvec), INTENT(OUT)  :: A
+      TYPE (CP), INTENT(OUT)  :: A
       real*8, allocatable  :: tvec(:),tmat(:,:),F(:,:),VT(:,:),svals(:)
       integer, allocatable :: nbas(:)
       integer :: i,gi,gf,ndof,j
@@ -99,7 +99,7 @@
       ENDDO
 
 !     Set up the Chebyshev grids for each DOF and build the DCT matrices
-      call NewCPmat(A,nbas,1,.FALSE.)
+      A=NewCP(1,nbas,.FALSE.)
       A%coef(1)=1.d0
 
       gi=1
@@ -139,13 +139,13 @@
       TYPE (Configs), INTENT(INOUT) :: B
       TYPE (Configs), ALLOCATABLE   :: V(:)
       TYPE (Configs) :: CV
-      TYPE (CPvec), INTENT(INOUT)   :: BB
+      TYPE (CP), INTENT(INOUT)   :: BB
       character(len=5), intent(in)  :: sys
       character(len=64), intent(in) :: fnm
       integer, intent(in) :: nsamp
       logical, intent(in) :: samplegrid
 !!!
-      TYPE (CPvec), INTENT(INOUT)  :: A
+      TYPE (CP), INTENT(INOUT)  :: A
 !!!
 
 !     Read points from a data file...
@@ -172,7 +172,7 @@
       implicit none
       TYPE (ChebObj), INTENT(IN)    :: CGrid(:)
       TYPE (Configs), INTENT(OUT)   :: B
-      TYPE (CPvec), INTENT(OUT)     :: BB
+      TYPE (CP), INTENT(OUT)     :: BB
       character(len=64), intent(in) :: fnm
       integer, intent(in)  :: nsamp
       logical, intent(in)  :: samplegrid
@@ -189,7 +189,7 @@
 
       IF (samplegrid) THEN
          call CP2Config(BB,B)
-         call FlushCPvec(BB)
+         call FlushCP(BB)
       ENDIF
 
       end subroutine ReadPES
@@ -204,8 +204,8 @@
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
       TYPE (Configs), INTENT(IN) :: B
-      TYPE (CPvec), INTENT(IN)   :: BB
-      TYPE (CPvec) :: Balt
+      TYPE (CP), INTENT(IN)   :: BB
+      TYPE (CP) :: Balt
       character(len=64), intent(in) :: fnm
       logical, intent(in) :: samplegrid
       real*8, allocatable :: X(:,:),V(:)
@@ -214,7 +214,7 @@
 !         call WritePESConfigFile(B,fnm)
          call Config2CP(Balt,B)
          call CP2Points(CGrid,Balt,X,V)
-         call FlushCPvec(Balt)
+         call FlushCP(Balt)
          call WritePESPointsFile(X,V,fnm)
       ELSE
          call CP2Points(CGrid,BB,X,V)
@@ -352,7 +352,7 @@
 
       implicit none
       TYPE (ChebObj), INTENT(IN)    :: CGrid(:)
-      TYPE (CPvec), INTENT(OUT)     :: B
+      TYPE (CP), INTENT(OUT)     :: B
       character(len=64), intent(in) :: fnm
       logical, intent(out) :: success
       integer, intent(in)  :: nsamp
@@ -460,14 +460,14 @@
       TYPE (ChebObj), INTENT(IN)    :: CGrid(:)
       TYPE (Configs), INTENT(IN)    :: CV
       TYPE (Configs), INTENT(INOUT) :: B
-      TYPE (CPvec), INTENT(INOUT)   :: BB
+      TYPE (CP), INTENT(INOUT)   :: BB
       TYPE (Configs) :: Bt
-      TYPE (CPvec)   :: BBt
+      TYPE (CP)   :: BBt
       integer, intent(in) :: nsamp
       logical, intent(in) :: samplegrid
       integer :: samples,bdim,tdim
 !!!
-      TYPE (CPvec), INTENT(INOUT)  :: A
+      TYPE (CP), INTENT(INOUT)  :: A
 !!!
 
       IF (samplegrid) THEN
@@ -475,7 +475,7 @@
             call SamplePESPointRandom(CGrid,B,nsamp,CV)
 
 !!!
-!            call FlushCPvec(A)
+!            call FlushCP(A)
 !            call GetCPArbTfmMat(A,CGrid,CV)
 !!!
 
@@ -513,7 +513,7 @@
             write(*,'(X,A,I9)') 'Samples added         : ',samples
 
             call SUMVECVEC(BB,1.d0,BBt,1.d0)
-            call FlushCPvec(BBt)
+            call FlushCP(BBt)
          ENDIF
       ENDIF
 
@@ -641,7 +641,7 @@
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
       TYPE (Configs), INTENT(IN) :: CV
-      TYPE (CPvec), INTENT(OUT)  :: B
+      TYPE (CP), INTENT(OUT)  :: B
       real*8, allocatable :: X(:,:),V(:)
       integer, intent(in) :: nsamp
       integer :: i,j,ndof
@@ -692,7 +692,7 @@
 
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
-      TYPE (CPvec), INTENT(OUT)  :: B
+      TYPE (CP), INTENT(OUT)  :: B
       real*8, intent(in)   :: X(:,:),V(:)
       integer, allocatable :: nbas(:)
       integer :: i,j,k,n,gi,ndof,nsamp
@@ -714,7 +714,7 @@
          IF (CGrid(j)%egrid) nbas(j)=nbas(j)+1
       ENDDO
 
-      call NewCPvec(B,nbas,nsamp)
+      B=NewCP(nsamp,nbas)
       DEALLOCATE(nbas)
 
       DO i=1,nsamp
@@ -749,7 +749,7 @@
 
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
-      TYPE (CPvec), INTENT(IN)   :: B
+      TYPE (CP), INTENT(IN)   :: B
       real*8, allocatable, intent(out) :: X(:,:),V(:)
       integer, allocatable :: nbas(:)
       integer :: i,j,k,n,gi,ndof,nsamp
@@ -791,7 +791,7 @@
 
       implicit none
       TYPE (ChebObj), INTENT(IN)  :: CGrid(:)
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(INOUT) :: F
       logical, intent(in) :: forw
       integer :: i,j,gi,gf,rk,ndof
       real*8  :: fac
@@ -825,7 +825,7 @@
 
       implicit none
       TYPE (ChebObj), INTENT(IN) :: CGrid(:)
-      TYPE (CPvec), INTENT(IN)   :: C
+      TYPE (CP), INTENT(IN)   :: C
       real*8, intent(in)   :: x(:)
       real*8, allocatable  :: y(:),clprods(:,:),prods(:)
       integer, allocatable :: gi(:),gf(:)

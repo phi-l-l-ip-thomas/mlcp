@@ -350,6 +350,107 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      function MatrixUnwrap(M,ri,ci,ro,co) result(U)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Receives M, an [ro x co] matrix of inner [ri x ci] matrices, and 
+! reorders into U, where U has dimensions [ri*ci x ro*co] 
+
+      implicit none
+      real*8, allocatable :: U(:,:)
+      real*8, intent(in)  :: M(:,:)
+      integer, intent(in) :: ri,ci,ro,co
+      integer :: j,k,l,kl,js,jf,ks,kf,ls,lf
+
+!     Error checking
+      IF (ri*ro .ne. SIZE(M,1)) THEN
+         write(*,*) 'ri*ro = (',ri,'*',ro,') = ',ri*ro,&
+                    ' is not equal to ',SIZE(M,1)
+         call AbortWithError('MatrixUnwrap() ri*ro must equal rows(M)')
+      ENDIF
+      IF (ci*co .ne. SIZE(M,2)) THEN
+         write(*,*) 'ci*co = (',ci,'*',co,') = ',ci*co,&
+                    ' is not equal to ',SIZE(M,2)
+         call AbortWithError('MatrixUnwrap() ci*co must equal cols(M)')
+      ENDIF
+
+      allocate(U(ri*ci,ro*co))
+!     Loop over inner blocks of M (l,k)
+      kl=1
+      ls=1
+      do l=0,co-1
+         ks=1
+         kf=ri
+         do k=0,ro-1
+!           Unwrap inner block of M into a column of U
+            js=1
+            jf=ri
+            do j=0,ci-1
+               U(js:jf,kl)=M(ks:kf,ls+j)
+               js=js+ri
+               jf=jf+ri
+            enddo
+            kl=kl+1
+            ks=ks+ri
+            kf=kf+ri
+         enddo
+         ls=ls+ci
+      enddo
+
+      end function MatrixUnwrap
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function MatrixRewrap(U,ri,ci,ro,co) result(M)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Receives U, with dimensions [ri*ci x ro*co], and returns block form
+! as M, where M is an [ro x co] matrix of inner [ri x ci] matrices
+
+      implicit none
+      real*8, allocatable :: M(:,:)
+      real*8, intent(in)  :: U(:,:)
+      integer, intent(in) :: ri,ci,ro,co
+      integer :: j,k,l,kl,js,jf,ks,kf,ls
+
+!     Error checking
+      IF (ri*ci .ne. SIZE(U,1)) THEN
+         write(*,*) 'ri*ci = (',ri,'*',ci,') = ',ri*ci,&
+                    ' is not equal to ',SIZE(U,1)
+         call AbortWithError('MatrixRewrap() ri*ci must equal rows(U)')
+      ENDIF
+      IF (ro*co .ne. SIZE(U,2)) THEN
+         write(*,*) 'ro*co = (',ro,'*',co,') = ',ro*co,&
+                    ' is not equal to ',SIZE(U,2)
+         call AbortWithError('MatrixRewrap() ro*co must equal cols(U)')
+      ENDIF
+
+      allocate(M(ri*ro,ci*co))
+
+      kl=1
+      ls=1
+      do l=0,co-1
+         ks=1
+         kf=ri
+         do k=0,ro-1
+            js=1
+            jf=ri
+            do j=0,ci-1
+               M(ks:kf,ls+j)=U(js:jf,kl)
+               js=js+ri
+               jf=jf+ri
+            enddo
+            kl=kl+1
+            ks=ks+ri
+            kf=kf+ri
+         enddo
+         ls=ls+ci
+      enddo
+
+      end function MatrixRewrap
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine SolveTridiag(avec,bvec,QHQ,COMPZ)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -426,6 +527,38 @@
       eigen_time=eigen_time+t2-t1
 
       end subroutine SolveGenEigval
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine PrintSVD(M)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Prints SVD of matrix A, for quick check
+
+      implicit none
+      real*8, intent(in)  :: M(:,:)
+      real*8, allocatable :: A(:,:),U(:,:),VT(:,:),svals(:)
+      integer :: i
+
+      ALLOCATE(A(SIZE(M,1),SIZE(M,2)))
+      A(:,:)=M(:,:)
+      call SolveWithSVD(svals,A,U,VT)
+
+      write(*,*) 'PrintSVD(): svals'
+      DO i=1,SIZE(svals)
+         write(*,*) i,svals(i)
+      ENDDO
+      write(*,*)
+
+      write(*,*) 'PrintSVD(): U'
+      call PrintMatrix(U)
+
+      write(*,*) 'PrintSVD(): VT'
+      call PrintMatrix(VT)
+
+      DEALLOCATE(A,U,VT,svals)
+
+      end subroutine PrintSVD
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -639,6 +772,7 @@
       real*8, allocatable, intent(out) :: Mi(:,:)
       real*8, allocatable :: SIG(:,:),U(:,:),VT(:,:),svals(:)
       integer :: i,rm,cm,ns
+      real*8, parameter :: tol=1.d-12
 
       rm=SIZE(M,1)
       cm=SIZE(M,2)
@@ -650,11 +784,12 @@
 !     SVD of M (as Mi)
       call SolveWithSVD(svals,Mi,U,VT)
 
-!     Form SIGMA^(-1) matrix
+!     Form SIGMA^(-1) matrix, keeping only values exceeding tol
       ns=SIZE(svals)
       ALLOCATE(SIG(ns,ns))
       SIG=0.d0
       DO i=1,ns
+         IF (svals(i).lt.tol) EXIT
          SIG(i,i)=1.d0/svals(i)
       ENDDO
 
@@ -665,6 +800,121 @@
       DEALLOCATE(U,VT,SIG,svals)
 
       end subroutine MatrixPseudoinverse
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SolveLinSysSVD(A,B,reg)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Solves linear system A*X = B, via SVD-calculated Moore-Penrose
+! pseudoinverse, where A is an (m x m) matrix, and B,X are a group of n 
+! length-m vectors. Solution X replaces B; A is destroyed by this routine
+
+      implicit none
+      real*8, intent(in) :: reg
+      real*8, intent(inout) :: A(:,:),B(:,:)
+      real*8, allocatable :: U(:,:),VT(:,:),SIG(:,:),svals(:),WORK(:)
+      integer :: i,m,p,q,INFO,LWORK
+      real*8  :: tol,thresh,optdim(1)
+
+      m=SIZE(A,1)
+      p=SIZE(B,2)
+
+      IF (reg.lt.0.d0) THEN
+         write(*,*) 'reg = ',reg,' must be nonnegative'
+         call AbortWithError('SolveLinSysSVD():reg < 0')
+      ENDIF
+
+      tol=reg
+!      tol=0.5d0*sqrt(REAL(m+p+1))*EPSILON(1.d0)
+
+!     This routine requires a square matrix A
+      IF (SIZE(A,2).ne.m .or. SIZE(B,1).ne.m) THEN
+         write(*,*) 'A must be square, and rows(B)=SIZE(A), but sizes',&
+         ' are A[',m,' x ',SIZE(A,2),'], B[',SIZE(B,1),' x p]'
+         call AbortWithError('SolveLinSysSVD(): size mismatch')
+      ENDIF
+
+      ALLOCATE(U(m,m),VT(m,m),svals(m))
+
+!     Calculate optimal LWORK value for DGESVD
+      CALL DGESVD('S','S',m,m,A,m,svals,U,m,VT,m,optdim,-1,INFO)
+      LWORK=INT(optdim(1))
+      ALLOCATE(WORK(LWORK))
+
+!     Calculate SVD...
+      CALL DGESVD('S','S',m,m,A,m,svals,U,m,VT,m,WORK,LWORK,INFO)
+      DEALLOCATE(WORK)
+
+!     Error checking
+      if (INFO.ne.0) then
+         write(*,*) 'error in DGESVD, info = ',INFO
+         call AbortWithError('SolveLinSysSVD(): DGESVD error')
+      endif
+
+!     Form SIGMA^(-1) matrix, keeping only values exceeding threshold
+      thresh=tol*svals(1)
+      DO i=1,m
+         IF (svals(i).lt.thresh) EXIT
+         q=i
+      ENDDO
+      ALLOCATE(SIG(q,q))
+      SIG=0.d0
+      DO i=1,q
+         SIG(i,i)=1.d0/svals(i)
+      ENDDO
+      DEALLOCATE(svals)
+
+!     Calculate  M^(-1)*b = [V * SIGMA^(-1) * U^T] * b
+
+!     A <- V * SIGMA^(-1)
+      call DGEMM('T','N',m,q,q,1.d0,VT(1:q,:),q,SIG,q,0.d0,A(:,1:q),m)
+      DEALLOCATE(VT,SIG)
+!     VT <- U^T * B
+      ALLOCATE(VT(q,p))
+      call DGEMM('T','N',q,p,m,1.d0,U(:,1:q),m,B,m,0.d0,VT,q)
+      DEALLOCATE(U)
+!     B <- [V * SIGMA^(-1)] * [U^T * b]
+      call DGEMM('N','N',m,p,q,1.d0,A(:,1:q),m,VT,q,0.d0,B,m)
+      DEALLOCATE(VT)
+
+      end subroutine SolveLinSysSVD
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SolveLinSysLU(A,B,reg)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Solves linear system A*X = B, via DGETRF for LU-decomp + DGETRS, where
+! A is an (m x m) matrix, and B,X are a group of n length-m vectors.
+! Solution X replaces B, and A is destroyed by this routine
+
+      implicit none
+      real*8, intent(inout) :: A(:,:)
+      real*8, intent(inout) :: B(:,:)
+      real*8, intent(in)    :: reg
+      integer, allocatable  :: IPV(:)
+      integer :: i,m,n,info
+
+      IF (reg.lt.0.d0) THEN
+         write(*,*) 'reg = ',reg,' must be nonnegative'
+         call AbortWithError('SolveLinSysLU():reg < 0')
+      ENDIF
+
+      m=SIZE(B,1)
+      n=SIZE(B,2)
+
+!     Add regulization penalty to avoid ill-conditioning
+      DO i=1,m
+         A(i,i)=A(i,i)+reg
+      ENDDO
+
+      allocate(IPV(m))
+      call dgetrf(m,m,A,m,IPV,info)
+      call dgetrs('N',m,n,A,m,IPV,B,m,info)
+      deallocate(IPV)
+
+      end subroutine SolveLinSysLU
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

@@ -7,10 +7,10 @@
 ! To add a PES to the code, place all potential constant files in the
 ! 'pes' directory and add an appropriate call to GetPotential() below
 
-      use ERRORTRAP
-      use UTILS
-      use SEPDREPN
-      use CPCONFIG
+      USE ERRORTRAP
+      USE UTILS
+      USE SEPDREPN
+      USE CPCONFIG
 
       CONTAINS
 
@@ -465,6 +465,164 @@
       ENDDO
 
       end subroutine FF2Configs
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine TransformPES(V,vtype,alpha,omega)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Transforms potential into "Morsified" coordinates with asymptotic long
+! range behavior
+
+      implicit none
+      TYPE (Configs), INTENT(INOUT) :: V(:)
+      integer, allocatable, intent(out) :: vtype(:,:)
+      real*8, allocatable, intent(out)  :: alpha(:),omega(:)
+      integer, allocatable :: modpowr(:,:)
+      integer :: i,j,k,l,ndof,ndf,ncoup,vterms
+      real*8, allocatable  :: v1d(:,:)
+      logical, allocatable :: sympes(:)
+      logical :: morsify
+      real*8  :: am1,afac
+
+!     Set parameters
+      ncoup=SIZE(V)
+      ndof=V(1)%nbas(1)
+      morsify=.FALSE.
+      afac=1.d0
+
+      ALLOCATE(v1d(ndof,ncoup),alpha(ndof),sympes(ndof),omega(ndof))
+      v1d=0.d0
+
+!     Loop over quadratic, cubic, quartic, ... terms in the PES
+      vterms=0
+      DO k=1,ncoup
+
+!        If V(k) is a zero vector, skip
+         IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
+
+!        Keep a tally of the total number of potential terms
+         vterms=vterms+SIZE(V(k)%coef)
+
+!        Extract the 1D potentials
+         DO i=1,SIZE(V(k)%coef)
+            call DistribModePower(V(k)%qns(i,:),modpowr)
+            ndf=SIZE(modpowr,1)
+            IF (ndf.eq.1) THEN  ! 1D potential term
+!              Make sure 1D PES contains no duplicate terms, which will
+!              lead to incorrect transformations
+               IF (v1d(modpowr(1,1),modpowr(1,2)).ne.0.d0) &
+                  call AbortWithError('TransformPES(): duplicate term')
+               v1d(modpowr(1,1),modpowr(1,2))=V(k)%coef(i)
+            ENDIF
+            deallocate(modpowr)
+         ENDDO
+      ENDDO
+
+!     Extract the harmonic constants before transforming the PES
+!     These are needed by FillHamilType() to form the KEO
+      omega(:)=v1d(:,2)
+
+!     Compute the value of the alpha parameter and transform the 1D PES
+      sympes(:)=.FALSE.
+      DO i=1,ndof
+!        No cubic and higher terms: set alpha to 1.0 and be done
+         IF (SIZE(v1d,2).lt.3) THEN
+            sympes(i)=.TRUE.
+            alpha(i)=1.d0
+!        Symmetric potential: compute alpha for coupling terms only
+         ELSEIF (v1d(i,3).eq.0.d0) THEN
+            sympes(i)=.TRUE.
+            alpha(i)=-1.5d0*v1d(i,4)/v1d(i,2)
+            alpha(i)=SIGN(sqrt(abs(alpha(i))),alpha(i))
+
+!        Asymmetric potential: compute alpha and morsify 1D terms
+         ELSE
+            alpha(i)=-v1d(i,3)/v1d(i,2)
+            am1=1.d0/alpha(i)
+!           Morse series reversal defs
+            am1=1.d0/alpha(i)
+            v1d(i,4) = am1*(am1*(am1*(am1*v1d(i,4) + 1.5d0*v1d(i,3)) + &
+                           (11.d0/12.d0)*v1d(i,2)) + 0.25d0*v1d(i,1))
+!           Alpha is chosen to give v1d(i,3) = 0. Enforce v1d(i,3) = 0
+!           here since the expression below may give a nonzero alpha
+!           due to roundoff error
+!            v1d(i,3) = am1*(am1*(am1*v1d(i,3) + v1d(i,2)) + &
+!                           (1.d0/3.d0)*v1d(i,1))
+            v1d(i,3) = 0.d0
+            v1d(i,2) = am1*(am1*v1d(i,2) + 0.5d0*v1d(i,1))
+            v1d(i,1) = am1*v1d(i,1)
+         ENDIF
+         alpha(i)=abs(afac*alpha(i))  ! Scaled alpha
+      ENDDO
+
+!     Assign the type and transform the PES
+!     Set all entries of vtype to zero by default (which forces using
+!     the polynomial potentials). These are modified if morsify=.TRUE.
+      ALLOCATE(vtype(vterms,ncoup))
+      vtype=0
+
+      IF (morsify) THEN
+
+         write(*,'(/X,A,A/)') '--> The PES will be transformed into ',&
+              'asymptotically-decaying coordinates'
+         write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
+!                            ' y_i = 1-exp(-alpha_i*q_i)'
+                            ' y_i = q_i'
+         write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
+                            ' y_i = q_i' 
+         write(*,'(X,A,A)') ' d-D coupling potentials :',&
+                            ' y_i = tanh(alpha_i*q_i)'
+         write(*,'(/X,A,f10.6,A)') 'DOF Sym Alpha-values (scaled by ',&
+                                   afac,')'
+       
+         DO i=1,ndof
+            write(*,'(X,I3,2X,L1,2X,ES15.8)') i,sympes(i),alpha(i)
+         ENDDO
+
+         l=1
+         DO k=1,ncoup
+
+!           If V(k) is a zero vector, skip
+            IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
+
+!           Transform the PES
+            DO i=1,SIZE(V(k)%coef)
+               call DistribModePower(V(k)%qns(i,:),modpowr)
+               ndf=SIZE(modpowr,1)
+
+!              1D potential term: copy from transformed v1d array
+               IF (ndf.eq.1) THEN
+
+!                 Symmetric potential
+                  IF (sympes(modpowr(1,1))) THEN
+                     vtype(l,1)=0  ! Leave as power of q
+
+!                 Asymmetric potential
+                  ELSE
+!                     V(k)%coef(i)=v1d(modpowr(1,1),modpowr(1,2))
+!                     vtype(l,1)=2  ! morse
+                     vtype(l,1)=0  ! Leave as power of q
+                  ENDIF
+!              Coupling term: transform into tanh series using alphas
+               ELSE
+!                 Transform/assign each factor in the product operator
+                  DO j=1,ndf
+                     V(k)%coef(i)=V(k)%coef(i)/&
+                                  alpha(modpowr(j,1))**modpowr(j,2)
+                     vtype(l,j)=1  ! tanh
+                  ENDDO
+               ENDIF
+
+               deallocate(modpowr)
+               l=l+1
+            ENDDO
+         ENDDO
+      ENDIF
+
+      DEALLOCATE(v1d,sympes)
+
+      end subroutine TransformPES
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

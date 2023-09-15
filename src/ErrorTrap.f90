@@ -19,27 +19,27 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE SetupErrorTrapModule()
+      subroutine SetupErrorTrapModule()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sets up the module
 
-      IMPLICIT NONE
+      implicit none
 
       ErrorTrapModuleSetupFlag=ErrorTrapModuleSetupFlag+1
 
       IF (ErrorTrapModuleSetupFlag>1) RETURN
 
-      END SUBROUTINE SetupErrorTrapModule
+      end subroutine SetupErrorTrapModule
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE DisposeErrorTrapModule()
+      subroutine DisposeErrorTrapModule()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Disposes the module
 
-      IMPLICIT NONE
+      implicit none
     
       IF (ErrorTrapModuleSetupFlag<=0) RETURN
 
@@ -47,48 +47,48 @@
 
       IF (ErrorTrapModuleSetupFlag>0) RETURN
 
-      END SUBROUTINE DisposeErrorTrapModule
+      end subroutine DisposeErrorTrapModule
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE ShowError(Message)
+      subroutine ShowError(Message)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Displays an error message to stdout
 
-      IMPLICIT NONE
+      implicit none
       CHARACTER(*) :: Message
 
       IF (ErrorTrapModuleSetupFlag<= 0) CALL SetupErrorTrapModule()
 
       PRINT '(/A,A/)','ERROR: ',TRIM(Message)
 
-      END SUBROUTINE ShowError
+      end subroutine ShowError
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE ShowWarning(Message)
+      subroutine ShowWarning(Message)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Displays a warning message to stdout
 
-      IMPLICIT NONE
+      implicit none
       CHARACTER(*) :: Message
 
       IF (ErrorTrapModuleSetupFlag<=0) CALL SetupErrorTrapModule()
 
       PRINT '(/A,A/)','WARNING: ',TRIM(Message)
 
-      END SUBROUTINE ShowWarning
+      end subroutine ShowWarning
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE AbortWithError(String)
+      subroutine AbortWithError(String)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Displays message to stdout and stops program
 
-      IMPLICIT NONE
+      implicit none
       CHARACTER(*) :: String
 
       IF (ErrorTrapModuleSetupFlag<=0) CALL SetupErrorTrapModule()
@@ -97,16 +97,16 @@
 
       STOP
 
-      END SUBROUTINE AbortWithError
+      end subroutine AbortWithError
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE ERROR(Test,Message)
+      subroutine ERROR(Test,Message)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Tests the given test and shows error message and stop program if true
 
-      IMPLICIT NONE
+      implicit none
       LOGICAL       :: Test
       CHARACTER(*)  :: Message
 
@@ -114,16 +114,16 @@
 
       IF (Test) CALL AbortWithError(Message)
 
-      END SUBROUTINE ERROR
+      end subroutine ERROR
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE WARN(Test,Message)
+      subroutine WARN(Test,Message)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Tests the given test and prints warning message if true
 
-      IMPLICIT NONE
+      implicit none
       LOGICAL       :: Test
       CHARACTER(*)  :: Message
 
@@ -131,7 +131,7 @@
 
       IF (Test) CALL ShowWarning(Message)
 
-      END SUBROUTINE WARN
+      end subroutine WARN
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

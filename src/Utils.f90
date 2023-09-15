@@ -24,9 +24,9 @@
             PROCEDURE :: n => Getivsize
       END TYPE IVEC
 
-      INTERFACE OPERATOR( .SEQ. )
-          MODULE PROCEDURE CompareStringsForEQ
-      END INTERFACE
+      interface operator( .SEQ. )
+          module procedure CompareStringsForEQ
+      end interface
 
       INTERFACE Vec2Mat
          MODULE PROCEDURE Vec2Matrix,Vec2SymMat
@@ -126,7 +126,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      INTEGER FUNCTION LookForFreeUnit()
+      integer function LookForFreeUnit()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Set the smallest integer equal or greater than 20 that is 
@@ -134,7 +134,7 @@
 ! returns the integer number of the smallest free unit.
 
 
-      IMPLICIT NONE
+      implicit none
       LOGICAL               :: File_Opened
       INTEGER, PARAMETER    :: UnitMax = 300
 
@@ -147,7 +147,7 @@
       CALL ERROR((LookForFreeUnit.eq.UnitMax), &
                  "PrintTools: No free I/O unit available")
 
-      END FUNCTION LookForFreeUnit
+      end function LookForFreeUnit
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -183,8 +183,10 @@
 
       write(*,*)
       do ir=1,rows
+          write(*,*) (mat(ir,ic),ic=1,cols)
 !         write(*,'(40(f15.8))') (mat(ir,ic),ic=1,cols)
-         write(*,'(40(f13.6))') (mat(ir,ic),ic=1,cols)
+!         write(*,'(40(f13.6))') (mat(ir,ic),ic=1,cols)
+!         write(*,'(40(f6.2))') (mat(ir,ic),ic=1,cols)
       enddo
       write(*,*)
 
@@ -213,7 +215,42 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE MatDiag2Utriang(dmat,tmat,sym,refl)
+      subroutine ReflectTriangle(M,u2l)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Reflects triangular matrix to fill in entries
+
+      implicit none
+      real*8, intent(inout) :: M(:,:)
+      logical, intent(in)   :: u2l
+      integer :: i,j,n
+
+      n=SIZE(M,1)
+      IF (SIZE(M,2).ne.n) &
+         call AbortWithError('ReflectTriangle(): M must be square')
+
+!     Copy  upper triangle to lower triangle
+      IF (u2l) THEN
+         DO i=2,n
+            DO j=1,i-1
+               M(i,j)=M(j,i)
+            ENDDO
+         ENDDO
+
+!     Copy lower triangle to upper triangle
+      ELSE
+         DO i=1,n-1
+            DO j=i+1,n
+               M(i,j)=M(j,i)
+            ENDDO
+         ENDDO
+      ENDIF
+
+      end subroutine ReflectTriangle
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine MatDiag2Utriang(dmat,tmat,sym,refl)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Converts matrix in stored diagonal form to upper triangular form
@@ -251,11 +288,11 @@
          ENDDO
       ENDIF
 
-      END SUBROUTINE MatDiag2Utriang
+      end subroutine MatDiag2Utriang
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE MatUtriang2Diag(dmat,tmat,sym)
+      subroutine MatUtriang2Diag(dmat,tmat,sym)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Converts matrix from upper triangular to stored diagonal form
@@ -282,11 +319,11 @@
       sym=2
       call TrimMatDiagForm(dmat,sym)
 
-      END SUBROUTINE MatUtriang2Diag
+      end subroutine MatUtriang2Diag
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE TrimMatDiagForm(dmat,sym)
+      subroutine TrimMatDiagForm(dmat,sym)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Trims matrix in stored-diagonal form by removing zero columns
@@ -301,7 +338,7 @@
       real*8  :: tol,elem
       integer :: i,j,nr,nc,finalcol,newr,newc,newsym
 
-      tol=1.0d-14
+      tol=1.0d-12
 
       nr=SIZE(dmat,1)
       nc=SIZE(dmat,2)
@@ -376,11 +413,11 @@
       dmat=tmpmat
       DEALLOCATE(tmpmat)
 
-      END SUBROUTINE TrimMatDiagForm
+      end subroutine TrimMatDiagForm
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE Vec2Matrix(v,M,nr,nc)
+      subroutine Vec2Matrix(v,M,nr,nc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Wraps a vector into matrix format. nr,nc = number of rows,columns. The
@@ -405,11 +442,11 @@
          M(ir,ic)=v(i)
       ENDDO
 
-      END SUBROUTINE Vec2Matrix
+      end subroutine Vec2Matrix
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE Mat2Vec(v,M,sym)
+      subroutine Mat2Vec(v,M,sym)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Wrapper for matrix-to-vector unwrapping. Setting sym=.TRUE. stores the
@@ -427,11 +464,11 @@
          call Matrix2Vec(v,M)
       ENDIF
 
-      END SUBROUTINE Mat2Vec
+      end subroutine Mat2Vec
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE Matrix2Vec(v,M)
+      subroutine Matrix2Vec(v,M)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Unwraps a matrix to vector. The vector is filled column-at-a-time
@@ -453,11 +490,11 @@
          ENDDO
       ENDDO
 
-      END SUBROUTINE Matrix2Vec
+      end subroutine Matrix2Vec
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE Vec2Dmat(v,M,nr,nc,sym)
+      subroutine Vec2Dmat(v,M,nr,nc,sym)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Wraps a vector to matrix format, then converts to stored diagonal form
@@ -476,11 +513,11 @@
       M=D
       DEALLOCATE(D)
 
-      END SUBROUTINE Vec2Dmat
+      end subroutine Vec2Dmat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE SymMat2Vec(v,M)
+      subroutine SymMat2Vec(v,M)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Unwraps a symmetric matrix to vector, keeping the upper triangle. 
@@ -514,11 +551,11 @@
 !     Multiply by sqrt(2) so that reduc() will preserve Frobenius norm
       v(n+1:)=s*v(n+1:)
 
-      END SUBROUTINE SymMat2Vec
+      end subroutine SymMat2Vec
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE Vec2SymMat(v,M)
+      subroutine Vec2SymMat(v,M)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Converts a vector, in the form generated by SymMat2Vec(), to a square 
@@ -552,11 +589,11 @@
          ENDDO
       ENDDO
 
-      END SUBROUTINE Vec2SymMat
+      end subroutine Vec2SymMat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE SymPackMat2Vec(v,M)
+      subroutine SymPackMat2Vec(v,M)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Store a symmetric matrix as a vector in symmetric-packed form. The 
@@ -592,11 +629,11 @@
          ENDDO
       ENDDO
 
-      END SUBROUTINE SymPackMat2Vec
+      end subroutine SymPackMat2Vec
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE Vec2SymPackMat(v,M)
+      subroutine Vec2SymPackMat(v,M)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Unpacks the vector version of a symmetric packed matrix to matrix form
@@ -642,11 +679,11 @@
          ENDDO
       ENDDO
 
-      END SUBROUTINE Vec2SymPackMat
+      end subroutine Vec2SymPackMat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE SymmetrizeMat(M)
+      subroutine SymmetrizeMat(M)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Symmetrizes a matrix by averaging the i,j-th element with the j,i-th
@@ -667,100 +704,11 @@
          ENDDO
       ENDDO
 
-      END SUBROUTINE SymmetrizeMat
+      end subroutine SymmetrizeMat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE ExtractRowsColsMatrix(M,row,col)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Extracts rows and cols of matrix, removing those for which row(i) and
-! col(j) are less than one
-
-      implicit none
-      real*8, allocatable, intent(inout) :: M(:,:)
-      integer, allocatable, intent(inout) :: row(:),col(:)
-      real*8, allocatable  :: Mt(:,:)
-      integer, allocatable :: rowt(:),colt(:)
-      integer :: i,j,k,l,r,c,nzr,nzc
-
-      r=SIZE(row)
-      c=size(col)
-
-!     Error checking
-      IF (SIZE(M,1).ne.r) THEN
-         write(*,*) 'M(r,c) has ',SIZE(M,1),' rows, but must have ',&
-                    r,' rows'
-         call AbortWithError('ExtractRowsColsMatrix(): bad dimensions')
-      ENDIF
-      IF (SIZE(M,2).ne.c) THEN
-         write(*,*) 'M(r,c) has ',SIZE(M,2),' cols, but must have ',&
-                    c,' rows'
-         call AbortWithError('ExtractRowsColsMatrix(): bad dimensions')
-      ENDIF
-
-!     Count number of rows and cols to keep
-      nzr=0
-      DO i=1,r
-         IF (row(i).gt.0) nzr=nzr+1
-      ENDDO
-      nzc=0
-      DO j=1,c
-         IF (col(j).gt.0) nzc=nzc+1
-      ENDDO
-
-!     Deallocate and exit if row or col has no entries to keep
-      IF (nzr.eq.0 .or. nzc.eq.0) THEN
-         DEALLOCATE(M)
-         IF (nzr.eq.0) DEALLOCATE(row)
-         IF (nzc.eq.0) DEALLOCATE(col)
-         RETURN
-      ENDIF
-
-!     Copy greater-than-zero portions of row and col to tmp array
-      ALLOCATE(Mt(nzr,nzc),rowt(nzr),colt(nzc))
-      k=1
-      DO i=1,r
-         IF (row(i).gt.0) THEN
-            rowt(k)=row(i)
-            k=k+1
-         ENDIF
-      ENDDO
-      l=1
-      DO j=1,c
-         IF (col(j).gt.0) THEN
-            colt(l)=col(j)
-            l=l+1
-         ENDIF
-      ENDDO
-
-!     Extract the rows and cols for which BOTH row(i) and col(j) are
-!     greater than zero
-      l=1
-      DO j=1,c
-         IF (col(j).gt.0) THEN
-            k=1
-            DO i=1,r
-               IF (row(i).gt.0) THEN
-                  Mt(k,l)=M(i,j)
-                  k=k+1
-               ENDIF
-            ENDDO
-            l=l+1
-         ENDIF
-      ENDDO
-
-      DEALLOCATE(M,row,col)
-      ALLOCATE(M(nzr,nzc),row(nzr),col(nzc))
-      M(:,:)=Mt(:,:)
-      row(:)=rowt(:)
-      col(:)=colt(:)
-
-      END SUBROUTINE ExtractRowsColsMatrix
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      SUBROUTINE GetIdentityMatrix(M,n,norm)
+      subroutine GetIdentityMatrix(M,n,norm)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -780,11 +728,29 @@
          M(i,i)=val
       ENDDO
 
-      END SUBROUTINE GetIdentityMatrix
+      end subroutine GetIdentityMatrix
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE Cascade(v,up)
+      subroutine RandomNormVec(v)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Fills v with random values and normalizes
+
+      implicit none
+      real*8, intent(inout) :: v(:)
+      real*8 :: norm
+
+      call random_number(v(:))
+      v(:)=v(:)-0.5d0
+      norm=1.d0/sqrt(abs(dot_product(v,v)))
+      v(:)=v(:)*norm
+
+      end subroutine RandomNormVec
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Cascade(v,up)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Moves all entries in a vector up or down one position
@@ -808,11 +774,51 @@
          v(n)=0.d0
       ENDIF
 
-      END SUBROUTINE Cascade
+      end subroutine Cascade
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      FUNCTION ibisect(v,i) RESULT(jl)
+      subroutine NextIndex(indx,lims)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Computes next index in nested sequence. 'lims' has upper limit, such
+! that indices are in range 1...lims(i) for mode i. 'indx' is
+! overwritten by new values
+
+      implicit none
+      integer, intent(in)    :: lims(:)
+      integer, intent(inout) :: indx(:)
+      integer :: i,j,ndof,ind
+
+      ndof=SIZE(lims)
+
+      IF (SIZE(indx).ne.SIZE(lims)) THEN
+         write(*,*) 'indx(',SIZE(indx),'), lims(',SIZE(lims),&
+                    ') sizes must match'
+         call AbortWithError("NextIndex(): array size mismatch")
+      ENDIF
+
+!     Find the mode to increment
+      DO i=1,ndof
+         ind=i
+         IF (indx(i).lt.lims(i)) EXIT
+      ENDDO
+
+!     Reset earlier modes, increment first to not reach limit
+      DO j=1,ind-1
+         indx(j)=1
+      ENDDO
+      IF (ind.eq.ndof .and. indx(ind).eq.lims(ind)) THEN
+         indx(ndof)=1
+      ELSE
+         indx(ind)=indx(ind)+1
+      ENDIF
+
+      end subroutine NextIndex
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function ibisect(v,i) RESULT(jl)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Finds index of last item of v with the same index as i, by bisection
@@ -839,11 +845,11 @@
         ENDIF
       ENDDO
 
-      END FUNCTION ibisect
+      end function ibisect
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE ifind(v,i,jset)
+      subroutine ifind(v,i,jset)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Finds index of last item of v with the same index as i, by bisection
@@ -898,11 +904,11 @@
       ENDDO
       jset(1)=jl
 
-      END SUBROUTINE ifind
+      end subroutine ifind
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      INTEGER FUNCTION FACRL(n)
+      integer function FACRL(n)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Computes n factorial
@@ -922,11 +928,11 @@
 
       FACRL=prod
 
-      END FUNCTION FACRL
+      end function FACRL
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      LOGICAL FUNCTION IntListsRSame(l1,l2)
+      logical function IntListsRSame(l1,l2)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Compares lists of integers to see if they contain the same values
@@ -947,11 +953,11 @@
          ENDDO
       ENDIF
 
-      END FUNCTION IntListsRSame
+      end function IntListsRSame
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
       
-      LOGICAL FUNCTION checkfornans(M)
+      logical function checkfornans(M)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Search a matrix for NaN values, return .TRUE. if there are any
@@ -973,11 +979,11 @@
          ENDDO
       ENDDO
       
-      END FUNCTION checkfornans
+      end function checkfornans
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      INTEGER FUNCTION GetRandomInteger(n)
+      integer function GetRandomInteger(n)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Picks a random integer between 1 and n
@@ -992,11 +998,11 @@
 
       GetRandomInteger=nint(n*x(1)+0.5)
 
-      END FUNCTION GetRandomInteger
+      end function GetRandomInteger
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      INTEGER FUNCTION GetSymN(s)
+      integer function GetSymN(s)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Finds n, the dimension for a symmetric matrix wrapped to vector with
@@ -1019,11 +1025,11 @@
 
       GetSymN=n
 
-      END FUNCTION GetSymN
+      end function GetSymN
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      FUNCTION compareStringsForEQ( s1, s2 ) RESULT( equal_result )
+      function compareStringsForEQ( s1, s2 ) RESULT( equal_result )
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Compares strings and does not differentiate between lower and upper
@@ -1070,7 +1076,7 @@
 
       equal_result = equal
 
-      END FUNCTION compareStringsForEQ
+      end function compareStringsForEQ
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

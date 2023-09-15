@@ -12,6 +12,10 @@
       real*8, private  :: norm_time=0.d0,pvv_time=0.d0,svv_time=0.d0
       logical, private :: MVV_SETUP = .FALSE.
 
+      INTERFACE VecScalarMult
+         MODULE PROCEDURE VecScalarMult_all,VecScalarMult_gen
+      END INTERFACE VecScalarMult
+
       INTERFACE PRODVV
          MODULE PROCEDURE PRODVV_AA,PRODVV_AB
       END INTERFACE PRODVV
@@ -20,9 +24,20 @@
          MODULE PROCEDURE ordre_AA,ordre_AB
       END INTERFACE ordre
 
-      INTERFACE SUMLCVEC
-         MODULE PROCEDURE SUMLCVEC_facs,SUMLCVEC_nofacs
-      END INTERFACE SUMLCVEC
+      INTERFACE CONSTPT
+         MODULE PROCEDURE CONSTPSTOT,CONSTBBTOT
+         MODULE PROCEDURE CONSTPSTOT_OMP,CONSTBBTOT_OMP
+      END INTERFACE
+
+      INTERFACE CONSTPk
+         MODULE PROCEDURE CONSTPSk,CONSTBBk
+         MODULE PROCEDURE CONSTPSk_OMP,CONSTBBk_OMP
+      END INTERFACE
+
+      INTERFACE UPDATEP
+         MODULE PROCEDURE UpdatePS,UpdateBB
+         MODULE PROCEDURE UpdatePS_OMP,UpdateBB_OMP
+      END INTERFACE
 
       contains
 
@@ -70,7 +85,7 @@
 ! re are the rank indices over which over which to change the sign
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(INOUT) :: F
       integer, intent(in) :: ri,re
       integer :: n
 
@@ -81,14 +96,30 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine VecScalarMult(F,fac,ri,re)
+      subroutine VecScalarMult_all(F,fac)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Multiplies CP-vec by scalar factor, which is distributed over all DOFs
 ! If the factor is negative then the sign is also changed
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(INOUT) :: F
+      real*8, intent(in) :: fac
+
+      call VecScalarMult(F,fac,1,F%R())
+
+      end subroutine VecScalarMult_all
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine VecScalarMult_gen(F,fac,ri,re)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Multiplies CP-vec by scalar factor, which is distributed over all DOFs
+! If the factor is negative then the sign is also changed
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: F
       integer, intent(in) :: ri,re
       real*8, intent(in)  :: fac
       integer :: ndof
@@ -97,7 +128,7 @@
       F%coef(ri:re)=abs(fac)*F%coef(ri:re)
       IF (fac.lt.0.d0) call VecSignChange(F,ri,re)
 
-      end subroutine VecScalarMult
+      end subroutine VecScalarMult_gen
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -108,8 +139,8 @@
 ! dofs. The summed vector replaces F; G is unchanged.
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec), INTENT(IN)    :: G
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: G
       real*8, intent(in) :: Ffac,Gfac
       integer, allocatable :: nbas(:)
       integer :: rF,rG,ndof
@@ -120,7 +151,11 @@
 
       IF (.NOT.CHECKNBAS(F,G)) THEN
          write(*,*) 'Dimensions or type of F and G do not match'
-         CALL AbortWithError('Error in SUMVECVEC()')
+         write(*,*) 'F:'
+         call F%show()
+         write(*,*) 'G:'
+         call G%show()
+         call AbortWithError('Error in SUMVECVEC()')
       ENDIF
 
       rF=SIZE(F%coef)
@@ -130,8 +165,8 @@
 
 !     If one of the two terms is zero, it is replaced by the other
       IF (rF.eq.1 .and. F%coef(1).eq.0.d0) THEN
-         call FlushCPvec(F)
-         call CopyWtoV(F,G)
+         call FlushCP(F)
+         F=CopyCP(G)
          call VecScalarMult(F,Gfac,1,rG)
 
       ELSE IF (rG.eq.1 .and. G%coef(1).eq.0.d0) THEN
@@ -152,7 +187,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SUMLCVEC_facs(F,Q,facs)
+      subroutine SUMLCVEC(F,Q,facs)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sums a linear combination of vectors in Q and stores in F
@@ -160,8 +195,8 @@
 ! one allocate is performed
 
       implicit none
-      TYPE (CPvec), INTENT(OUT) :: F
-      TYPE (CPvec), INTENT(IN)  :: Q(:)
+      TYPE (CP), INTENT(OUT) :: F
+      TYPE (CP), INTENT(IN)  :: Q(:)
       real*8, intent(in) :: facs(:)
       integer :: i,nbloc,rst,nrki
       real*8  :: t1,t2
@@ -172,7 +207,7 @@
       nbloc=SIZE(facs)
       IF (SIZE(Q).ne.nbloc) THEN
          write(*,*) 'Mismatch in dimension of Q, facs'
-         call AbortWithError("Error in SUMLCVEC_facs()")
+         call AbortWithError("Error in SUMLCVEC()")
       ENDIF
 
 !     Get the rank of F (=sum of ranks in Q)
@@ -183,7 +218,7 @@
 
 !     Build F from Q and the factors
       rst=0
-      call NewCPvec(F,Q(1)%nbas,nrki)
+      F=NewCP(nrki,Q(1)%nbas)
       DO i=1,nbloc
          nrki=SIZE(Q(i)%coef)
          call GenCopyWtoV(F,Q(i),rst+1,rst+nrki,1,nrki)
@@ -194,46 +229,7 @@
       call CPU_TIME(t2)
       svv_time=svv_time+t2-t1
 
-      end subroutine SUMLCVEC_facs
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine SUMLCVEC_nofacs(F,Q)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Sums a linear combination of vectors in Q and stores in F
-! This version does not require factors, assuming them to be 1
-
-      implicit none
-      TYPE (CPvec), INTENT(OUT) :: F
-      TYPE (CPvec), INTENT(IN)  :: Q(:)
-      integer :: i,nbloc,rst,nrki
-      real*8  :: t1,t2
-
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
-      call CPU_TIME(t1)
-
-      nbloc=SIZE(Q)
-
-!     Get the rank of F (=sum of ranks in Q)
-      nrki=0
-      DO i=1,nbloc
-         nrki=nrki+SIZE(Q(i)%coef)
-      ENDDO
-
-!     Build F from Q
-      rst=0
-      call NewCPvec(F,Q(1)%nbas,nrki)
-      DO i=1,nbloc
-         nrki=SIZE(Q(i)%coef)
-         call GenCopyWtoV(F,Q(i),rst+1,rst+nrki,1,nrki)
-         rst=rst+nrki
-      ENDDO
-
-      call CPU_TIME(t2)
-      svv_time=svv_time+t2-t1
-
-      end subroutine SUMLCVEC_nofacs
+      end subroutine SUMLCVEC
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -244,8 +240,8 @@
 ! replacement function so that ordre can be called with a single vector
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT)  :: G
-      TYPE (CPvec) :: F
+      TYPE (CP), INTENT(INOUT)  :: G
+      TYPE (CP) :: F
 
       call ordre(G,F)
       call ReplaceVwithW(G,F)
@@ -262,13 +258,13 @@
 ! version generates a sorted vector in addition to the original
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: G
-      TYPE (CPvec), INTENT(OUT) :: F
+      TYPE (CP), INTENT(IN)  :: G
+      TYPE (CP), INTENT(OUT) :: F
       real*8, allocatable :: tabindex(:)
       integer :: rG,i
 
 !     Set parameters       
-      rG=SIZE(G%coef)
+      rG=G%R() !SIZE(G%coef)
 
 !     List of ordered indices
       allocate(tabindex(rG))
@@ -277,7 +273,7 @@
       enddo
 
 !     Sort the coefficients into Fcoef
-      call NewCPvec(F,G%nbas,rG)
+      F=NewCP(G,rG)
       F%coef=G%coef
       call dsort(F%coef,tabindex,rG,-2)
 
@@ -292,13 +288,49 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine NORMBASE1(F,d,ovr)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Renormalizes Fbase, which modifies or overwrites (ovr=F/T) Fcoef
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: F
+      logical, intent(in) :: ovr
+      integer, intent(in) :: d
+      real*8  :: norm1D,t1,t2
+      integer :: i,rF
+
+      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      call CPU_TIME(t1)
+
+      rF=F%R()
+
+      do i=1,rF
+         norm1D=sqrt(abs(dot_product(F%base(F%ibas(d):F%fbas(d),i),&
+                                     F%base(F%ibas(d):F%fbas(d),i))))
+         F%base(F%ibas(d):F%fbas(d),i)=&
+         F%base(F%ibas(d):F%fbas(d),i)/norm1D
+         IF (ovr) THEN
+            F%coef(i)=norm1D
+         ELSE
+            F%coef(i)=F%coef(i)*norm1D
+         ENDIF
+      enddo
+
+      call CPU_TIME(t2)
+      norm_time=norm_time+t2-t1
+
+      end subroutine NORMBASE1
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine NORMBASE(F)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Renormalizes Fbase, which modifies Fcoef
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(INOUT) :: F
       real*8  :: norm1D,normND,t1,t2
       integer :: ndim,ir,irk,id,imod,rF,gst
 
@@ -338,18 +370,249 @@
       subroutine NORMCOEF(F)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Renormalizes Fbase with a call to NORMBASE
-! then renormalizes Fcoef here
+! Normalizes coefs of F. Base should be normalized prior to calling this
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(INOUT) :: F
       real*8  :: normND
 
-      call NORMBASE(F)
       normND=1/sqrt(abs(PRODVV(F)))
       F%coef=F%coef*normND
 
       end subroutine NORMCOEF
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine NORMALIZE(F)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Renormalizes Fbase,Fcoef with calls to NORMBASE,NORMCOEF, respectively
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: F
+      real*8  :: normND
+
+      call NORMBASE(F)
+      call NORMCOEF(F)
+
+      end subroutine NORMALIZE
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine UpdateFfromSoln(F,RHS,mode)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Fills terms of F for given mode from RHS. New terms are normalized to
+! generate new coefficients
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: F
+      real*8, intent(in)  :: RHS(:,:)
+      integer, intent(in) :: mode
+      integer :: i,k,l,row,col
+      real*8, parameter :: thresh=1.d-12
+      real*8  :: rnorm
+
+      IF (mode.lt.1 .or. mode.gt.SIZE(F%nbas)) THEN
+         write(*,*) 'mode (',mode,') must be in [1,',SIZE(F%nbas),']'
+         call AbortWithError('UpdateFfromSoln(): mode out of range')
+      ENDIF
+
+!     RHS contains multiple solutions from "small" linear system
+      IF ((SIZE(RHS,1).eq.SIZE(F%coef)) .and. &
+          (SIZE(RHS,2).eq.F%nbas(mode))) THEN
+         do i=1,SIZE(F%coef)
+            rnorm=sqrt(abs(dot_product(RHS(i,:),RHS(i,:))))
+            F%coef(i)=rnorm
+            if (rnorm.gt.0.d0) then
+               F%base(F%ibas(mode):F%fbas(mode),i)=&
+               RHS(i,1:F%nbas(mode))/rnorm
+            else
+               call RandomNormVec(F%base(F%ibas(mode):F%fbas(mode),i))
+            endif
+         enddo
+
+!     RHS contains one solution from "large" linear system
+!     1st dimension is n vectors of length rF, 2nd dimension is length 1
+      ELSEIF ((MOD(SIZE(RHS,1),SIZE(F%coef)).eq.0) .and. & 
+              (SIZE(RHS,2).eq.1)) THEN
+         do i=1,SIZE(F%coef)
+            rnorm=0.d0
+            do k=0,F%nbas(mode)-1
+               row=k*SIZE(F%coef)+i
+               rnorm=rnorm+rhs(row,1)**2
+            enddo
+            rnorm=sqrt(abs(rnorm))
+            F%coef(i)=rnorm
+            if (rnorm.gt.0.d0) then
+               do k=0,F%nbas(mode)-1
+                  row=k*SIZE(F%coef)+i
+                  F%base(F%ibas(mode)+k,i)=rhs(row,1)/rnorm
+               enddo
+            else
+               call RandomNormVec(F%base(F%ibas(mode):F%fbas(mode),i))
+            endif
+         enddo
+
+!     RHS contains multiple solutions from "large" linear system
+!     1st dimension is n vectors of length rF, 2nd dimension is length m
+      ELSEIF ((MOD(SIZE(RHS,1),SIZE(F%coef)).eq.0) .and. &
+              (SIZE(RHS,2).eq.F%cols(mode))) THEN
+         do i=1,SIZE(F%coef)
+            rnorm=0.d0
+            do k=0,F%rows(mode)-1
+               row=k*SIZE(F%coef)+i
+               do l=1,F%cols(mode)
+                  rnorm=rnorm+rhs(row,l)**2
+               enddo
+            enddo
+            rnorm=sqrt(abs(rnorm))
+            F%coef(i)=rnorm
+            if (rnorm.gt.0.d0) then
+               do l=1,F%cols(mode)
+                  col=(l-1)*F%rows(mode)
+                  do k=0,F%rows(mode)-1
+                     row=k*SIZE(F%coef)+i
+                     F%base(F%ibas(mode)+col+k,i)=rhs(row,l)/rnorm
+                  enddo
+               enddo
+            else
+               call RandomNormVec(F%base(F%ibas(mode):F%fbas(mode),i))
+            endif
+         enddo
+
+!     Error for incorrect sizes
+      ELSE
+         write(*,*) 'RHS (',SIZE(RHS,1),' x ',SIZE(RHS,2),') must be ',&
+         'either (',SIZE(F%coef),' x ',F%nbas(mode),') or (',&
+         SIZE(F%coef)*F%nbas(mode),' x 1) to match F'        
+         call AbortWithError('UpdateFfromSoln(): F, RHS size mismatch')
+
+      ENDIF
+
+!     Replace zero coefficients with small values since these may cause
+!     zero division in future B,P matrix downdates
+      rnorm=thresh*MAXVAL(F%coef)
+      do i=1,F%R()
+         if (F%coef(i).eq.0.d0) F%coef(i)=rnorm
+      enddo
+
+      end subroutine UpdateFfromSoln
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function CPMatSelfProdTot(M1,M2,sumoverrows) result (F)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Product along rows or cols of two CP-matrices
+! Returns CP-vector of products as a result
+! Set sumoverrows=.TRUE. to sum over rows, .FALSE. to sum over cols
+
+      implicit none
+      TYPE (CP), intent(in)  :: M1,M2
+      TYPE (CP) :: F
+      logical, intent(in)  :: sumoverrows
+      integer, allocatable, dimension(:) :: s,nr,nc,mlim,nlim
+      integer :: d,i,k,ik,m,ms,n,ns,ndof,rk1,rk2
+      real*8  :: prod1d
+
+      IF (.NOT.CHECKNBAS(M1,M2)) THEN
+         write(*,*) 'Dimensions or type of M1 and M2 do not match'
+         call AbortWithError('Error in CPMatSelfProdTot()')
+      ENDIF
+      IF (ANY(M1%sym) .or. ANY(M2%sym)) THEN
+         write(*,*) 'Symmetry is not yet implemented'
+         call AbortWithError('CPMatSelfProdTot(): symmetry not allowed')
+      ENDIF
+
+      ndof=SIZE(M1%nbas)
+      rk1=SIZE(M1%coef)
+      rk2=SIZE(M2%coef)
+      ALLOCATE(s(ndof),nr(ndof),nc(ndof),mlim(ndof),nlim(ndof))
+
+      IF (sumoverrows) THEN
+         s(:)=M1%rows(:)
+         nr(:)=1
+         nc(:)=M1%cols(:)
+         mlim(:)=M1%cols(:)
+         nlim(:)=M1%rows(:)
+      ELSE
+         s(:)=1
+         nr(:)=M1%rows(:)
+         nc(:)=1
+         mlim(:)=M1%rows(:)
+         nlim(:)=M1%cols(:)
+      ENDIF
+
+      F=NewCP(rk1*rk2,nr,nc,M1%sym)
+
+      DO d=1,ndof
+         ik=1
+         DO i=1,rk1
+            DO k=1,rk2
+               F%coef(ik)=M1%coef(i)*M2%coef(k)
+               ms=M1%ibas(d)
+               DO m=0,mlim(d)-1
+                  prod1D=0.d0
+                  ns=ms
+                  DO n=0,nlim(d)-1
+                     prod1D=prod1D+M1%base(ns,i)*M2%base(ns,k)
+                     ns=ns+nr(d)
+                  ENDDO
+                  F%base(F%ibas(d)+m,ik)=prod1D
+                  ms=ms+s(d)
+               ENDDO
+               ik=ik+1
+            ENDDO
+         ENDDO
+      ENDDO
+
+      DEALLOCATE(s,nr,nc,mlim,nlim)
+
+      end function CPMatSelfProdTot
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function CPHadamardProd(M1,M2) result(M3)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Computes element-wise CP-matrix product for M1, M2 with same dims
+
+      implicit none
+      TYPE (CP), INTENT(IN)  :: M1,M2
+      TYPE (CP) :: M3
+      integer :: i,j,k,ik
+      real*8  :: t1,t2
+
+      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      call CPU_TIME(t1)
+
+      IF (.NOT.CHECKNBAS(M1,M2)) THEN
+         write(*,*) 'Dimensions or type of M1 and M2 do not match'
+         write(*,*) 'M1:'
+         call M1%show()
+         write(*,*) 'M2:'
+         call M2%show()
+         call AbortWithError('Error in CPHadamardProd()')
+      ENDIF
+
+      M3=NewCP(M1,M1%R()*M2%R())
+
+      ik=1
+      DO k=1,M1%R()
+         DO i=1,M2%R()
+            M3%coef(ik)=M1%coef(k)*M2%coef(i)  
+            DO j=1,SIZE(M3%base,1)
+               M3%base(j,ik)=M1%base(j,k)*M2%base(j,i)
+            ENDDO
+            ik=ik+1
+         ENDDO
+      ENDDO
+
+      call CPU_TIME(t2)
+      pvv_time=pvv_time+t2-t1
+
+      end function CPHadamardProd
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -359,7 +622,7 @@
 ! Calculates the dot product of F with itself, using factor symmetry
 
       implicit none
-      TYPE (CPvec), intent(in) :: F
+      TYPE (CP), intent(in) :: F
       real*8  :: PRODVV_AA,t1,t2
       integer :: nrk,i,j
 
@@ -399,7 +662,7 @@
 !         <F^if_1|G^ig_1>*...*<F^if_ndim|G^ig_ndim >
 
       implicit none
-      TYPE (CPvec), intent(in) :: F,G
+      TYPE (CP), intent(in) :: F,G
       real*8  :: PRODVV_AB,t1,t2
       integer :: rF,rG,i,j
 
@@ -462,6 +725,24 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      function CHECKPDIMS(F,G,P)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Checks dimensions of BB or PS inner product matrix to make sure their
+! sizes match those of the input CP items
+
+      implicit none
+      TYPE (CP), INTENT(IN) :: F,G
+      real*8, intent(in) :: P(:,:)
+      logical :: CHECKPDIMS
+
+      CHECKPDIMS=(SIZE(F%coef).eq.SIZE(P,2)) .and. &
+                 (SIZE(G%coef).eq.SIZE(P,1))
+
+      end function CHECKPDIMS
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine CONSTPSTOT(F,G,kskip,PS)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -472,13 +753,20 @@
 ! Skips the kskip-th DOF (set kskip=0 to include all DOF)
       
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F,G
+      TYPE (CP), INTENT(IN) :: F,G
       real*8, intent(inout) :: PS(:,:)
       integer, intent(in) :: kskip
       integer :: rF,rG,i,j
 
       rF=SIZE(F%coef)
       rG=SIZE(G%coef)
+
+!     Error checking
+      IF (.not.CHECKPDIMS(F,G,PS)) THEN
+         write(*,*) 'PS is (',SIZE(PS,1),' x ',SIZE(PS,2),&
+                    ') but must be (',rG,' x ',rF,')' 
+         call AbortWithError('CONSTPSTOT(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products
       PS=0.d0
@@ -503,12 +791,19 @@
 ! Skips the kskip-th DOF (set kskip=0 to include all DOF)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       real*8, intent(inout) :: BB(:,:)
       integer, intent(in) :: kskip
       integer :: rF,i,j
 
       rF=SIZE(F%coef)
+
+!     Error checking
+      IF (.not.CHECKPDIMS(F,F,BB)) THEN
+         write(*,*) 'BB is (',SIZE(BB,1),' x ',SIZE(BB,2),&
+                    ') but must be (',rF,' x ',rF,')'
+         call AbortWithError('CONSTBBTOT(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products 
       BB=0.d0
@@ -529,7 +824,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine CONSTPSk(F,G,k,PSk)
+      subroutine CONSTPSk(F,G,k,PS)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! PSk must be allocated before the call to CONSTPSk. 
@@ -539,31 +834,33 @@
 ! (dividing factor by which to produce the product excluding id = k)
       
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F,G
-      real*8, intent(inout) :: PSk(:,:)
+      TYPE (CP), INTENT(IN) :: F,G
+      real*8, intent(inout) :: PS(:,:)
       integer, intent(in)   :: k
       real*8  :: prod1D
-      integer :: rF,rG,i,j,id,ir,gi,gf
+      integer :: rF,rG,i,j,ir,gi,gf
 
       rF=size(F%coef)
       rG=size(G%coef)
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO id=1,k-1
-         gi=gi+F%nbas(id)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,G,PS)) THEN
+         write(*,*) 'PS is (',SIZE(PS,1),' x ',SIZE(PS,2),&
+                    ') but must be (',rG,' x ',rF,')'
+         call AbortWithError('CONSTPSk(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products 
-      PSk=0.d0
+      PS=0.d0
       DO i=1,rG
          DO j=1,rF
             prod1D=0.d0
             DO ir=gi,gf
                prod1D=prod1D+G%base(ir,i)*F%base(ir,j)
             ENDDO
-            PSk(i,j)=prod1D
+            PS(i,j)=prod1D
          ENDDO
       ENDDO
 
@@ -571,7 +868,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine CONSTBBk(F,k,BBk)
+      subroutine CONSTBBk(F,k,BB)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! BBk must be allocated before the call to CONSTBBk. 
@@ -581,37 +878,39 @@
 ! (dividing factor by which to produce the product excluding id = k)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
-      real*8, intent(inout) :: BBk(:,:)
+      TYPE (CP), INTENT(IN) :: F
+      real*8, intent(inout) :: BB(:,:)
       integer, intent(in)   :: k
       real*8  :: prod1D
-      integer :: rF,i,j,id,ir,gi,gf,is
+      integer :: rF,i,j,ir,gi,gf
 
       rF=size(F%coef)
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO id=1,k-1
-         gi=gi+F%nbas(id)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,F,BB)) THEN
+         write(*,*) 'BB is (',SIZE(BB,1),' x ',SIZE(BB,2),&
+                    ') but must be (',rF,' x ',rF,')'
+         call AbortWithError('CONSTBBk(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products
-      BBk=0.d0
+      BB=0.d0
       DO i=1,rF
          DO j=i,rF
             prod1D=0.d0
             DO ir=gi,gf
                prod1D=prod1D+F%base(ir,i)*F%base(ir,j)
             ENDDO
-            BBk(i,j)=prod1D
+            BB(i,j)=prod1D
          ENDDO
       ENDDO
 
 !     Copy elements that are same due to symmetry
       DO i=2,rF
          DO j=1,i-1
-            BBk(i,j)=BBk(j,i)
+            BB(i,j)=BB(j,i)
          ENDDO
       ENDDO
 
@@ -629,22 +928,24 @@
 ! (dividing factor by which to produce the product excluding id = k)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F,G
+      TYPE (CP), INTENT(IN) :: F,G
       real*8, intent(inout) :: PS(:,:)
       integer, intent(in)   :: k
       logical, intent(in)   :: divide
       real*8  :: prod1D
-      integer :: rF,rG,i,j,id,ir,gi,gf
+      integer :: rF,rG,i,j,ir,gi,gf
 
       rF=size(F%coef)
       rG=size(G%coef)
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO id=1,k-1
-         gi=gi+F%nbas(id)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,G,PS)) THEN
+         write(*,*) 'PS is (',SIZE(PS,1),' x ',SIZE(PS,2),&
+                    ') but must be (',rG,' x ',rF,')'
+         call AbortWithError('UpdatePS(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products 
       DO i=1,rG
@@ -670,21 +971,23 @@
 ! or dividing by < F_k^l , F_k^l' >, (divide=.TRUE.)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       real*8, intent(inout) :: BB(:,:)
       integer, intent(in) :: k
       logical, intent(in) :: divide
       real*8  :: prod1D
-      integer :: rF,i,j,id,ir,gi,gf,is
+      integer :: rF,i,j,ir,gi,gf
 
       rF=size(F%coef)
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO id=1,k-1
-         gi=gi+F%nbas(id)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,F,BB)) THEN
+         write(*,*) 'BB is (',SIZE(BB,1),' x ',SIZE(BB,2),&
+                    ') but must be (',rF,' x ',rF,')'
+         call AbortWithError('UpdateBB(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products
       DO i=1,rF
@@ -709,7 +1012,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine CONSTPSTOT_OMP(F,G,kskip,PS)
+      subroutine CONSTPSTOT_OMP(F,G,kskip,PS,pll)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! PS must be allocated before the call to CONSTPSTOT.
@@ -717,17 +1020,24 @@
 ! which appears in the second part of the normal equations for ALS
 ! for 1 < l < rG and 1 < l' < rF.
 ! Skips the kskip-th DOF (set kskip=0 to include all DOF)
-! OpenMP parallel version
+! OpenMP parallel version (pll used to direct interface)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F,G
+      TYPE (CP), INTENT(IN) :: F,G
       real*8, intent(inout) :: PS(:,:)
-      integer, intent(in) :: kskip
+      integer, intent(in) :: kskip,pll
       integer :: rF,rG,rT,i,j,l
 
       rF=SIZE(F%coef)
       rG=SIZE(G%coef)
       rT=rG*rF
+
+!     Error checking
+      IF (.not.CHECKPDIMS(F,G,PS)) THEN
+         write(*,*) 'PS is (',SIZE(PS,1),' x ',SIZE(PS,2),&
+                    ') but must be (',rG,' x ',rF,')'
+         call AbortWithError('CONSTPSTOT_OMP(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products
 !$omp parallel
@@ -744,7 +1054,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine CONSTBBTOT_OMP(F,kskip,BB)
+      subroutine CONSTBBTOT_OMP(F,kskip,BB,pll)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! BB must be allocated before the call to CONSTBBTOT.
@@ -753,16 +1063,23 @@
 ! for 1 < l < rG and 1 < l' < rF.
 ! Different from CONSTPSTOT since BB matrix is symmetric
 ! Skips the kskip-th DOF (set kskip=0 to include all DOF)
-! OpenMP parallel version
+! OpenMP parallel version (pll used to direct interface)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       real*8, intent(inout) :: BB(:,:)
-      integer, intent(in) :: kskip
+      integer, intent(in) :: kskip,pll
       integer :: rF,rT,i,j,l
 
       rF=SIZE(F%coef)
       rT=rF*rF
+
+!     Error checking
+      IF (.not.CHECKPDIMS(F,F,BB)) THEN
+         write(*,*) 'BB is (',SIZE(BB,1),' x ',SIZE(BB,2),&
+                    ') but must be (',rF,' x ',rF,')'
+         call AbortWithError('CONSTBBTOT_OMP(): dimension mismatch')
+      ENDIF
 
 !     Compute inner products
 !$omp parallel
@@ -787,7 +1104,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine CONSTPSk_OMP(F,G,k,PSk)
+      subroutine CONSTPSk_OMP(F,G,k,PS,pll)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! PSk must be allocated before the call to CONSTPSk.
@@ -795,24 +1112,26 @@
 ! which occurs in the second part of the normal equations for ALS
 ! for 1 < l < rG and 1 < l' < rF
 ! (dividing factor by which to produce the product excluding id = k)
-! OpenMP parallel version
+! OpenMP parallel version (pll used to direct interface)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F,G
-      real*8, intent(inout) :: PSk(:,:)
-      integer, intent(in)   :: k
+      TYPE (CP), INTENT(IN) :: F,G
+      real*8, intent(inout) :: PS(:,:)
+      integer, intent(in)   :: k,pll
       integer :: rF,rG,rT,i,j,l,gi,gf
 
       rF=size(F%coef)
       rG=size(G%coef)
       rT=rG*rF
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO l=1,k-1
-         gi=gi+F%nbas(l)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,G,PS)) THEN
+         write(*,*) 'PS is (',SIZE(PS,1),' x ',SIZE(PS,2),&
+                    ') but must be (',rG,' x ',rF,')'
+         call AbortWithError('CONSTPSk_OMP(): dimension mismatch')
+      ENDIF
 
 !     Compute inner product for the k-th DOF
 !$omp parallel
@@ -820,7 +1139,7 @@
       DO l=1,rT
          i=(l-1)/rF+1
          j=mod(l-1,rF)+1
-         PSk(i,j)=dot_product(G%base(gi:gf,i),F%base(gi:gf,j))
+         PS(i,j)=dot_product(G%base(gi:gf,i),F%base(gi:gf,j))
       ENDDO
 !$omp enddo
 !$omp end parallel
@@ -829,7 +1148,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine CONSTBBk_OMP(F,k,BBk)
+      subroutine CONSTBBk_OMP(F,k,BB,pll)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! BBk must be allocated before the call to CONSTBBk.
@@ -837,24 +1156,26 @@
 ! which occurs in the second part of the normal equations for ALS
 ! for 1 < l < nrk and 1 < l' < nrk
 ! (dividing factor by which to produce the product excluding id = k)
-! OpenMP parallel version
+! OpenMP parallel version (pll used to direct interface)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
-      real*8, intent(inout) :: BBk(:,:)
-      integer, intent(in)   :: k
+      TYPE (CP), INTENT(IN) :: F
+      real*8, intent(inout) :: BB(:,:)
+      integer, intent(in)   :: k,pll
       real*8  :: prod1D
       integer :: rF,rT,i,j,l,gi,gf
 
       rF=size(F%coef)
       rT=rF*rF
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO l=1,k-1
-         gi=gi+F%nbas(l)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,F,BB)) THEN
+         write(*,*) 'BB is (',SIZE(BB,1),' x ',SIZE(BB,2),&
+                    ') but must be (',rF,' x ',rF,')'
+         call AbortWithError('CONSTBBk_OMP(): dimension mismatch')
+      ENDIF
 
 !     Compute inner product for the k-th DOF
 !$omp parallel
@@ -863,7 +1184,7 @@
          i=(l-1)/rF+1
          j=mod(l-1,rF)+1
          IF (j.ge.i) &
-            BBk(i,j)=dot_product(F%base(gi:gf,i),F%base(gi:gf,j))
+            BB(i,j)=dot_product(F%base(gi:gf,i),F%base(gi:gf,j))
       ENDDO
 !$omp enddo
 !$omp end parallel
@@ -871,7 +1192,7 @@
 !     Copy elements that are same due to symmetry
       DO i=2,rF
          DO j=1,i-1
-            BBk(i,j)=BBk(j,i)
+            BB(i,j)=BB(j,i)
          ENDDO
       ENDDO
 
@@ -879,7 +1200,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine UpdatePS_OMP(F,G,k,PS,divide)
+      subroutine UpdatePS_OMP(F,G,k,PS,divide,pll)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! PS must be allocated before the call to CONSTPSk.
@@ -887,12 +1208,12 @@
 ! which occurs in the second part of the normal equations for ALS
 ! for 1 < l < rG and 1 < l' < rF, by multiplying by or dividing out
 ! PS for the k-th DOF
-! OpenMP parallel version
+! OpenMP parallel version (pll used to direct interface)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F,G
+      TYPE (CP), INTENT(IN) :: F,G
       real*8, intent(inout) :: PS(:,:)
-      integer, intent(in)   :: k
+      integer, intent(in)   :: k,pll
       logical, intent(in)   :: divide
       real*8  :: prod1D
       integer :: rF,rG,rT,i,j,l,gi,gf
@@ -900,13 +1221,15 @@
       rF=size(F%coef)
       rG=size(G%coef)
       rT=rG*rF
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO l=1,k-1
-         gi=gi+F%nbas(l)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,G,PS)) THEN
+         write(*,*) 'PS is (',SIZE(PS,1),' x ',SIZE(PS,2),&
+                    ') but must be (',rG,' x ',rF,')'
+         call AbortWithError('UpdatePS_OMP(): dimension mismatch')
+      ENDIF
 
 !     Compute inner product and update or downdate
 !$omp parallel
@@ -925,31 +1248,33 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine UpdateBB_OMP(F,k,BB,divide)
+      subroutine UpdateBB_OMP(F,k,BB,divide,pll)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This subroutine updates matrix BB(l,l')= PI_kp < F_kp^l , F_kp^l' >
 ! by multiplying by < F_k^l , F_k^l' >, (divide=.FALSE.)
 ! or dividing by < F_k^l , F_k^l' >, (divide=.TRUE.)
-! OpenMP parallel version
+! OpenMP parallel version (pll used to direct interface)
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       real*8, intent(inout) :: BB(:,:)
-      integer, intent(in) :: k
+      integer, intent(in) :: k,pll
       logical, intent(in) :: divide
       real*8  :: prod1D
       integer :: rF,rT,i,j,l,gi,gf,is
 
       rF=size(F%coef)
       rT=rF*rF
+      gi=F%ibas(k)
+      gf=F%fbas(k)
 
-!     Calc basis ranges
-      gi=1
-      DO l=1,k-1
-         gi=gi+F%nbas(l)
-      ENDDO
-      gf=gi+F%nbas(k)-1
+!     Error checking
+      IF (.not.CHECKPDIMS(F,F,BB)) THEN
+         write(*,*) 'BB is (',SIZE(BB,1),' x ',SIZE(BB,2),&
+                    ') but must be (',rF,' x ',rF,')'
+         call AbortWithError('UpdateBB_OMP(): dimension mismatch')
+      ENDIF
 
 !     Compute inner product and update or downdate
 !$omp parallel
@@ -985,7 +1310,7 @@
 ! COND = sqrt (sum_l=1^rank s_l) / ||F||
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       real*8  :: COND,num
       integer :: rF,i
       
@@ -1006,17 +1331,17 @@
 ! Computes the two norm ||F-G||_2
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: G,F
-      TYPE (CPvec)  :: H
+      TYPE (CP), INTENT(IN) :: G,F
+      TYPE (CP)  :: H
       integer :: rF,rG
       real*8  :: calc_FmG
 
       rF=SIZE(F%coef)
 
-      call CopyWtoV(H,F)
+      H=CopyCP(F)
       call SUMVECVEC(H,1.d0,G,-1.d0)
       calc_FmG=sqrt(abs(PRODVV(H)))
-      call FlushCPvec(H)
+      call FlushCP(H)
 
       end function calc_FmG
 
@@ -1029,7 +1354,7 @@
 ! dimensions equal
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: F
+      TYPE (CP), INTENT(IN) :: F
       integer :: i,j,k,l,n,rF,ndof
       real*8  :: prod1,sum1,diagnorm
 
@@ -1066,15 +1391,15 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE CPMatVecProd(M,v,w,trans)
+      subroutine CPMatVecProd(M,v,w,trans)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Matrix-vector product: CP-format matrix times CP-format vector:
 ! M * v = w. Set trans = .TRUE. to do M^T * v = w. M must be square.
 
-      IMPLICIT NONE
-      TYPE (CPvec), INTENT(IN)  :: M,v
-      TYPE (CPvec), INTENT(OUT) :: w
+      implicit none
+      TYPE (CP), INTENT(IN)  :: M,v
+      TYPE (CP), INTENT(OUT) :: w
       logical, intent(in)  :: trans
       integer, allocatable :: nbas(:),gst(:,:)
       integer :: gi(3),gf(3)
@@ -1104,7 +1429,7 @@
       ENDDO
 
 !     Compute the matrix-vector product; store in w
-      call NewCPvec(w,nbas,rkw)
+      w=NewCP(rkw,nbas)
 
       ALLOCATE(gst(ndof,3))
       gst(1,:)=1
@@ -1135,225 +1460,7 @@
 
       DEALLOCATE(nbas,gst)
 
-      END SUBROUTINE CPMatVecProd
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      SUBROUTINE CPMatOrdVecProd(M,v,w)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Matrix-vector product: matrix in CP-format times ordinary vector
-! M * v = w
-
-      IMPLICIT NONE
-      TYPE (CPvec), INTENT(IN) :: M
-      REAL*8, INTENT(IN)  :: v(:)
-      REAL*8, INTENT(OUT) :: w(:)
-      INTEGER :: i,j,k,nr,nc,nrk
-      REAL*8 :: wtmp
-
-!     Error checking
-      IF (SIZE(M%nbas).ne.2) THEN
-         write(*,*) 'Must have exactly 2 DOFs in CP-mat-vec-product'
-         call AbortWithError('Error in CP2MatOrdVecProd()')
-      ENDIF
-      IF (M%nbas(2).ne.SIZE(v)) THEN
-         write(*,*) 'Mismatch in matrix and vector-in dimensions'
-         call AbortWithError('Error in CP2MatOrdVecProd()')
-      ENDIF
-      IF (M%nbas(1).ne.SIZE(w)) THEN
-         write(*,*) 'Mismatch in matrix and vector-out dimensions'
-         call AbortWithError('Error in CP2MatOrdVecProd()')
-      ENDIF
-
-!     Set parameters
-      nrk=SIZE(M%coef)
-      nr=M%nbas(1)
-      nc=M%nbas(2)
-
-      w=0.d0
-
-!     Matrix-vector product
-      DO i=1,nrk
-         wtmp=0.d0
-         DO j=1,nc
-            wtmp=wtmp+M%base(nr+j,i)*v(j)
-         ENDDO
-         wtmp=M%coef(i)*wtmp
-         DO j=1,nr
-            w(j)=w(j)+M%base(j,i)*wtmp
-         ENDDO
-      ENDDO
-
-      END SUBROUTINE CPMatOrdVecProd
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      SUBROUTINE CPMatMatProd(M1,t1,M2,t2,M3,nr1,nc1,nr2,nc2)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Matrix-matrix product: matrices in CP-format M3=M1*M2
-! t1,t2 = transpose of 1st,2nd matrices (choose .FALSE. for normal)
-
-      IMPLICIT NONE
-      TYPE (CPvec), INTENT(IN)  :: M1,M2
-      TYPE (CPvec), INTENT(OUT) :: M3
-      LOGICAL, INTENT(IN)  :: t1,t2
-      INTEGER, INTENT(IN)  :: nr1(:),nc1(:),nr2(:),nc2(:)
-      INTEGER, ALLOCATABLE :: nbas(:)
-      REAL*8, ALLOCATABLE  :: tmat1(:,:),tmat2(:,:),tmat3(:,:),tvec(:)
-      INTEGER :: gi(3),gf(3),ndof,rk1,rk2,rk3,i,j,k,ik
-
-!     Initializations
-      ndof=SIZE(M1%nbas)
-      rk1=SIZE(M1%coef)
-      rk2=SIZE(M2%coef)
-      rk3=rk1*rk2
-
-!     Error checking
-      IF (SIZE(M2%nbas).ne.ndof .or. &
-          SIZE(nr1).ne.ndof .or. SIZE(nr2).ne.ndof .or. &
-          SIZE(nc1).ne.ndof .or. SIZE(nc2).ne.ndof) call &
-         AbortWithError('CPMatMatProd(): inconsistent # DOF')
-
-!     Determine nbas based on the expected dimensions of M3. If there
-!     is a mismatch in dimension, MatrixMult() will trap this error,
-!     so it is not tested here
-      ALLOCATE(nbas(ndof))
-      IF (t1) THEN
-         nbas=nc1
-      ELSE
-         nbas=nr1
-      ENDIF
-      IF (t2) THEN
-         nbas=nbas*nr2
-      ELSE
-         nbas=nbas*nc2
-      ENDIF
-!     Use NewCPvec() instead of NewCPmat() since M3 may not be square
-      call NewCPvec(M3,nbas,rk3)
-      DEALLOCATE(nbas)
-
-!     Multiply the coefficients
-      ik=1
-      DO k=1,rk2
-         DO i=1,rk1
-            M3%coef(ik)=M1%coef(i)*M2%coef(k)
-            ik=ik+1
-         ENDDO
-      ENDDO
-
-!     Multiply the matrices stored in M1%base and M2%base
-      gi(:)=1
-      DO j=1,ndof
-         gf(1)=gi(1)+M1%nbas(j)-1
-         gf(2)=gi(2)+M2%nbas(j)-1
-         gf(3)=gi(3)+M3%nbas(j)-1
-
-!        Loop over terms in H
-         ik=1
-         DO k=1,rk2
-!           Get the matrix in M2 for the j-th DOF
-            call Vec2Mat(M2%base(gi(2):gf(2),k),tmat2,nr2(j),nc2(j))
-            DO i=1,rk1
-!              Get the matrix in M1 for the j-th DOF
-               call Vec2Mat(M1%base(gi(1):gf(1),i),tmat1,nr1(j),nc1(j))
-!              Matrix multiply tmat1*tmat2=tmat3
-               call MatrixMult(tmat1,t1,tmat2,t2,tmat3)
-!              Convert product matrix to vector; then put in M3
-               call Mat2Vec(tvec,tmat3,.FALSE.)
-               M3%base(gi(3):gf(3),ik)=tvec
-               DEALLOCATE(tmat1,tmat3,tvec)
-               ik=ik+1
-            ENDDO
-            DEALLOCATE(tmat2)
-         ENDDO
-         gi(1)=gi(1)+M1%nbas(j)
-         gi(2)=gi(2)+M2%nbas(j)
-         gi(3)=gi(3)+M3%nbas(j)
-      ENDDO
-
-      END SUBROUTINE CPMatMatProd
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      SUBROUTINE CPMatMatProd2(M1,tp1,M2,tp2,M3)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Matrix-matrix product: matrices in CP-format M3=M1*M2
-! tp1,tp2 = transpose of 1st,2nd matrices (choose .FALSE. for normal)
-
-      IMPLICIT NONE
-      TYPE (CPvec), INTENT(IN)  :: M1,M2
-      TYPE (CPvec), INTENT(OUT) :: M3
-      TYPE (CPvec) :: v
-      LOGICAL, INTENT(IN) :: tp1,tp2
-      INTEGER :: nbas3(2)
-      INTEGER :: i,j,k,r1,c1,r2,c2,kr1,kc1,kr2,kc2,nrk1,nrk2
-      INTEGER :: nr1,nc1,nr2,nc2
-      REAL*8  :: wtmp
-
-!     Error checking
-      IF (SIZE(M1%nbas).ne.2 .or. SIZE(M2%nbas).ne.2) THEN
-         write(*,*) 'Error: must have 2 DOFs in CP-mat-mat-product'
-         call AbortWithError('Error in CP2MatMatProd2()')
-      ENDIF
-
-!     Set parameters: some must be swapped if 'tpX' is .TRUE. (matrix
-!     transpose case)
-      nrk1=SIZE(M1%coef)
-      nrk2=SIZE(M2%coef)
-      r1=1
-      c1=2
-      kr1=0
-      kc1=M1%nbas(1)
-      IF (tp1) THEN
-         r1=2
-         c1=1
-         kr1=M1%nbas(1)
-         kc1=0
-      ENDIF
-      r2=1
-      c2=2
-      kr2=0
-      kc2=M2%nbas(1)
-      IF (tp2) THEN
-         r2=2
-         c2=1
-         kr2=M2%nbas(1)
-         kc2=0
-      ENDIF
-      nr1=M1%nbas(r1)
-      nc1=M1%nbas(c1)
-      nr2=M2%nbas(r2)
-      nc2=M2%nbas(c2)
-
-      IF (nc1.ne.nr2) THEN
-         write(*,*) 'Error: mismatch in matrix dimensions'
-         call AbortWithError('Error in CP2MatMatProd2()')
-      ENDIF
-
-      nbas3=(/nr1,nc2/)
-
-      call GetZeroCPvec(M3,nbas3)
-
-!     Matrix-matrix product
-      DO i=1,nrk1
-         DO j=1,nrk2
-            call NewCPvec(v,nbas3,1)
-            v%base(1:nr1,1)=M1%base(kr1+1:kr1+nr1,i)
-            v%base(nr1+1:nr1+nc2,1)=M2%base(kc2+1:kc2+nc2,j)
-            v%coef(1)=M1%coef(i)*M2%coef(j)
-            wtmp=0.d0
-            DO k=1,nc1
-               wtmp=wtmp+M1%base(kc1+k,i)*M2%base(kr2+k,j)
-            ENDDO
-            call SUMVECVEC(M3,1.d0,v,wtmp)
-            call FlushCPvec(v)
-         ENDDO
-      ENDDO
-
-      END SUBROUTINE CPMatMatProd2
+      end subroutine CPMatVecProd
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1364,8 +1471,8 @@
 ! No reduction or normalization is done here
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec), INTENT(IN)    :: G
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: G
       real*8  :: vivj
 
       vivj=PRODVV(F,G)
@@ -1381,8 +1488,8 @@
 ! Augments F to rank nrk by adding random terms with small coefficients
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec) :: G
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP) :: G
       real*8, parameter   :: smallnr=1.d-12
       integer, intent(in) :: nrk
       integer :: rF
@@ -1392,13 +1499,46 @@
 !     No need to do anything if the rank of F is already large enough
       IF (rF.ge.nrk) RETURN
 
-      call GetRandomCPvec(G,F%nbas,nrk-rF)
+      G=RandomCP(F,nrk-rF)
       call NORMBASE(G)
       G%coef=MINVAL(F%coef)*smallnr
 
       call SUMVECVEC(F,1.d0,G,1.d0)
 
       end subroutine AugmentVWithRandom
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine AugmentVWithRandomN(F,nrk)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Augments F to rank nrk by adding random terms with small coefficients
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP) :: G
+      real*8, parameter    :: smallnr=1.d-12
+      logical, allocatable :: domode(:)
+      integer, intent(in)  :: nrk
+      integer :: rF
+
+      rF=SIZE(F%coef)
+
+!     No need to do anything if the rank of F is already large enough
+      IF (rF.ge.nrk) RETURN
+
+      G=RandomCP(F,nrk-rF)
+      G%base(:,:)=1.d0
+      call NORMALIZE(G)
+      G%coef=MINVAL(F%coef)*smallnr
+      allocate(domode(SIZE(G%nbas)))
+      domode(:)=.TRUE.
+!      call CPMatrixZeroOffDiag(G,domode)
+      deallocate(domode)
+
+      call SUMVECVEC(F,1.d0,G,1.d0)
+
+      end subroutine AugmentVWithRandomN
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

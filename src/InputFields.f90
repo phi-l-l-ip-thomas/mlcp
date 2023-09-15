@@ -4,13 +4,14 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      use ERRORTRAP
-      use UTILS
+      USE ERRORTRAP
+      USE UTILS
 
       implicit none
       TYPE CPpar
-           integer :: ncycle,npow,lowmem,truncation
+           integer :: ncycle,npow,lowmem
            integer :: ncpu,psirank,hrank,psinals,hnals
+           integer :: rs(33)
            real*8  :: solvtol
            logical :: update,dorestart,opt
            character(len=48) :: resfile
@@ -41,7 +42,7 @@
       implicit none
       TYPE (CPpar) :: cpp
       character(len=64), intent(in) :: fnm
-      integer      :: u,InpStat
+      integer      :: i,u,InpStat
 
 !     Open input file
       u = LookForFreeUnit()
@@ -89,9 +90,6 @@
 !     low memory calculation type
       read(u,*)
       read(u,*) cpp%lowmem
-!     basis truncation option
-      read(u,*)
-      read(u,*) cpp%truncation
 !     do vector updates
       read(u,*)
       read(u,*) cpp%update
@@ -104,6 +102,9 @@
 !     restart file name
       read(u,*)
       read(u,*) cpp%resfile
+!     random seed
+      read(u,*)
+      read(u,*) (cpp%rs(i),i=1,33)
 
       CLOSE(u)
 
@@ -118,6 +119,7 @@
 
       implicit none
       TYPE (CPpar),INTENT(IN) :: cpp
+      integer :: i
 
       write(*,'(X,A/)') '********** Input parameters read: ***********'
       write(*,'(X,A,2X,A5)') 'The Hamiltonian will be set up for    :',&
@@ -144,8 +146,6 @@
                              cpp%npow
       write(*,'(X,A,2X,I5)') 'Low-memory calculation type   (lowmem):',&
                              cpp%lowmem
-      write(*,'(X,A,2X,I5)') 'Basis truncation option   (truncation):',&
-                             cpp%truncation
       write(*,'(X,A,2X,L5)') 'Use vector updates            (update):',&
                              cpp%update
       write(*,'(X,A,2X,L5)') 'Optimize PES by coord. rotation  (opt):',&
@@ -154,6 +154,9 @@
                 'Solver convergence criterion (solvtol):  ',cpp%solvtol
       write(*,'(X,A,2X,A)') 'Restart file name            (resfile):',&
                              cpp%resfile
+      write(*,'(X,A,2X,33(I0,X))') &
+                            'Random seed                       (rs):',&
+                             (cpp%rs(i),i=1,33)
       write(*,'(/X,A)') '*********************************************'
 
       end subroutine PrintMLCPInputs

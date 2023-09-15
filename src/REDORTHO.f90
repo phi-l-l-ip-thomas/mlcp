@@ -22,8 +22,8 @@
 ! terms are retained
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: G
-      TYPE (CPvec), INTENT(OUT) :: F
+      TYPE (CP), INTENT(IN)  :: G
+      TYPE (CP), INTENT(OUT) :: F
       TYPE (Configs) :: v
       integer, intent(in)  :: rF
 
@@ -45,7 +45,7 @@
 ! give slightly different results.
 
       implicit none
-      TYPE (CPvec), INTENT(IN)    :: G
+      TYPE (CP), INTENT(IN)    :: G
       TYPE (Configs), INTENT(OUT) :: v
       integer, intent(in) :: rF
       integer, parameter  :: switch=100
@@ -68,7 +68,7 @@
 ! number of configurations to keep
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: G
+      TYPE (CP), INTENT(IN)  :: G
       TYPE (Configs), intent(out) :: v
       TYPE (Configs) :: w
       integer, intent(in)  :: rF
@@ -211,7 +211,7 @@
 ! number of configurations to keep per term
 
       implicit none
-      TYPE (CPvec), INTENT(IN)  :: G
+      TYPE (CP), INTENT(IN)  :: G
       TYPE (Configs), intent(out) :: v
       TYPE (Configs) :: w
       integer, intent(in)  :: rF
@@ -489,8 +489,8 @@
 ! After sorting, the rank is truncated at rrG if it exceeds this value
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: G
-      TYPE (CPvec) :: F
+      TYPE (CP), INTENT(INOUT) :: G
+      TYPE (CP) :: F
       integer, intent(in) :: rrG
       integer :: rF,rG,i,j,k,l,ndof,ndiff,idiff,gst,pos
       real*8  :: norm1D,cuttol
@@ -500,7 +500,7 @@
       ndof=SIZE(G%nbas)
       rG=SIZE(G%coef)
       cuttol=MAXVAL(G%coef)*tol
-      call NewCPvec(F,G%nbas,rG)
+      F=NewCP(rG,G%nbas)
 
       DO
 !        Copy the first term from G to F
@@ -565,17 +565,17 @@
 
 !     At this point the sorted terms are the first rF terms in F. Post-
 !     process (normalize/sort/truncate) and transfer terms to G
-      call FlushCPvec(G)
-      call NewCPvec(G,F%nbas,rF)
+      call FlushCP(G)
+      G=NewCP(rF,F%nbas)
       call GenCopyWtoV(G,F,1,rF,1,rF)
-      call FlushCPvec(F)
+      call FlushCP(F)
       call NORMBASE(G)
       call ordre(G,F)
-      call FlushCPvec(G)
+      call FlushCP(G)
       rF=min(rF,rrG)
-      call NewCPvec(G,F%nbas,rF)
+      G=NewCP(rF,F%nbas)
       call GenCopyWtoV(G,F,1,rF,1,rF)
-      call FlushCPvec(F)
+      call FlushCP(F)
 
       end subroutine reduc_bysorting
 
@@ -587,7 +587,7 @@
 ! Compares the gr-th term of G and the fr-th term of F for equality
 
       implicit none
-      TYPE (CPvec), INTENT(IN) :: G,F
+      TYPE (CP), INTENT(IN) :: G,F
       integer, intent(in)  :: gr,fr
       integer, intent(out) :: ndiff,idiff,pos
       integer :: ndof,gst,gi,k,l,bsign

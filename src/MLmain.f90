@@ -8,13 +8,13 @@
       USE UTILS
       USE MODECOMB
       USE SEPDREPN
-      USE HAMILSETUP
-      USE MUNKRES
+      USE HAMILSETUP 
       USE INPUTFIELDS
       USE RESTART
       USE REDUCTION
       USE ALSPOW
-      USE MODHVEC
+      USE LINSOLVER
+      USE CPMMM
       USE BLOCKUTILS
       USE MODEH
       USE GUESS
@@ -22,14 +22,16 @@
       USE UPDATER
       USE ANALYZER
       USE CHEBLIB
-      USE GPUINTERTWINE
+!!!
+      USE TESTCPR
+
 
       implicit none
       TYPE (CPpar)        :: cpp
       TYPE (MLtree)       :: ML
       TYPE (Hamiltonian)  :: Ham
-      TYPE (HopList)      :: HL
-      TYPE (CPvec), ALLOCATABLE :: Q(:)
+      TYPE (CP), ALLOCATABLE :: Q(:)
+      TYPE (CP) :: H,W
       real*8, allocatable :: eigv(:),delta(:)
       integer :: rs(33),d(3),t(3)
       integer :: il,im,j,trm,ilrst,imrst
@@ -42,16 +44,19 @@
       rs=(/0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,&
           mod(INT(t1),7),d(1),d(2),d(3),t(1),t(2),t(3),mod(INT(t1),5)/)
       call random_seed(PUT=rs)
+!      write(*,*) 'Random seed = ',rs
 
       write(*,'(X,A/)') '############################################'
       write(*,*)        '     Multi-layer CP-format TISE solver      '
       write(*,*)        '           by Phillip S. Thomas             '
       write(*,*)        '       based on the CP-format solver        '
       write(*,*)        '             of Arnaud Leclerc              '
-      write(*,*)        '          Version ML2-gpu 09-14-2023        '
+      write(*,*)        '          Version ML2f 04-27-2020           '
       write(*,'(/X,A/)') '############################################'
 
       call PrintWallTime('MLCP initialized')
+
+!      call Test_calcPk()
 
 !     Set up the mode combination module, read input
       write(*,'(/X,A/)') 'Setting up mode-combination module...'
@@ -89,6 +94,17 @@
       call RestartSetup(ilrst,imrst,cpp,Ham,ML)
       IF (ilrst.lt.1) call SaveEigenInfo(1,ML%nmode(1),cpp,Ham,ML)
 
+      IF (ANY(cpp%rs.ne.0)) THEN
+         rs(1:33)=cpp%rs(1:33)
+         write(*,'(/X,A/)') 'Random seed used from input file...'     
+      ELSE
+         rs=(/0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,&
+         mod(INT(t1),7),d(1),d(2),d(3),t(1),t(2),t(3),mod(INT(t1),5)/)
+         write(*,'(/X,A,33(X,I0)/)') 'Random seed generated: ',&
+                                    (rs(j),j=1,33)
+      ENDIF
+      call random_seed(PUT=rs)
+
 !!!!!! --- MAIN RUN --- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
       write(*,'(/X,A)') '***** MAIN RUN *****'
@@ -104,10 +120,11 @@
             write(*,'(/,X,A,I0,A,I0,/)') 'LAYER-MODE: ',il,'-',im
 
 !           Build the mode block (Q) and Hamiltonian matrix (H) here
-            call BuildModeHamiltonian(il,im,Ham,HL,ML,cpp)
+            call BuildModeHamiltonian(il,im,H,Ham,ML,cpp)
 
 !           Make the initial guess
-            call GuessPsi(il,im,cpp%truncation,eigv,Q,Ham,ML)
+            call GuessPsi(il,im,eigv,Q,Ham,ML)
+            W=GuessWeights(il,im,4000.0,Ham,ML)
 
 !           Calculate the mode eigenfunctions with the solver of choice
 !           If the mode on the current layer contains only one mode from
@@ -118,8 +135,8 @@
             IF (Ham%ndof(trm,il).eq.1 .and. Ham%nop(trm,il).eq.1) THEN
                write(*,'(3X,A)') '(Mode solved previously)'
             ELSE
-               call SolverAlg(eigv,delta,cpp,Q,Ham,HL,il,ML%nlayr)
-               call FlushHopList(HL)
+               call SolverAlg(eigv,delta,cpp,Q,H,W,il,ML%nlayr)
+
 !              Print the wall time upon completion of the solver
                write(frmt,'(X,2(A,I0),A)') &
                'Layer-Mode ',il,'-',im,': solver finished'
@@ -137,6 +154,8 @@
             call SaveEigenInfo(il,im,cpp,Ham,ML)
 
             DEALLOCATE(eigv,Q)
+            call FlushCP(H)
+            call FlushCP(W)
          ENDDO
       ENDDO
       write(*,*)
@@ -154,7 +173,7 @@
       call DisposeReduction()
       call DisposeALSPow()
       call DisposeALSUtils()
-      call DisposeGPUmvp()
+      call DisposeLinSolver()
       call DisposeMunkres()
       call DisposeUpdateModule()
       call DisposeAnalModule()

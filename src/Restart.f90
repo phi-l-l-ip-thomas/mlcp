@@ -5,12 +5,12 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Restart a crashed calculation (provided it doesn't crash too hard!)
 
-      use ERRORTRAP
-      use UTILS
-      use MODECOMB
-      use INPUTFIELDS
-      use HAMILSETUP
-      use SEPDREPN
+      USE ERRORTRAP
+      USE UTILS
+      USE MODECOMB
+      USE INPUTFIELDS
+      USE HAMILSETUP
+      USE SEPDREPN
 
       CONTAINS
 
@@ -101,7 +101,7 @@
       TYPE (MLtree), INTENT(IN) :: ML
       TYPE (MLtree) :: MLrst
       character(len=64) :: fnm
-      integer :: il,im
+      integer :: il,im,j
 
 !     Read the restart input files
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
@@ -115,12 +115,6 @@
                     '; New system: ',cpp%system
          call AbortWithError(&
          'ValidateRestart(): System change not allowed in a restart!')
-      ENDIF
-      IF (cpp%truncation.ne.cprst%truncation) THEN
-         write(*,*) 'Old choice of truncation: ',cprst%truncation,&
-                    '; New choice of truncation: ',cpp%truncation
-         call AbortWithError(&
-         'ValidateRestart(): truncation must not change in a restart!')
       ENDIF
       IF (cpp%opt.neqv.cprst%opt) THEN
          write(*,*) 'Old choice of opt: ',cprst%opt,&
@@ -156,6 +150,9 @@
          ' * update changed from ',cprst%update,' to ',cpp%update
       IF (cpp%solvtol.ne.cprst%solvtol) write(*,*) &
          ' * solvtol changed from ',cprst%solvtol,' to ',cpp%solvtol
+      IF (.not.ALL(cpp%rs.eq.cprst%rs)) write(*,'(X,2(A,33(I0,X)))') &
+         ' * rs changed from ',(cpp%rs(j),j=1,33),&
+                        ' to ',(cprst%rs(j),j=1,33)
       write(*,*)
 
 !     Validate input against layers.rst. Make sure that the ordering of
@@ -192,7 +189,7 @@
       implicit none
       TYPE (CPpar) :: cpp
       character(len=64) :: fnm
-      integer :: u
+      integer :: u,j
 
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
 
@@ -236,10 +233,7 @@
 !     low memory calculation type
       write(u,'(A)') 'lowmem'
       write(u,'(I16)') cpp%lowmem
-!     basis truncation option
-      write(u,'(A)') 'truncation'
-      write(u,'(I16)') cpp%truncation
-!     use vector updates
+!     USE vector updates
       write(u,'(A)') 'update'
       write(u,'(L16)') cpp%update
 !     PES optimization by coordinate rotation
@@ -251,7 +245,9 @@
 !     restart file name
       write(u,'(A)') 'resfile'
       write(u,'(A48)') cpp%resfile
-
+!     random seed
+      write(u,'(A)') 'random'
+      write(u,'(33(I0,X))') (cpp%rs(j),j=1,33)
       close(u)
 
       end subroutine SaveMLCPInputFile
@@ -583,7 +579,7 @@
 
       implicit none
       TYPE (CPpar), INTENT(INOUT) :: cpp
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: Q(:)
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
       real*8, intent(inout)  :: bounds(2),eigv(:),delta(:)
       integer, intent(inout) :: isavi
       logical, intent(out) :: success
@@ -617,8 +613,8 @@
 ! Writes wavefunction to file for restart
 
       implicit none
-      TYPE (CPvec), ALLOCATABLE, INTENT(INOUT) :: Q(:)
-      TYPE (CPvec), ALLOCATABLE :: Qt(:)
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
+      TYPE (CP), ALLOCATABLE :: Qt(:)
       real*8, intent(inout)  :: bounds(2),eigv(:),delta(:)
       integer, intent(inout) :: isvi
       character(len=64), intent(in) :: fnm
@@ -689,7 +685,7 @@
             ENDDO
             IF (.not.success) EXIT
 
-            call NewCPvec(Qt(i),nbas,nrk)
+            Qt(i)=NewCP(nrk,nbas)
             DEALLOCATE(nbas)
             read(u,IOSTAT=InpStat) Qt(i)%coef
             IF (Inpstat /=0) THEN
@@ -737,7 +733,7 @@
 
       implicit none
       TYPE (CPpar), INTENT(IN) :: cpp
-      TYPE (CPvec), ALLOCATABLE, INTENT(IN) :: Q(:)
+      TYPE (CP), ALLOCATABLE, INTENT(IN) :: Q(:)
       real*8, intent(in)  :: bounds(2),eigv(:),delta(:)
       integer, intent(in) :: isavi
       character(len=64)   :: fnm
@@ -762,7 +758,7 @@
 ! Writes wavefunction to file for restart
 
       implicit none
-      TYPE (CPvec), ALLOCATABLE, INTENT(IN) :: Q(:)
+      TYPE (CP), ALLOCATABLE, INTENT(IN) :: Q(:)
       real*8, intent(in)  :: bounds(2),eigv(:),delta(:)
       integer, intent(in) :: isavi
       character(len=64), intent(in) :: fnm

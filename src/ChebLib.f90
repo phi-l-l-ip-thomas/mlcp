@@ -1386,8 +1386,8 @@
       integer :: i
 
 !      ftest=(x-1.d0)*x**2+1.d0
-!      ftest=gaussian(2.d0,PI,5.d0,x)
-!      ftest=gaussian(-2.d0*PI*x,PI,5.d0,x)
+!      ftest=gaussian(x,2.d0,PI,5.d0)
+!      ftest=gaussian(x,-2.d0*PI*x,PI,5.d0)
 !      ftest=HObasisfxn(3,x)
 !      ftest=HObasisfxn(2,x)**2
 !      ftest=morse1D(x)
@@ -1402,18 +1402,100 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function morse1D(x)
+      function my1Dfunction(typ,x,ip1,ip2,rp1,rp2,rp3,rp4,rp5)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! 1D function driver. Call with integer parameters ip1, ip2, and 
+! real parameters rp1, rp2, rp3, rp4, rp5
+
+      implicit none
+      integer, intent(in) :: typ,ip1,ip2
+      real*8, intent(in)  :: x,rp1,rp2,rp3,rp4,rp5
+      real*8 :: my1Dfunction
+
+      IF (typ.eq.0) THEN
+!        q^ip1
+         my1Dfunction=x**ip1
+      ELSEIF (typ.eq.1) THEN
+         my1Dfunction=tanh(rp1*x)**ip1
+      ELSEIF (typ.eq.2) THEN
+         my1Dfunction=morse1D(x,ip1,1.d0,rp1,0.d0)
+      ELSEIF (typ.eq.3) THEN
+         my1Dfunction=sqgauss(x,ip1,rp1)
+      ELSE
+         call AbortWithError('my1Dfunction(): unrecognized function')
+      ENDIF
+
+      end function my1Dfunction
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function sqgauss(x,pow,a)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! 1D power of the square-root of a Gaussian, symmetrized to have odd
+! symmetry for pow=1
+
+      implicit none
+      integer, intent(in) :: pow
+      real*8, intent(in)  :: x,a
+      real*8 :: sqgauss
+
+      IF (mod(pow,2).ne.0) &
+         call AbortWithError('sqgauss(): odd value of pow')
+      sqgauss=(1.d0-exp(-a*x**2))**(pow/2)
+
+      end function sqgauss
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function morse1D(x,pow,b,a,c)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! 1D Morse function
 
       implicit none
-      real*8, intent(in) :: x
+      integer, intent(in) :: pow
+      real*8, intent(in)  :: x,b,a,c
       real*8 :: morse1D
 
-      morse1D=2*((1.d0-exp(-x))**2-1.d0)
+      morse1D=b*(1.d0-exp(-a*(x-c)))**pow
 
       end function morse1D
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine HObasisseries(x,HOx)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Fills array HOx with harmonic oscillator basis functions evaluated
+! at x, orders 0...n-1, where n is the length of HOx
+
+      implicit none
+      real*8, intent(inout) :: HOx(:)
+      real*8, intent(in)    :: x
+      real*8  :: fac
+      integer :: i,n
+
+      n=SIZE(HOx)
+      fac=gaussian(x,1.d0,0.5d0,0.d0)/PI**(0.25d0)
+
+!     n = 0 function
+      HOx(1)=fac
+
+      IF (n.gt.1) THEN
+!        n = 1 function
+         HOx(2)=fac*sqrt(2.d0)*x
+         IF (n.gt.2) THEN
+!           Recursion for n > 1
+            DO i=3,n
+               HOx(i)=sqrt(2.d0/(i-1))*&
+                      (x*HOx(i-1)-sqrt((i-2)/2.d0)*HOx(i-2))
+            ENDDO
+         ENDIF
+      ENDIF
+
+      end subroutine HObasisseries
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1428,7 +1510,7 @@
       real*8  :: fac,rov,ov,HObasisfxn
       integer :: i
 
-      fac=gaussian(1.d0,0.5d0,0.d0,x)/PI**(0.25d0)
+      fac=gaussian(x,1.d0,0.5d0,0.d0)/PI**(0.25d0)
 
       IF (n.lt.0) THEN
          call AbortWithError("HObasisfxn(): n must be >= 0")
@@ -1452,7 +1534,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function gaussian(b,a,c,x)
+      function gaussian(x,b,a,c)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Gaussian function

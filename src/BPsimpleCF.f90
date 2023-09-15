@@ -30,10 +30,10 @@
       TYPE (Configs), INTENT(INOUT) :: C
       TYPE (Configs), INTENT(IN)    :: B    ! Data to fit
       TYPE (Configs), INTENT(OUT)   :: R    ! Residual of fit
-      TYPE (CPvec), INTENT(IN)      :: A    ! Transformation matrix
-      TYPE (CPvec), INTENT(OUT)     :: X,G  ! Solution, Gradient
+      TYPE (CP), INTENT(IN)      :: A    ! Transformation matrix
+      TYPE (CP), INTENT(OUT)     :: X,G  ! Solution, Gradient
       TYPE (Configs) :: Rnew,Xc,Gc,Gc2,Gc3
-      TYPE (CPvec)   :: Ax,Xnew,Gnew,Xt
+      TYPE (CP)   :: Ax,Xnew,Gnew,Xt
       integer :: iter,maxit,rkx,i,maxnmode,l0
       real*8  :: sigma,gtol,ctol,dtol,fold,fnew,fdelta
       real*8  :: gg,dgg,gam,l1
@@ -67,7 +67,7 @@
 !     Initialize residual config. list and objective function value
       call CPMatVecProd(A,X,Ax,.FALSE.)
       call GetResidualCF(B,Ax,R,fnew)
-      call FlushCPvec(Ax)
+      call FlushCP(Ax)
       fold=fnew
       fdelta=1.d0
 
@@ -81,7 +81,7 @@
       call CopyConfigsWtoV(Gc2,Gc)
       call CopyConfigsWtoV(Gc3,Gc)
 
-      call FlushCPvec(G)
+      call FlushCP(G)
 !      write(*,'(X,A/)') 'Projection of initial G onto guess configs:'
 !      call PrintConfigs(Gc)
       call Config2CP(G,Gc)
@@ -115,7 +115,7 @@
          call FlushConfigs(Xc)
          call ConfigSetOverlap(C,Xc,Xnew)
          call SavePESCoef(csp,Xc)
-         call FlushCPvec(Xnew)
+         call FlushCP(Xnew)
          call Config2CP(Xnew,Xc)
 
          l1=onenorm(Xc)
@@ -125,7 +125,7 @@
 !        for the projected Xnew 
          call CPMatVecProd(A,Xnew,Ax,.FALSE.)
          call GetResidualCF(B,Ax,Rnew,fnew)
-         call FlushCPvec(Ax)
+         call FlushCP(Ax)
 
          fdelta=(fold-fnew)/fnew
          write(*,'(I10,3(X,ES12.4),X,I8)') &
@@ -138,7 +138,7 @@
 !        Project gradient onto guess configurations
          call FlushConfigs(Gc)
          call ConfigSetOverlap(C,Gc,Gnew)
-         call FlushCPvec(Gnew)
+         call FlushCP(Gnew)
 
 !        Modify the line search direction using the Polak-Ribiere update
          gg=0.d0
@@ -188,16 +188,16 @@
 
       implicit none
       TYPE (Configs), INTENT(IN) :: R
-      TYPE (CPvec), INTENT(IN)   :: A
-      TYPE (CPvec), INTENT(OUT)  :: G
-      TYPE (CPvec) :: Rcp
+      TYPE (CP), INTENT(IN)   :: A
+      TYPE (CP), INTENT(OUT)  :: G
+      TYPE (CP) :: Rcp
 
       call Config2CP(Rcp,R)
 
 !     Convert to gradient using matrix-vector product and sign change
       call CPMatVecProd(A,Rcp,G,.TRUE.)
       call VecSignChange(G,1,SIZE(G%coef))
-      call FlushCPvec(Rcp)
+      call FlushCP(Rcp)
 
       end subroutine GetCFGradient
 
@@ -212,7 +212,7 @@
       implicit none
       TYPE (Configs), INTENT(IN)  :: b
       TYPE (Configs), INTENT(OUT) :: r
-      TYPE (CPvec), INTENT(IN)    :: Ax
+      TYPE (CP), INTENT(IN)    :: Ax
       real*8, intent(out) :: f
       integer :: i,rk
 
@@ -242,9 +242,9 @@
       TYPE (Configs), INTENT(IN)  :: B
       TYPE (Configs), INTENT(OUT) :: R
       TYPE (Configs) :: Bg
-      TYPE (CPvec), INTENT(IN)  :: X,G,A
-      TYPE (CPvec), INTENT(OUT) :: Xnew
-      TYPE (CPvec) :: Ax,Ag
+      TYPE (CP), INTENT(IN)  :: X,G,A
+      TYPE (CP), INTENT(OUT) :: Xnew
+      TYPE (CP) :: Ax,Ag
       real*8, intent(inout) :: fnew
       real*8, allocatable   :: solncoef(:)
       real*8  :: aax,bx,cx,step,l2,rav,gav,fac
@@ -253,7 +253,7 @@
       rkb=SIZE(B%coef)
 
 !     Get rid of the old Xnew and residual, if they are allocated
-      call FlushCPvec(Xnew)
+      call FlushCP(Xnew)
       call FlushConfigs(R)
 
 !     Matrix vector product to put X,G in basis of B
@@ -278,8 +278,8 @@
       fac=rav/gav
       Bg%coef(:)=Bg%coef(:)*fac
 
-      call FlushCPvec(Ax)
-      call FlushCPvec(Ag)
+      call FlushCP(Ax)
+      call FlushCP(Ag)
 
 !     NR line search
       ALLOCATE(solncoef(rkb))
@@ -292,7 +292,7 @@
       R%coef(:)=solncoef(:)
 
 !     Calculate Xnew = X + step*G
-      call CopyWtoV(Xnew,X)
+      Xnew=CopyCP(X)
       call SUMVECVEC(Xnew,1.d0,G,step*fac)
 
       DEALLOCATE(solncoef)

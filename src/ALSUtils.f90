@@ -5,11 +5,11 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Utility functions guided by Alternating Least Squares reduction
 
-      use ERRORTRAP
-      use UTILS
-      use SEPDREPN
-      use MODVECVEC
-      use LINALG
+      USE ERRORTRAP
+      USE UTILS
+      USE SEPDREPN
+      USE MODVECVEC
+      USE LINALG
 
       implicit none
       real*8, private  :: alsutils_time=0.d0
@@ -97,27 +97,36 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ALS_ORTHO_alg(Q,nitn,lowmem)
+      subroutine ALS_ORTHO_alg(Q,nitn,lowmem,svec)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Select the algorithm for intertwined vector updates depending on the 
 ! value of'lowmem'
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: Q(:)
+      TYPE (CP), INTENT(INOUT) :: Q(:)
       integer, intent(in)  :: nitn,lowmem
+      integer, intent(in), optional :: svec
+      integer :: s2
 
       IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
 
+!     Select the first vector in the block to be orthogonalized
+      IF (present(svec)) THEN
+         s2=svec
+      ELSE
+         s2=2 ! Orthogonalize beginning with second vector
+      ENDIF
+
       IF (lowmem.ge.0 .and. lowmem.le.2) THEN
-         call ALS_ORTHO_2(Q,nitn)
+         call ALS_ORTHO_2(Q,nitn,s2)
       ELSEIF (lowmem.eq.3) THEN
-         call ALS_ORTHO_3(Q,nitn)
+         call ALS_ORTHO_3(Q,nitn,s2)
       ELSE
          write(*,'(/X,A)') 'ALS_ORTHO_alg(): invalid low-mem choice'
          write(*,'(X,A)')  'Choose: FASTEST <--0=1=2,3--> LEAST MEMORY'
          write(*,'(X,A/)') 'ALS_ORTHO_2() selected by default...'
-         call ALS_ORTHO_2(Q,nitn)
+         call ALS_ORTHO_2(Q,nitn,s2)
       ENDIF
 
       end subroutine ALS_ORTHO_alg
@@ -131,8 +140,8 @@
 ! value of'lowmem'
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec), INTENT(IN)    :: Q(:)
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: Q(:)
       real*8, intent(in)   :: coefs(:)
       integer, intent(in)  :: nitn,lowmem
 
@@ -153,20 +162,21 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ALS_ORTHO_2(Q,nitn)
+      subroutine ALS_ORTHO_2(Q,nitn,svec)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! ALS guided Gram-Schmidt orthogonalization. Given CP-format vectors
 ! stored in Q, the vectors are iteratively orthogonalized using ALS.
 ! This version updates the overlap coefficients after each ALS iteration
+! Vectors before svec must be already orthonormalized before calling
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: Q(:)
-      integer, intent(in)  :: nitn
-      integer, allocatable :: nbas(:),IPV(:),ranks(:,:)
+      TYPE (CP), INTENT(INOUT) :: Q(:)
+      integer, intent(in)  :: nitn,svec
+      integer, allocatable :: nbas(:),ranks(:,:)
       real*8, allocatable  :: coefs(:),BB(:,:),PS(:,:),bjk(:,:)
       real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: iv,nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,m,n,info,gst,itn
+      integer :: iv,nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,m,n,gst,itn
       integer :: nr
       character(60) :: frmt
 
@@ -177,6 +187,13 @@
       nbloc=SIZE(Q)
       ndim=SIZE(Q(1)%nbas)
 
+!     Error checking
+      IF (svec.lt.2 .or. svec.gt.nbloc) THEN
+         write(*,'(X,2(A,I0),A)') &
+         'svec is ',svec,' but must be [2,',nbloc,']'
+         call AbortWithError('ALS_ORTHO_2(): svec out of range')
+      ENDIF
+
 !     Store a pointer for the ranks of the vectors
       ALLOCATE(coefs(nbloc),ranks(nbloc,3))
       ranks(1,1)=1
@@ -184,13 +201,10 @@
       ranks(1,3)=SIZE(Q(1)%coef)
 
 !     Normalize the first vector
-      call NORMCOEF(Q(1))
+      call NORMALIZE(Q(1))
 
 !     Loop over vectors in the block
       DO iv=2,nbloc
-
-!        Penalty to avoid bad conditioning
-         valpen=maxval(Q(iv)%coef)*1.d-10
 
 !        Set ranks. rG is the sum of the ranks of the first iv vectors
          coefs(iv)=1.d0
@@ -200,6 +214,11 @@
          rG=ranks(iv,2)
          rF=ranks(iv,3)
 
+         IF (iv.lt.svec) CYCLE
+
+!        Penalty to avoid bad conditioning
+         valpen=maxval(Q(iv)%coef)*1.d-10
+
          ALLOCATE(PS(rG,rF))
 
 !        PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
@@ -207,7 +226,7 @@
 !$omp do private(l,t1,t2)
          DO l=1,iv
             call CPU_TIME(t1)            
-            call CONSTPSTOT(Q(iv),Q(l),0,PS(ranks(l,1):ranks(l,2),1:rF))
+            call CONSTPT(Q(iv),Q(l),0,PS(ranks(l,1):ranks(l,2),1:rF))
             call CPU_TIME(t2)
             alsutils_time=alsutils_time+t2-t1
          ENDDO
@@ -250,7 +269,7 @@
                DO l=1,iv
                   call CPU_TIME(t1)
                   rT=ranks(l,3)
-                  call CONSTPSk(Q(iv),Q(l),k,&
+                  call CONSTPk(Q(iv),Q(l),k,&
                                 BB(ranks(l,1):ranks(l,2),1:rF))
                   PS(ranks(l,1):ranks(l,2),1:rF)= &
                   PS(ranks(l,1):ranks(l,2),1:rF)/ &
@@ -263,13 +282,9 @@
                call CPU_TIME(t1)
                DEALLOCATE(BB)
 
-!              Copy the last rF x rF block of PS into BB and add penalty
-!              to BB to avoid ill-conditioning (section 3.2, Beylkin)
+!              Copy the last rF x rF block of PS into BB
                ALLOCATE(BB(rF,rF))
                BB(1:rF,1:rF)=PS(ranks(iv,1):ranks(iv,2),1:rF)
-               DO i=1,rF
-                  BB(i,i)=BB(i,i)+valpen
-               ENDDO
 
 !              Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4). This also
 !              requires updating the Gram-Schmidt coefficients
@@ -301,32 +316,19 @@
 
 !              Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !              (B includes all inner products except the kth)
-!              Use DGETRF for LU factorization + DGETRS to solve system
-               ALLOCATE(IPV(rF))
-               call dgetrf(rF,rF,BB,rF,IPV,info)
-               call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-               DEALLOCATE(BB,IPV)
+               call SolveLinSysLU(BB,bjk,valpen)
+               DEALLOCATE(BB)
 
 !              Construct improved F
-               DO i=1,rF
-                  rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-                  Q(iv)%coef(i)=rnorm
-                  DO ir=1,n
-                     imod=gst+ir
-                     Q(iv)%base(imod,i)=bjk(i,ir)/rnorm
-                  ENDDO
-               ENDDO
+               call UpdateFfromSoln(Q(iv),bjk,k)
                DEALLOCATE(bjk)
 
-!              Check coefs of F for NaN values resulting from zero
-!              division. If there are any, restart ALS without updating
-               DO i=1,rF
-                  IF (Q(iv)%coef(i).ne.Q(iv)%coef(i)) THEN
-                     write(*,*) 'ALS_ORTHO_2(): NaN on update; itn = ',&
-                                itn
-                     call AbortWithError('ALS_ORTHO_2 crashed')
-                  ENDIF
-               ENDDO
+!              Check coefs for NaN values resulting from zero division.
+               IF (.NOT. CHECKCOEFS(Q(iv))) THEN
+                  write(*,*) 'ALS_ORTHO_2(): NaN on update; itn = ',itn,&
+                             '; mode = ',k
+                  call AbortWithError('ALS_ORTHO_2 crashed')
+               ENDIF
 
 !              Update PS (calc inner products with new fs for k-th DOF)
                ALLOCATE(BB(rG,rF))
@@ -338,7 +340,7 @@
                DO l=1,iv
                   call CPU_TIME(t1)
                   rT=ranks(l,3)
-                  call CONSTPSk(Q(iv),Q(l),k,&
+                  call CONSTPk(Q(iv),Q(l),k,&
                                 BB(ranks(l,1):ranks(l,2),1:rF))
                   PS(ranks(l,1):ranks(l,2),1:rF)= &
                   PS(ranks(l,1):ranks(l,2),1:rF)* &
@@ -378,22 +380,23 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ALS_ORTHO_3(Q,nitn)
+      subroutine ALS_ORTHO_3(Q,nitn,svec)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! ALS guided Gram-Schmidt orthogonalization. Given CP-format vectors
 ! stored in Q, the vectors are iteratively orthogonalized using ALS.
 ! This version updates the overlap coefficients after each ALS iteration
 ! and does not store a full-size (nbloc*rF x rF) PS matrix
+! Vectors before svec must be already orthonormalized before calling
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: Q(:)
-      integer, intent(in)  :: nitn
-      integer, allocatable :: nbas(:),IPV(:),ind(:,:)
+      TYPE (CP), INTENT(INOUT) :: Q(:)
+      integer, intent(in)  :: nitn,svec
+      integer, allocatable :: nbas(:),ind(:,:)
       real*8, allocatable  :: coefs(:)
       real*8, allocatable  :: BB(:,:),BBk(:,:),BBmem(:,:),bjk(:,:)
       real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: iv,nbloc,rF,rT,ndim,i,j,k,l,m,n,info,itn,gik,gfk
+      integer :: iv,nbloc,rF,rT,ndim,i,j,k,l,m,n,itn,gik,gfk
 
       IF (nitn.eq.0) return
       IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
@@ -402,8 +405,15 @@
       nbloc=SIZE(Q)
       ndim=SIZE(Q(1)%nbas)
 
+!     Error checking
+      IF (svec.lt.2 .or. svec.gt.nbloc) THEN
+         write(*,'(X,2(A,I0),A)') &
+         'svec is ',svec,' but must be [2,',nbloc,']'
+         call AbortWithError('ALS_ORTHO_3(): svec out of range')
+      ENDIF
+
 !     Normalize the first vector
-      call NORMCOEF(Q(1))
+      call NORMALIZE(Q(1))
 
       call CPU_TIME(t1)
 
@@ -417,7 +427,7 @@
       ENDDO
 
 !     Loop over vectors in the block
-      DO iv=2,nbloc
+      DO iv=svec,nbloc
 
 !        Penalty to avoid bad conditioning
          valpen=maxval(Q(iv)%coef)*1.d-10
@@ -447,14 +457,14 @@
 
 !                 Calc <Q(iv),Q(l)> for all DOFs except the k-th
                   ALLOCATE(BB(rT,rF))
-                  call CONSTPSTOT_OMP(Q(iv),Q(l),k,BB)
+                  call CONSTPT(Q(iv),Q(l),k,BB,0)
 
 !                 Compute the Gram-Schmidt coefficient. This requires
 !                 evaluating the full inner product <Q(iv),Q(l)>, so we
 !                 need to do this for the k-th DOF also
                   IF (l.lt.iv) THEN
                      ALLOCATE(BBk(rT,rF))
-                     call CONSTPSk_OMP(Q(iv),Q(l),k,BBk)
+                     call CONSTPk(Q(iv),Q(l),k,BBk,0)
                      DO j=1,rT
                         DO i=1,rF
                            coefs(l)=coefs(l)-BB(j,i)*BBk(j,i)*&
@@ -486,39 +496,24 @@
 !              Store BBmem <- BB for later normalization
                BBmem(1:rF,1:rF)=BB(1:rF,1:rF)
 
-!              Add penalty to BB to avoid ill-conditioning 
-!              (section 3.2, Beylkin)
-               DO i=1,rF
-                  BB(i,i)=BB(i,i)+valpen
-               ENDDO
-
 !              Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !              (B includes all inner products except the kth)
-!              Use DGETRF for LU factorization + DGETRS to solve system
-               ALLOCATE(IPV(rF))
-               call dgetrf(rF,rF,BB,rF,IPV,info)
-               call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-               DEALLOCATE(BB,IPV)
+               call SolveLinSysLU(BB,bjk,valpen)
+               DEALLOCATE(BB)
 
 !              Construct improved F
-               DO i=1,rF
-                  rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-                  Q(iv)%coef(i)=rnorm
-                  Q(iv)%base(gik:gfk,i)=bjk(i,1:n)/rnorm
-               ENDDO
+               call UpdateFfromSoln(Q(iv),bjk,k)
                DEALLOCATE(bjk)
 
-!              Error out if coefs of F are NaN from zero division
-               DO i=1,rF
-                  IF (Q(iv)%coef(i).ne.Q(iv)%coef(i)) THEN
-                     write(*,*) 'ALS_ORTHO_3(): NaN on update; itn = ',&
-                                itn
-                     call AbortWithError('ALS_ORTHO_3 crashed')
-                  ENDIF
-               ENDDO
+!              Check coefs for NaN values resulting from zero division.
+               IF (.NOT. CHECKCOEFS(Q(iv))) THEN
+                  write(*,*) 'ALS_ORTHO_3(): NaN on update; itn = ',itn,&
+                             '; mode = ',k
+                  call AbortWithError('ALS_ORTHO_3 crashed')
+               ENDIF
 
 !              Update BBmem with k-th DOF and normalize Q(iv)
-               call UpdateBB_OMP(Q(iv),k,BBmem,.FALSE.)
+               call UpdateP(Q(iv),k,BBmem,.FALSE.,0)
 
                rnorm=0.d0
                DO i=1,rF
@@ -545,20 +540,21 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ALS_ORTHOb(Q,nitn)
+      subroutine ALS_ORTHOb(Q,nitn,svec)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! ALS guided Gram-Schmidt orthogonalization. Given CP-format vectors
 ! stored in Q, the vectors are iteratively orthogonalized using ALS.
 ! This version does not update the overlap coefficients
+! Vectors before svec must be already orthonormalized before calling
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: Q(:)
-      integer, intent(in)  :: nitn
-      integer, allocatable :: nbas(:),IPV(:),ranks(:,:)
+      TYPE (CP), INTENT(INOUT) :: Q(:)
+      integer, intent(in)  :: nitn,svec
+      integer, allocatable :: nbas(:),ranks(:,:)
       real*8, allocatable  :: coefs(:),BB(:,:),PS(:,:),bjk(:,:)
       real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: iv,nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,m,n,info,gst,itn
+      integer :: iv,nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,m,n,gst,itn
       integer :: nr
 
       IF (nitn.eq.0) return
@@ -568,6 +564,13 @@
       nbloc=SIZE(Q)
       ndim=SIZE(Q(1)%nbas)
 
+!     Error checking
+      IF (svec.lt.2 .or. svec.gt.nbloc) THEN
+         write(*,'(X,2(A,I0),A)') &
+         'svec is ',svec,' but must be [2,',nbloc,']'
+         call AbortWithError('ALS_ORTHOb(): svec out of range')
+      ENDIF
+
 !     Store a pointer for the ranks of the vectors
       ALLOCATE(coefs(nbloc),ranks(nbloc,3))
       ranks(1,1)=1
@@ -575,15 +578,12 @@
       ranks(1,3)=SIZE(Q(1)%coef)
 
 !     Normalize the first vector
-      call NORMCOEF(Q(1))
+      call NORMALIZE(Q(1))
 
       call CPU_TIME(t1)
 
 !     Loop over vectors in the block
       DO iv=2,nbloc
-
-!        Penalty to avoid bad conditioning
-         valpen=maxval(Q(iv)%coef)*1.d-10
 
 !        Set ranks. rG is the sum of the ranks of the first iv vectors
          coefs(iv)=1.d0
@@ -593,13 +593,18 @@
          rG=ranks(iv,2)
          rF=ranks(iv,3)
 
+         IF (iv.lt.svec) CYCLE
+
+!        Penalty to avoid bad conditioning
+         valpen=maxval(Q(iv)%coef)*1.d-10
+
          ALLOCATE(PS(rG,rF))
 
 !        PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
 !$omp parallel
 !$omp do private(l)
          DO l=1,iv
-            call CONSTPSTOT(Q(iv),Q(l),0,PS(ranks(l,1):ranks(l,2),1:rF))
+            call CONSTPT(Q(iv),Q(l),0,PS(ranks(l,1):ranks(l,2),1:rF))
          ENDDO
 !$omp enddo
 !$omp end parallel
@@ -628,20 +633,16 @@
                DO l=1,iv
                   rT=ranks(l,3)
                   ALLOCATE(BB(rT,rF))
-                  call CONSTPSk(Q(iv),Q(l),k,BB)
+                  call CONSTPk(Q(iv),Q(l),k,BB)
                   PS(ranks(l,1):ranks(l,2),1:rF)= &
                   PS(ranks(l,1):ranks(l,2),1:rF)/ &
                   BB(1:rT,1:rF)
                   DEALLOCATE(BB)
                ENDDO
 
-!              Copy the last rF x rF block of PS into BB and add penalty
-!              to BB to avoid ill-conditioning (section 3.2, Beylkin)
+!              Copy the last rF x rF block of PS into BB
                ALLOCATE(BB(rF,rF))
                BB(1:rF,1:rF)=PS(ranks(iv,1):ranks(iv,2),1:rF)
-               DO i=1,rF
-                  BB(i,i)=BB(i,i)+valpen
-               ENDDO
 
 !              Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4). This also
 !              requires updating the Gram-Schmidt coefficients
@@ -662,37 +663,25 @@
 
 !              Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !              (B includes all inner products except the kth)
-!              Use DGETRF for LU factorization + DGETRS to solve system
-               ALLOCATE(IPV(rF))
-               call dgetrf(rF,rF,BB,rF,IPV,info)
-               call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-               DEALLOCATE(BB,IPV)
+               call SolveLinSysLU(BB,bjk,valpen)
+               DEALLOCATE(BB)
 
 !              Construct improved F
-               DO i=1,rF
-                  rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-                  Q(iv)%coef(i)=rnorm
-                  DO ir=1,n
-                     imod=gst+ir
-                     Q(iv)%base(imod,i)=bjk(i,ir)/rnorm
-                  ENDDO
-               ENDDO
+               call UpdateFfromSoln(Q(iv),bjk,k)
                DEALLOCATE(bjk)
 
-!              Check coefs of F for NaN values resulting from zero
-!              division. If there are any, restart ALS without updating
-               DO i=1,rF
-                  IF (Q(iv)%coef(i).ne.Q(iv)%coef(i)) THEN
-                     write(*,*) 'ALS_ORTHO(): NaN on update; itn = ',itn
-                     call AbortWithError('ALS_ORTHO crashed')
-                  ENDIF
-               ENDDO
+!              Check coefs for NaN values resulting from zero division.
+               IF (.NOT. CHECKCOEFS(Q(iv))) THEN
+                  write(*,*) 'ALS_ORTHO(): NaN on update; itn = ',itn,&
+                             '; mode = ',k
+                  call AbortWithError('ALS_ORTHO crashed')
+               ENDIF
 
 !              Update PS (calc inner products with new fs for k-th DOF)
                DO l=iv,1,-1
                   rT=ranks(l,3)
                   ALLOCATE(BB(rT,rF))
-                  call CONSTPSk(Q(iv),Q(l),k,BB)
+                  call CONSTPk(Q(iv),Q(l),k,BB)
                   PS(ranks(l,1):ranks(l,2),1:rF)= &
                   PS(ranks(l,1):ranks(l,2),1:rF)* &
                   BB(1:rT,1:rF)
@@ -737,14 +726,14 @@
 ! generating a long vector
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec), INTENT(IN)    :: Q(:)
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: Q(:)
       real*8, intent(in)   :: coefs(:)
       integer, intent(in)  :: nitn
-      integer, allocatable :: nbas(:),IPV(:),ranks(:,:)
+      integer, allocatable :: nbas(:),ranks(:,:)
       real*8, allocatable  :: BBmem(:,:),BB(:,:),PS(:,:),bjk(:,:)
       real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,n,info,gst,itn
+      integer :: nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,n,gst,itn
 
       IF (nitn.eq.0) return
       IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
@@ -776,11 +765,11 @@
 
 !     PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
       DO l=1,nbloc
-         call CONSTPSTOT(F,Q(l),0,PS(ranks(l,1):ranks(l,2),1:rF))
+         call CONSTPT(F,Q(l),0,PS(ranks(l,1):ranks(l,2),1:rF))
       ENDDO
 
 !     BB(l,l') = Pi_{i=2}^ndim < F_i^l , F_i^l' >
-      call CONSTBBTOT(F,0,BBmem)
+      call CONSTPT(F,0,BBmem)
 
 !     Loop over ALS iterations
       DO itn=1,nitn
@@ -794,20 +783,17 @@
             DO l=1,nbloc
                rT=ranks(l,3)
                ALLOCATE(BB(rT,rF))
-               call CONSTPSk(F,Q(l),k,BB)
+               call CONSTPk(F,Q(l),k,BB)
                PS(ranks(l,1):ranks(l,2),1:rF)= &
                PS(ranks(l,1):ranks(l,2),1:rF)/ &
                BB(1:rT,1:rF)
                DEALLOCATE(BB)
             ENDDO
 
-!           Downdate BBmem and add penalty to avoid ill-conditioning
-            call UpdateBB(F,k,BBmem,.TRUE.)
+!           Downdate BBmem
+            call UPDATEP(F,k,BBmem,.TRUE.)
             ALLOCATE(BB(rF,rF))
             BB=BBmem 
-            DO i=1,rF
-               BB(i,i)=BB(i,i)+valpen
-            ENDDO
 
 !           Calculate b_j_k ( l', nr) (Beylkin, eq. 3.4).
             ALLOCATE(bjk(rF,n))
@@ -827,37 +813,26 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            ALLOCATE(IPV(rF))
-            call dgetrf(rF,rF,BB,rF,IPV,info)
-            call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-            DEALLOCATE(BB,IPV)
+            call SolveLinSysLU(BB,bjk,valpen)
+            DEALLOCATE(BB)
 
 !           Construct improved F
-            DO i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               DO ir=1,n
-                  imod=gst+ir
-                  F%base(imod,i)=bjk(i,ir)/rnorm
-               ENDDO
-            ENDDO
+            call UpdateFfromSoln(F,bjk,k)
             DEALLOCATE(bjk)
 
-!           Check coefs of F for NaN resulting from zero division
-            DO i=1,rF
-               IF (F%coef(i).ne.F%coef(i)) THEN
-                  write(*,*) 'ALS_SUMLCVEC_2: NaN on update; itn = ',itn
-                  call AbortWithError('ALS_SUMLCVEC_2 crashed')
-               ENDIF
-            ENDDO
+!           Check coefs for NaN values resulting from zero division.
+            IF (.NOT. CHECKCOEFS(F)) THEN
+               write(*,*) 'ALS_SUMLCVEC_2(): NaN on update; itn = ',itn,&
+                          '; mode = ',k
+               call AbortWithError('ALS_SUMLCVEC_2 crashed')
+            ENDIF
 
 !           Update PS with the new Fs (skip on last pass)
             IF (itn.lt.nitn .or. k.lt.ndim) THEN
                DO l=1,nbloc
                   rT=ranks(l,3)
                   ALLOCATE(BB(rT,rF))
-                  call CONSTPSk(F,Q(l),k,BB)
+                  call CONSTPk(F,Q(l),k,BB)
                   PS(ranks(l,1):ranks(l,2),1:rF)= &
                   PS(ranks(l,1):ranks(l,2),1:rF)* &
                   BB(1:rT,1:rF)
@@ -866,7 +841,7 @@
             ENDIF
 
 !           Update BB (do even on last pass for normalization)
-            call UpdateBB(F,k,BBmem,.FALSE.)
+            call UPDATEP(F,k,BBmem,.FALSE.)
 
             gst=gst+n
          ENDDO  ! loop over k
@@ -901,14 +876,14 @@
 ! generating a long vector or a PS matrix
 
       implicit none
-      TYPE (CPvec), INTENT(INOUT) :: F
-      TYPE (CPvec), INTENT(IN)    :: Q(:)
+      TYPE (CP), INTENT(INOUT) :: F
+      TYPE (CP), INTENT(IN)    :: Q(:)
       real*8, intent(in)   :: coefs(:)
       integer, intent(in)  :: nitn
-      integer, allocatable :: nbas(:),IPV(:),ranks(:,:),ind(:,:)
+      integer, allocatable :: nbas(:),ranks(:,:),ind(:,:)
       real*8, allocatable  :: BBmem(:,:),BB(:,:),bjk(:,:),PS(:)
       real*8  :: valpen,rnorm,gtmp,t1,t2
-      integer :: nbloc,rF,rT,ndim,i,j,ir,k,l,m,n,info,itn
+      integer :: nbloc,rF,rT,ndim,i,j,ir,k,l,m,n,itn
       integer :: mmod,gi,gf,gik,gfk
 
       IF (nitn.eq.0) return
@@ -947,7 +922,7 @@
       ALLOCATE(BBmem(rF,rF),PS(rF))
 
 !     BB(l,l') = Pi_{i=2}^ndim < F_i^l , F_i^l' >
-      call CONSTBBTOT(F,0,BBmem)
+      call CONSTPT(F,0,BBmem)
 
 !     Loop over ALS iterations
       DO itn=1,nitn
@@ -992,40 +967,29 @@
                ENDDO  ! terms-in-vector
             ENDDO  ! vectors
 
-!           Downdate BBmem and add penalty to avoid ill-conditioning
-            call UpdateBB(F,k,BBmem,.TRUE.)
+!           Downdate BBmem
+            call UPDATEP(F,k,BBmem,.TRUE.)
             ALLOCATE(BB(rF,rF))
             BB=BBmem
-            DO i=1,rF
-               BB(i,i)=BB(i,i)+valpen
-            ENDDO
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-!           Use DGETRF for LU factorization + DGETRS to solve system
-            ALLOCATE(IPV(rF))
-            call dgetrf(rF,rF,BB,rF,IPV,info)
-            call dgetrs('N',rF,n,BB,rF,IPV,bjk,rF,INFO)
-            DEALLOCATE(BB,IPV)
+            call SolveLinSysLU(BB,bjk,valpen)
+            DEALLOCATE(BB)
 
 !           Construct improved F
-            DO i=1,rF
-               rnorm=sqrt(abs(dot_product(bjk(i,:),bjk(i,:))))
-               F%coef(i)=rnorm
-               F%base(gik:gfk,i)=bjk(i,1:n)/rnorm
-            ENDDO
+            call UpdateFfromSoln(F,bjk,k)
             DEALLOCATE(bjk)
 
-!           Check coefs of F for NaN resulting from zero division
-            DO i=1,rF
-               IF (F%coef(i).ne.F%coef(i)) THEN
-                  write(*,*) 'ALS_SUMLCVEC_3: NaN on update; itn = ',itn
-                  call AbortWithError('ALS_SUMLCVEC_3 crashed')
-               ENDIF
-            ENDDO
+!           Check coefs for NaN values resulting from zero division.
+            IF (.NOT. CHECKCOEFS(F)) THEN
+               write(*,*) 'ALS_SUMLCVEC_3(): NaN on update; itn = ',itn,&
+                          '; mode = ',k
+               call AbortWithError('ALS_SUMLCVEC_3 crashed')
+            ENDIF
 
 !           Update BB (do even on last pass for normalization)
-            call UpdateBB(F,k,BBmem,.FALSE.)
+            call UPDATEP(F,k,BBmem,.FALSE.)
 
          ENDDO  ! loop over k
       ENDDO  ! loop over iterations
