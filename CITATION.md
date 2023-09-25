@@ -27,7 +27,7 @@ P. S. Thomas and T. Carrington. J. Chem. Phys., 2017, 146, 204110.
 
 - "Comparison of different eigensolvers for calculating vibrational spectra using low-rank, sum-of-product basis functions,"
 A. LeClerc, P. S. Thomas, and T. Carrington, Jr., Molec. Phys., 2017, 115, 1740-1749.
-[DOI: 10.1080/00268976.2016.1249980](https://doi.org/10.1080/00268976.2016.1249980)
+[DOI:10.1080/00268976.2016.1249980](https://doi.org/10.1080/00268976.2016.1249980)
 
 - “Calculating vibrational spectra with sum of product basis functions without storing full-dimensional vectors or matrices,”
 A. LeClerc and T. Carrington, Jr., J. Chem. Phys., 2014, 140, 174111.
