@@ -9,7 +9,7 @@
 
       implicit none
       TYPE CPpar
-           integer :: ncycle,npow,lowmem
+           integer :: ncycle,npow,lowmem,truncation
            integer :: ncpu,psirank,hrank,psinals,hnals
            integer :: rs(33)
            real*8  :: solvtol
@@ -90,6 +90,9 @@
 !     low memory calculation type
       read(u,*)
       read(u,*) cpp%lowmem
+!     truncation layer options
+      read(u,*)
+      read(u,*) cpp%truncation
 !     do vector updates
       read(u,*)
       read(u,*) cpp%update
@@ -146,6 +149,8 @@
                              cpp%npow
       write(*,'(X,A,2X,I5)') 'Low-memory calculation type   (lowmem):',&
                              cpp%lowmem
+      write(*,'(X,A,2X,I5)') 'Truncation criterion      (truncation):',&
+                             cpp%truncation
       write(*,'(X,A,2X,L5)') 'Use vector updates            (update):',&
                              cpp%update
       write(*,'(X,A,2X,L5)') 'Optimize PES by coord. rotation  (opt):',&

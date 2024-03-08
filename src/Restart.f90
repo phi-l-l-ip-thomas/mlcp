@@ -146,6 +146,9 @@
          ' * npow changed from ',cprst%npow,' to ',cpp%npow
       IF (cpp%lowmem.ne.cprst%lowmem) write(*,*) &
          ' * lowmem changed from ',cprst%lowmem,' to ',cpp%lowmem
+      IF (cpp%truncation.ne.cprst%truncation) write(*,*) &
+         ' * truncation changed from ',cprst%truncation,&
+                                ' to ',cpp%truncation
       IF (cpp%update.neqv.cprst%update) write(*,*) &
          ' * update changed from ',cprst%update,' to ',cpp%update
       IF (cpp%solvtol.ne.cprst%solvtol) write(*,*) &
@@ -233,6 +236,9 @@
 !     low memory calculation type
       write(u,'(A)') 'lowmem'
       write(u,'(I16)') cpp%lowmem
+!     truncation layer criterion
+      write(u,'(A)') 'truncation'
+      write(u,'(I16)') cpp%truncation
 !     USE vector updates
       write(u,'(A)') 'update'
       write(u,'(L16)') cpp%update

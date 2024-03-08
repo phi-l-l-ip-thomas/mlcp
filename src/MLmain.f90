@@ -51,7 +51,7 @@
       write(*,*)        '           by Phillip S. Thomas             '
       write(*,*)        '       based on the CP-format solver        '
       write(*,*)        '             of Arnaud Leclerc              '
-      write(*,*)        '          Version ML2f 04-27-2020           '
+      write(*,*)        '          Version ML2f 03-07-2024           '
       write(*,'(/X,A/)') '############################################'
 
       call PrintWallTime('MLCP initialized')
@@ -123,7 +123,7 @@
             call BuildModeHamiltonian(il,im,H,Ham,ML,cpp)
 
 !           Make the initial guess
-            call GuessPsi(il,im,eigv,Q,Ham,ML)
+            call GuessPsi(il,im,eigv,Q,Ham,ML,cpp)
             W=GuessWeights(il,im,4000.0,Ham,ML)
 
 !           Calculate the mode eigenfunctions with the solver of choice

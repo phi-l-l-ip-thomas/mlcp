@@ -7,7 +7,7 @@ red2D
 redND
           ALS
 psirank
-           30
+           10
 hrank
             0
 psinals
@@ -22,6 +22,8 @@ npow
            10
 lowmem
             1
+truncation 
+            2
 update
             T
 optimize PES

@@ -14,81 +14,48 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetStatesinWindow(nbloc,evalsND,qns,evals1Dr,nbas,Etarget)
+      subroutine GetStatesinWindow(nbloc,evalsND,qns,evals1Dr,nbas,&
+                  nmode,nexci,nmtarget,netarget,Etarget,mstate)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sorts eigenvalues of a direct product separable wavefunction
 
       implicit none
-      integer, allocatable, intent(out) :: qns(:,:)
-      real*8, allocatable, intent(inout):: evalsND(:)
-      integer, allocatable, intent(in)  :: nbas(:)
-      real*8, allocatable, intent(in)   :: evals1Dr(:,:)
-      integer, intent(in)  :: nbloc
-      real*8, intent(in) :: Etarget
-      integer, allocatable :: iranges(:,:),nranges(:),indx(:)
-      real*8, allocatable  :: Eranges(:,:),evals1D(:,:),Edifs(:)
-      real*8 :: Esofar,eps
-      integer :: i,j,k,l,ndof,prodND,nguess,ii,jj,ind,mstate,istate
+      integer, intent(inout) :: qns(:,:)
+      real*8, intent(inout)  :: evalsND(:)
+      integer, intent(in)    :: nbloc
+      integer, intent(in)    :: nbas(:)
+      integer, intent(in)    :: nmode(:,:),nexci(:,:)
+      integer, intent(in)    :: nmtarget(2),netarget(2)
+      integer, intent(out)   :: mstate
+      real*8, intent(in)     :: Etarget
+      real*8, intent(in)     :: evals1Dr(:,:)
+      integer, allocatable   :: iranges(:,:),nranges(:),indx(:),jndx(:)
+      integer, allocatable   :: nmranges(:,:),neranges(:,:)
+      real*8, allocatable    :: Eranges(:,:),evals1D(:,:),Edifs(:)
+      real*8, parameter      :: smallnr=1.d-8
+      real*8  :: ZPE,Esofar,eps
+      integer :: i,j,k,l,ndof,prodND,nguess,ii,jj,ind,istate
       integer :: nmax,imin,imax,nmsofar,nexsofar
       character(len=64) :: frmt
-!!! TEMP: nmode and nexci arrays
-      integer, allocatable :: nmranges(:,:),neranges(:,:)
-      integer, allocatable :: nmode(:,:),nexci(:,:)
-      integer :: nmtarget(2),netarget(2)
-!!!
 
       ndof=SIZE(nbas)
-      nmax=SIZE(evals1Dr,1)
+      nmax=SIZE(evals1Dr,2)
 
-      IF (nbloc.ne.PRODUCT(nbas)) THEN
-         write(*,'(2(A,I0),A)') 'nbloc (',nbloc,&
-         ') must equal size of DP basis (',PRODUCT(nbas),')'
-      ENDIF
-
-      ALLOCATE(qns(nbloc,ndof),Edifs(nbloc))
-
-      write(frmt,'(A,I0,A)') '(',ndof,'(X,I2),2(X,f16.8))'
-
-!!!   TEMP: nmode and nexci arrays
-      ALLOCATE(nmode(nmax,ndof),nexci(nmax,ndof))
-      DO j=1,ndof
-         DO i=1,nbas(j)
-            nmode(i,j)=1
-            nexci(i,j)=i-1
-         ENDDO
-         nmode(1,j)=0
-      ENDDO
-
-      nmtarget(1)=0
-      nmtarget(2)=4
-      netarget(1)=0
-      netarget(2)=3
-!!!
+      ALLOCATE(Edifs(nbloc))
 
 !     ZPE-corrected evals1D
-      ALLOCATE(evals1D(nmax,SIZE(evals1Dr,2)))
+      ALLOCATE(evals1D(ndof,nmax))
+      ZPE=0.d0
       DO i=1,ndof
          DO j=1,nbas(i)
             evals1D(i,j)=evals1Dr(i,j)-evals1Dr(i,1)
          ENDDO
+         ZPE=ZPE+evals1Dr(i,1)
       ENDDO
 
-      write(*,*) 'evals1D:'
-      DO i=1,ndof
-         DO j=1,nbas(i)
-            write(*,*) 'i = ',i,'; j = ',j,&
-            '; evals1D(j,i) = ',evals1D(i,j),nmode(j,i),nexci(j,i)
-         ENDDO
-         write(*,*)
-      ENDDO
-
-      write(*,*) 'Initializin...'
-
-      ALLOCATE(indx(ndof),nranges(ndof),iranges(nmax,ndof),Eranges(ndof,2))
+      ALLOCATE(indx(ndof),nranges(ndof),jndx(ndof),iranges(nmax,ndof),Eranges(ndof,2))
       ALLOCATE(nmranges(ndof,2),neranges(ndof,2))
-      indx(:)=1
-      indx(1)=0
 
 !     Esofar holds sum of energies of modes whose indices vary more
 !     slowly than or equal to that of mode i,
@@ -98,38 +65,34 @@
 !     values for modes whose indices vary more rapidly than mode i
       Eranges(1,:)=0.d0
       DO i=2,ndof
+         !!! Should look at min and max evals1D, which might not
+         !!! be same as first and last val? Or should we enforce
+         !!! sorting evals1D in ascending order of energy?
          Eranges(i,1)=Eranges(i-1,1)+evals1D(i-1,1)
          Eranges(i,2)=Eranges(i-1,2)+evals1D(i-1,nbas(i-1))
       ENDDO
 
-!     Window initially covers full energy range
-      eps=Eranges(ndof,2)+evals1D(ndof,2)-Eranges(ndof,1)-evals1D(ndof,1)
+!     Window initially covers full energy range (plus room for roundoff)
+      eps=Eranges(ndof,2)+evals1D(ndof,nbas(ndof))-Eranges(ndof,1)-evals1D(ndof,1)
+      eps=eps*(1.d0+smallnr)
 
 !     nmsofar, nmranges, analogous to energy case above, but for nmode
-      write(*,*) 'nmranges'
       nmsofar=0
       nmranges(1,:)=0
       DO i=2,ndof
          nmranges(i,1)=nmranges(i-1,1)+minval(nmode(1:nbas(i),i))
          nmranges(i,2)=nmranges(i-1,2)+maxval(nmode(1:nbas(i),i))
-         write(*,*) i, nmranges(i,1), nmranges(i,2)
       ENDDO
 
 !     nexsofar, neranges, analogous to energy case above, but for nexci
-      write(*,*) 'neranges'
       nexsofar=0
       neranges(1,:)=0
       DO i=2,ndof
          neranges(i,1)=neranges(i-1,1)+minval(nexci(1:nbas(i),i))
          neranges(i,2)=neranges(i-1,2)+maxval(nexci(1:nbas(i),i))
-         write(*,*) i, neranges(i,1), neranges(i,2)
       ENDDO
 
-!     Number of states so far
-      mstate=0
-
       ! Initialize loop limits for outermost mode
-      ind=ndof
       call GetIndexRanges(evals1D(ndof,:nbas(ndof)),Esofar,&
                           Eranges(ndof,1),Eranges(ndof,2),Etarget,eps,&
                           imin,imax)
@@ -142,14 +105,21 @@
             endif
          endif
       ENDDO
+      ind=ndof
+      indx(:)=-1
       indx(ndof)=0
+      jndx(:)=-1
 
-      write(*,*) 'Everything initialized!'
+!     Number of states so far
+      mstate=0
 
       DO
+!        Exit when outermost mode exceeds final index value
+         IF (ind.eq.ndof .and. indx(ind).eq.nranges(ind)) EXIT
 
 !        Increment this mode and update energy, nmode, nex
          indx(ind)=indx(ind)+1
+         jndx(ind)=iranges(indx(ind),ind)
          Esofar=Esofar+evals1D(ind,iranges(indx(ind),ind))
          nmsofar=nmsofar+nmode(iranges(indx(ind),ind),ind)
          nexsofar=nexsofar+nexci(iranges(indx(ind),ind),ind)
@@ -159,6 +129,7 @@
             call GetIndexRanges(evals1D(j,:nbas(j)),Esofar,&
                                 Eranges(j,1),Eranges(j,2),Etarget,eps,&
                                 imin,imax)
+
             nranges(j)=0
             DO i=imin,imax
             ! Add nmode, nexec conditions here
@@ -170,29 +141,28 @@
                   endif
                endif
             ENDDO
-            indx(j)=imin
+
+            indx(j)=1
+            jndx(j)=iranges(indx(j),j)
             Esofar=Esofar+evals1D(j,iranges(indx(j),j))
             nmsofar=nmsofar+nmode(iranges(indx(j),j),j)
             nexsofar=nexsofar+nexci(iranges(indx(j),j),j)
 
-!               if (iranges(j,1).gt.iranges(j,2)) &
-!                  write(*,*) 'IRANGES: ', iranges(j,1), ' > ',iranges(j,2),'; mode',j,' !!!'
-!               write(*,*) Esofar,' = ',Esofar-evals1D(j,indx(j)),' + ',evals1D(j,indx(j))
          ENDDO
 
          IF (nranges(1).gt.0) THEN
+
 !           Add the element to the list of qns
             call InsertArrayItem(evalsND,Esofar,Edifs,&
                                  abs(Esofar-Etarget),&
-                                 qns,indx,istate,mstate)
+                                 qns,jndx,istate,mstate)
 !           Once nbloc states have been captured, contract the window so
 !           that only states closer to the target than the worst state
 !           are added
             IF (mstate.eq.nbloc) THEN
                eps=abs(evalsND(mstate)-Etarget)
             ENDIF
-            write(*,frmt) (iranges(indx(i),i)-1,i=1,ndof),Esofar,Esofar-Etarget
-               write(*,*) 'mstate = ',mstate,'; eps = ',eps
+
          ENDIF
 
 !        Find the mode with the index to increment
@@ -205,19 +175,12 @@
 
             IF (indx(i).lt.nranges(i)) EXIT
          ENDDO
-
-!        Exit when outermost mode exceeds final index value
-         IF (ind.eq.ndof .and. indx(ind).eq.nranges(ind)) EXIT
       ENDDO
 
-      DEALLOCATE(indx,iranges,nranges,Eranges,nmranges,neranges,evals1D)
+!     Add the ZPE back in
+      evalsND(:)=evalsND(:)+ZPE
 
-      write(*,*) 'Final list:'
-      do j=1,nbloc
-         write(*,frmt) (qns(j,i)-1,i=1,ndof),evalsND(j),Edifs(j)
-      enddo
-
-      call AbortWithError("Done")
+      DEALLOCATE(indx,jndx,iranges,nranges,Eranges,nmranges,neranges,evals1D)
 
       end subroutine GetStatesinWindow
 
@@ -340,8 +303,6 @@
         ENDIF
       ENDDO
 
-!      write(*,*) 'L: i,jl,ju=',i,jl,ju
-
       end function rbisectL
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -376,8 +337,6 @@
            ju=t
         ENDIF
       ENDDO
-
-!      write(*,*) 'H: i,jl,ju=',i,jl,ju
 
       end function rbisectH
 

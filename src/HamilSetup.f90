@@ -761,6 +761,167 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine GetFullAssignment(il,im,Ham,ML,qns,qnfull)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      TYPE (MLtree), INTENT(IN)      :: ML
+      TYPE (Hamiltonian), INTENT(IN) :: Ham
+      integer, intent(in)    :: qns(:)
+      integer, allocatable, intent(out) :: qnfull(:)
+      integer, intent(in)    :: il,im
+      integer, allocatable   :: modind(:),qntmp(:)
+      integer :: i,j,eigind,imn,nsubm,mst,nagn
+
+!     Get the full assignment in terms of primitive DOFs
+      ALLOCATE(modind(il),qntmp(ML%nmode(1)))
+
+      qntmp=0
+      nagn=0
+      modind=1
+      DO
+         imn=im
+
+         IF (modind(1).gt.1) EXIT
+
+!        Trace each assignment to the bottom layer
+         DO j=il,2,-1
+            mst=ML%modstart(j,imn)
+
+!           Take number of sub-modes from input array on first pass,
+!           then extract the number from stored assignment array
+            IF (j.eq.il) THEN
+               nsubm=SIZE(qns)
+            ELSE
+               nsubm=SIZE(Ham%eig(j,imn)%assgn,2)
+            ENDIF
+
+            IF (modind(il-j+2).gt.nsubm) THEN
+               modind(il-j+1)=modind(il-j+1)+1
+               modind(il-j+2:)=1
+               EXIT
+            ENDIF
+
+!           Use input array to get 'eigind' on first pass here, too
+            IF (j.eq.il) THEN
+               eigind=qns(modind(2))
+            ELSE
+               eigind=Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
+            ENDIF
+
+            imn=mst+modind(il-j+2)-1
+
+            IF (j.eq.2) THEN
+               nagn=nagn+1
+               qntmp(nagn)=eigind
+               modind(il-j+2)=modind(il-j+2)+1
+            ENDIF
+         ENDDO
+      ENDDO
+
+!     Copy qntmp to qnfull
+      ALLOCATE(qnfull(nagn))
+      qnfull(:)=qntmp(:nagn)
+      DEALLOCATE(modind,qntmp)
+
+      end subroutine GetFullAssignment
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GetPartialAssignment(il,im,Ham,ML,jmode,ibas,qnfull)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      TYPE (MLtree), INTENT(IN)      :: ML
+      TYPE (Hamiltonian), INTENT(IN) :: Ham
+      integer, intent(in)    :: jmode,ibas
+!      integer, intent(in)    :: qns(:)
+      integer, allocatable, intent(out) :: qnfull(:)
+      integer, intent(in)    :: il,im
+      integer, allocatable   :: modind(:),qntmp(:)
+      integer :: i,j,eigind,imn,nsubm,mst,nagn
+
+!     Get the full assignment in terms of primitive DOFs
+      ALLOCATE(modind(il),qntmp(ML%nmode(1)))
+
+!      write(*,*) '--------------------------------'
+!      write(*,*) 'GetPartialAssignment(): il = ',il
+!      write(*,*) '--------------------------------'
+
+
+      qntmp=0
+      nagn=0
+      modind=1
+      modind(2)=jmode
+      DO
+
+!         write(*,*) 'DO:'
+
+         imn=im
+
+!         IF (modind(1).gt.1) EXIT
+         IF (modind(2).gt.jmode) EXIT        
+
+!        Trace each assignment to the bottom layer
+         DO j=il,2,-1
+            mst=ML%modstart(j,imn)
+
+!            write(*,*) 'j=',j,'; modstart=',mst
+
+!           Take number of sub-modes from input array on first pass,
+!           then extract the number from stored assignment array
+            IF (j.eq.il) THEN
+               nsubm=jmode!SIZE(qns)
+!               write(*,*) 'j=',j,'; (qns) nsubm=',nsubm
+            ELSE
+               nsubm=SIZE(Ham%eig(j,imn)%assgn,2)
+!               write(*,*) 'j=',j,'; (eig) nsubm=',nsubm
+            ENDIF
+
+            IF (modind(il-j+2).gt.nsubm) THEN
+!               write(*,*) 'j=',j,';   modind(',il-j+2,') = ',modind(il-j+2),'>',nsubm
+!               write(*,*) '   so ...  modind(',il-j+1,'):',modind(il-j+1),'->',modind(il-j+1)+1
+!               write(*,*) ' and reset modind(',il-j+2,':) to 1'
+               modind(il-j+1)=modind(il-j+1)+1
+               modind(il-j+2:)=1
+               EXIT
+            ENDIF
+
+!           Use input array to get 'eigind' on first pass here, too
+            IF (j.eq.il) THEN
+!               write(*,*) 'j=',j,'; (=il) eigind=',jmode!qns(modind(2))
+               eigind=ibas !qns(modind(2))
+            ELSE
+!               write(*,*) 'j=',j,'; (<il) eigind=',Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
+               eigind=Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
+            ENDIF
+
+            imn=mst+modind(il-j+2)-1
+!            write(*,*) 'j=',j,'; imn=',imn
+
+            IF (j.eq.2) THEN
+               nagn=nagn+1
+               qntmp(nagn)=eigind
+               modind(il-j+2)=modind(il-j+2)+1
+!               write(*,*) 'j=',j,' update nagn =',nagn
+!               write(*,*) 'j=',j,' qntmp(',nagn,') = ',eigind
+!               write(*,*) 'j=',j,' update modind(',il-j+2,'):',modind(il-j+2),&
+!                          ' -> ',modind(il-j+2)+1
+            ENDIF
+         ENDDO
+      ENDDO
+
+!     Copy qntmp to qnfull
+      ALLOCATE(qnfull(nagn))
+      qnfull(:)=qntmp(:nagn)
+      DEALLOCATE(modind,qntmp)
+
+      end subroutine GetPartialAssignment
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       END MODULE HAMILSETUP
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
