@@ -23,7 +23,7 @@ npow
 lowmem
             1
 truncation 
-            2
+            0
 update
             T
 optimize PES

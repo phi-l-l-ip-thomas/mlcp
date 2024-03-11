@@ -139,9 +139,13 @@
             case(0)
                tag='energy'
             case(1)
-               tag='n-mode coupling'
+               tag='n-mode coupling, then by energy'
             case(2)
-               tag='total excitation'
+               tag='total excitation, then by energy'
+            case(12)
+               tag='n-mode coupling, then by total excitation'
+            case(21)
+               tag='total excitation, then by n-mode coupling'
             case default
                tag='invalid truncation choice'
             end select
@@ -295,9 +299,15 @@
       real*8,  allocatable   :: evalsNDtmp(:),tabindx(:)
       integer, allocatable   :: subqns(:)
       integer :: nmtarget(2),netarget(2)
-      integer :: j,k,ndof,nstate,mstate
-
+      integer :: i,j,k,ndof,nstate,mstate
+!!!
+!      integer :: l
+!      character(len=64) :: frmt
+!!!
       ndof=SIZE(nbas)
+!!! TEST
+!      write(frmt,'(A,I0,A)') '(',ndof,'(X,I3),X,f16.8)'
+!!!
 
       select case(constraint)
       case(0) ! Sort only by energy
@@ -308,21 +318,26 @@
                                 nstate)
 
       case(1) ! Sort by increasing nmode, by energy for each nmode value
-         netarget=(/0,nesum/)
          nstate=0
          allocate(evalsNDtmp(nbloc),qnstmp(nbloc,ndof))
          do j=0,nmsum
             nmtarget(1:2)=j
+            netarget=(/j,nesum/)
 !           Get states having j modes coupled
             call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,nbas,&
                                    nmode,nexci,nmtarget,netarget,Etarget,&
                                    mstate)
-
+!!!
+            if (mstate.gt.0) write(*,*) 'Adding ',j,'-mode states:'
+!!!
 !           Add the states to the master list
             do k=1,mstate
                nstate=nstate+1
                qns(nstate,:)=qnstmp(k,:)
                evalsND(nstate)=evalsNDtmp(k)
+!!!
+!               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+!!!
                if (nstate.ge.nbloc) exit
             enddo
             if (nstate.ge.nbloc) exit
@@ -330,21 +345,94 @@
          deallocate(evalsNDtmp,qnstmp)
 
       case(2) ! Sort by increasing nexci, by energy for each nexci value
-         nmtarget=(/0,nmsum/)
          nstate=0
          allocate(evalsNDtmp(nbloc),qnstmp(nbloc,ndof))
          do j=0,nesum
+            nmtarget=(/min(j,1),min(nesum,nmsum)/)
             netarget(1:2)=j
 !           Get states having j excitations
             call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,nbas,&
                                    nmode,nexci,nmtarget,netarget,&
                                    Etarget,mstate)
+!!!
+!            if (mstate.gt.0) write(*,*) 'Adding ',j,'-excited states:'
+!!!
 
 !           Add the states to the master list
             do k=1,mstate
                nstate=nstate+1
                qns(nstate,:)=qnstmp(k,:)
                evalsND(nstate)=evalsNDtmp(k)
+!!!
+!               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+!!!
+               if (nstate.ge.nbloc) exit
+            enddo
+            if (nstate.ge.nbloc) exit
+         enddo
+         deallocate(evalsNDtmp,qnstmp)
+
+      case(12) ! Sort by increasing nmode, then nexci, then energy
+
+         nstate=0
+         allocate(evalsNDtmp(nbloc),qnstmp(nbloc,ndof))
+         do j=0,nmsum
+            nmtarget(1:2)=j
+            do i=j,nesum
+               netarget(1:2)=i
+!              Get states having j modes coupled and i quanta
+               call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,&
+                                      nbas,nmode,nexci,nmtarget,netarget,&
+                                      Etarget,mstate)
+!!!
+!               if (mstate.gt.0) &
+!               write(*,*) 'Adding ',j,'-mode ',i,'-excited states:'
+!!!
+
+!              Add the states to the master list
+               do k=1,mstate
+                  nstate=nstate+1
+                  qns(nstate,:)=qnstmp(k,:)
+                  evalsND(nstate)=evalsNDtmp(k)
+!!!
+!                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+!!!
+                  if (nstate.ge.nbloc) exit
+               enddo
+               if (nstate.ge.nbloc) exit
+            enddo
+            if (nstate.ge.nbloc) exit
+         enddo
+         deallocate(evalsNDtmp,qnstmp)
+
+      case(21) ! Sort by increasing nexci, then nmode, then energy
+
+         nstate=0
+         allocate(evalsNDtmp(nbloc),qnstmp(nbloc,ndof))
+         do i=0,nesum
+            netarget(1:2)=i
+            do j=min(i,1),min(nesum,nmsum)
+               nmtarget(1:2)=j
+!              Get states having i quanta and j modes coupled
+               call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,&
+                                      nbas,nmode,nexci,nmtarget,netarget,&
+                                      Etarget,mstate)
+!!!
+!               if (mstate.gt.0) &
+!               write(*,*) 'Adding ',i,'-excited ',j,'-mode states:'
+!!!
+
+!              Add the states to the master list
+               do k=1,mstate
+                  nstate=nstate+1
+                  qns(nstate,:)=qnstmp(k,:)
+                  evalsND(nstate)=evalsNDtmp(k)
+!!!
+!                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+!!!
+
+                  if (nstate.ge.nbloc) exit
+               enddo
                if (nstate.ge.nbloc) exit
             enddo
             if (nstate.ge.nbloc) exit
@@ -371,7 +459,6 @@
       do k=1,nbloc
          qns(k,:)=qnstmp(int(tabindx(k)),:)
       enddo
-
       deallocate(qnstmp,tabindx)
 
       end subroutine sortDPeigvalsGen
