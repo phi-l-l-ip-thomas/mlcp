@@ -25,6 +25,3 @@ PREPROCFLG = -cpp
 # LAPACK and BLAS flags
 LAPACKLIB = lib/liblapack.a lib/librefblas.a
 
-# matrix-ID flag
-MIDLIB = lib/id_lib.a
-

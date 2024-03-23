@@ -18,7 +18,6 @@ OMPFLG := $(strip ${OMPFLG})
 PREPROCFLG := $(strip ${PREPROCFLG})
 
 LAPACKLIB := $(strip ${LAPACKLIB})
-MIDLIB := $(strip ${MIDLIB})
 
 #-----------------------------------------------------------------------
 #              Setup linking and compilation flags
@@ -39,7 +38,6 @@ COMPILEFLG += ${MPIFLG}
 COMPILEFLG += ${OMPFLG}
 COMPILEFLG += ${PREPROCFLG}
 
-LIBFLG  = ${MIDLIB}
 LIBFLG += ${LAPACKLIB}
 
 #-----------------------------------------------------------------------
