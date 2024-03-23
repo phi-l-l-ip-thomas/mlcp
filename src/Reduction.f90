@@ -182,12 +182,10 @@
 !        The initial guess is the existing vector F, but if the rank
 !        of F is too small then we must generate a new guess
          IF (.not.ALLOCATED(F%coef)) THEN
-            call reduc_RID(G,F,newrank)
-!            F=RandomCP(G,newrank)
+            F=RandomCP(G,newrank)
          ELSEIF (SIZE(F%coef).ne.newrank .or. nloop.eq.0) THEN
             call FlushCP(F)
-            call reduc_RID(G,F,newrank)
-!            F=RandomCP(G,newrank)
+            F=RandomCP(G,newrank)
          ENDIF
          IF (SIZE(G%coef).gt.newrank) call reduc_ALS(G,F,abs(nloop))
 
@@ -196,11 +194,9 @@
               (SIZE(G%nbas).gt.2 .and. redND.eq.'SR1')) THEN
 
          IF (.not.ALLOCATED(F%coef)) THEN
-!            call reduc_RID(G,F,newrank)
             F=RandomCP(G,newrank)
          ELSEIF (SIZE(F%coef).ne.newrank .or. nloop.eq.0) THEN
             call FlushCP(F)
-!            call reduc_RID(G,F,newrank)
             F=RandomCP(G,newrank)
          ENDIF
          IF (SIZE(G%coef).gt.newrank) call reduc_SR1(G,F,abs(nloop))
@@ -651,116 +647,6 @@
       call FlushConfigs(C)
 
       end subroutine reduc_rop
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine reduc_RID(G,F,rF)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Takes vector G as input, and returns reduced vector F using
-! randomized interpolative decomposition, as described in Biagioni and
-! Beylkin^2, J. Comput. Phys. 281 (2015) 116-134.
-
-      implicit none
-      TYPE (CP), INTENT(IN)  :: G
-      TYPE (CP), INTENT(OUT) :: F
-      integer, intent(in)   :: rF
-      integer, allocatable  :: Lk(:)
-      real*8, allocatable   :: Y(:,:),P(:)
-      integer :: rG,rexc,rrx,i,j,jmod,n
-      character*64 :: frmt
-
-!     Set parameters
-      rG=SIZE(G%coef)
-      rexc=8  ! Excess rank
-      rrx=min(rF+rexc,rG)
-      n=rG-rF
-
-!     If G is already small enough, no need to reduce
-      IF (rG.le.rF) THEN
-         F=CopyCP(G)
-         RETURN
-      ENDIF
-
-!     Guess a random start vector (eqn. 3.11)
-      F=RandomCP(G,rrx)
-
-!     Normalize F
-      call NORMBASE(F)
-      F%coef=1.d0
-
-!     Form the projection matrix Y (eqn. 1.15)
-      ALLOCATE(Y(rrx,rG))
-      call CONSTPT(G,F,0,Y)
-
-!     Multiply entries of PSTOT by the coefficients of G
-!     No need to do this for F since coefs are already 1
-      DO j=1,rG
-         Y(:,j)=Y(:,j)*G%coef(j)
-      ENDDO
-      call FlushCP(F)
-
-!     Calc. matrix interpolative decomposition of Y
-      call MatrixID(Y,rF,Lk,P)
-
-!     Construct the reduced-rank CP-vec, store in F
-      F=NewCP(rF,G%rows,G%cols,G%sym)
-      DO i=1,rF
-         F%base(:,i)=G%base(:,Lk(i))
-         F%coef(i)=1.d0
-         DO j=1,n
-            jmod=(j-1)*rF+i
-            F%coef(i)=F%coef(i)+P(jmod)
-         ENDDO
-!        Make sure coef is positive
-         F%coef(i)=F%coef(i)*G%coef(Lk(i))
-         IF (F%coef(i).lt.0.d0) THEN
-            F%coef(i)=abs(F%coef(i))
-            F%base(1:F%nbas(1),i)=-F%base(1:F%nbas(1),i)
-         ENDIF
-      ENDDO
-
-      DEALLOCATE(Y,Lk,P)
-
-      end subroutine reduc_RID
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine MatrixID(A,k,Lk,P)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Wrapper for Mark Tygert's matrix interpolative decomposition code
-! Computes columnwise matrix interpolative decomposition of matrix A,
-! see Cheng et al, SIAM J. Sci. Comput. 26 (2005) 1389-1404.; and
-! Martinsson et al, Appl. Comput. Harm. Anal. 20 (2011) 47-68.
-
-      implicit none
-      real*8, intent(in)   :: A(:,:)
-      integer, intent(in)  :: k
-      integer, allocatable, intent(out) :: Lk(:)
-      real*8, allocatable, intent(out)  :: P(:)
-      real*8, allocatable :: W(:)
-      integer :: m,n,wdim
-
-      m=SIZE(A,1)
-      n=SIZE(A,2)
-
-!     Initialize the w array
-      wdim=MAX(10000000,(2*k+17)*n+27*m+100)
-      ALLOCATE(W(wdim),Lk(n),P(k*(n-k)))
-
-! The Matrix-ID code includes FORTRAN 'save' variables and is not thread
-! safe, so calls to it must be OMP CRITICAL
-
-!$OMP CRITICAL
-      call iddr_aidi(m,n,k,W)
-!     Columnwise matrix-ID of A
-      call iddr_aid(m,n,A,k,W,Lk,P)
-!$OMP END CRITICAL
-
-      DEALLOCATE(W)
-
-      end subroutine MatrixID
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

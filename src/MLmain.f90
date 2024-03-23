@@ -41,7 +41,7 @@
       call idate(d)
       call itime(t)
       call CPU_TIME(t1)
-      rs=(/0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,&
+      rs=(/1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,&
           mod(INT(t1),7),d(1),d(2),d(3),t(1),t(2),t(3),mod(INT(t1),5)/)
       call random_seed(PUT=rs)
 !      write(*,*) 'Random seed = ',rs

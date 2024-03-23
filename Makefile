@@ -1,29 +1,6 @@
 # ******************** MLCP MAKEFILE **************************
-
-#-----------------------------------------------------------------------
-#                      USER DEFINABLE OPTIONS
-#-----------------------------------------------------------------------
-
-# Compiler ( gfortran, ifort )
-FC = gfortran
-
-# Debugging options ( yes or no )
-DEBUG = no
-
-# Optimization level
-OPTLEVEL = 3
-
-# linking LAPACK and BLAS 
-LAPACK = yes
-
-# linking matrix ID package
-MATID = yes
-
-# Compile with standard real 8 (see details about the flags for each compiler...)
-REAL8 = yes
-
-# Compile for parallelization using OpenMP
-OPENMP = yes
+$(if $(wildcard arch.mk),,$(error Error: Please create arch.mk from config/ directory for machine-dependent configuration))
+include arch.mk
 
 #-----------------------------------------------------------------------
 #                        STRIP ALL SPACES
@@ -31,105 +8,39 @@ OPENMP = yes
 
 # Strip leading and trailing spaces from all variables.
 FC := $(strip ${FC})
+FOPTS := $(strip ${FOPTS})
+OPTFLG := $(strip ${OPTFLG})
 DEBUG := $(strip ${DEBUG})
-OPTLEVEL := $(strip ${OPTLEVEL})
-LAPACK := $(strip ${LAPACK})
-OPENMP := $(strip ${OPENMP})
+DEBUGFLG := $(strip ${DEBUGFLG})
+MODULEFLG := $(strip ${MODULEFLG})
+MPIFLG := $(strip ${MPIFLG})
+OMPFLG := $(strip ${OMPFLG})
+PREPROCFLG := $(strip ${PREPROCFLG})
 
-#-----------------------------------------------------------------------
-#                       Compiler specific statements.
-#-----------------------------------------------------------------------
-
-ifeq (${FC},gfortran)
- # Debug flags
-   DEBUGFLG = -g -fcheck=all -fbacktrace
- # GNU LAPACK and BLAS flags
-   LAPACKFLG = lib/liblapack.a lib/librefblas.a
- # matrix-ID flag
-   MIDFLG = lib/id_lib.a
- # Data type
-   DATAFLG =
-   ifeq (${REAL8},yes)
-       DATAFLG = -fdefault-real-8 -fdefault-double-8
-   endif
- # Flag to specify the position of mod files
-   MODULEFLG = -I
- # Flag to specify OpenMP parallelization
-   OMPFLG = -fopenmp
-endif
-
-ifeq (${FC},ifort)
- # Debug flags
-   DEBUGFLG = -g -Wall -Wextra -pedantic -fimplicit-none -fcheck=all -fbacktrace
- # LAPACK and BLAS flags
-   LAPACKFLG = lib/liblapack.a lib/librefblas.a
- # matrix-ID flag
-   MIDFLG = lib/id_lib.a
- # Data type
-   DATAFLG =
-   ifeq (${REAL8},yes)
-       DATAFLG = -r8
-   endif
- # Flag to specify the position of mod files
-   MODULEFLG = -I
- # Flag to specify OpenMP parallelization
-   OMPFLG = -openmp
-endif
+LAPACKLIB := $(strip ${LAPACKLIB})
+MIDLIB := $(strip ${MIDLIB})
 
 #-----------------------------------------------------------------------
 #              Setup linking and compilation flags
 #-----------------------------------------------------------------------
 
-# initialize flags
+# Compiler flags and libraries
 COMPILEFLG =
-LIBFLG     =
+COMPILEFLG += ${FOPTS} 
 
 # if debugging set the appropriate flags
 ifeq (${DEBUG}, yes)
     COMPILEFLG += ${DEBUGFLG}
+else
+    COMPILEFLG += ${OPTFLG}
 endif
 
-# Set flags for defining standard variable kinds
-COMPILEFLG +=  ${DATAFLG}
+COMPILEFLG += ${MPIFLG}
+COMPILEFLG += ${OMPFLG}
+COMPILEFLG += ${PREPROCFLG}
 
-# If matrixID, add the linking options
-ifeq (${MATID}, yes)
-    LIBFLG += ${MIDFLG}
-endif
-
-# If lapack, add the linking options
-ifeq (${LAPACK}, yes)
-    LIBFLG += ${LAPACKFLG}
-endif
-
-# If lapack, add the linking options
-ifeq (${OPENMP}, yes)
-    COMPILEFLG += ${OMPFLG}
-endif
-
-#-----------------------------------------------------------------------
-#              Determine the optimization level to be used.
-#-----------------------------------------------------------------------
-
-ifeq (${OPTLEVEL},0)
-    OPTFLAGS = -O0
-endif
-ifeq (${OPTLEVEL},1)
-    OPTFLAGS = -O1
-endif
-ifeq (${OPTLEVEL},2)
-    OPTFLAGS = -O2
-endif
-ifeq (${OPTLEVEL},3)
-    OPTFLAGS = -O3
-endif
-
-# if debugging override input optimization level
-ifeq (${DEBUG}, yes)
-    OPTFLAGS = -O0
-endif
-
-COMPILEFLG += ${OPTFLAGS}
+LIBFLG  = ${MIDLIB}
+LIBFLG += ${LAPACKLIB}
 
 #-----------------------------------------------------------------------
 #                         DIRECTORIES

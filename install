@@ -14,9 +14,6 @@ make
 cd ../LAPACK
 make clean
 make
-cd ../IDLIB
-make clean
-make
 
 # Compile the code
 cd ../..
