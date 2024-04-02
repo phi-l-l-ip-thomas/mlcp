@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
 
       implicit none
       TYPE MLtree
@@ -37,6 +38,67 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine DisposeModeComb(ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Disposes the MLtree type
+
+      implicit none
+      TYPE (MLtree) :: ML
+
+      call Flush_ModeComb(ML)
+
+      MC_SETUP=.FALSE.
+      write(*,'(X,A,X,f20.3)') 'Total mode-combination time       (s)',&
+                             mc_time
+
+      end subroutine DisposeModeComb
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Flush_ModeComb(ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Disposes the MLtree type
+
+      implicit none
+      TYPE (MLtree) :: ML
+
+      IF (.not. MC_SETUP) CALL Init_ModeComb
+
+      IF (ALLOCATED(ML%modcomb)) DEALLOCATE(ML%modcomb)
+      IF (ALLOCATED(ML%modstart)) DEALLOCATE(ML%modstart)
+      IF (ALLOCATED(ML%whichmod)) DEALLOCATE(ML%whichmod)
+      IF (ALLOCATED(ML%gdim)) DEALLOCATE(ML%gdim)
+      IF (ALLOCATED(ML%nmode)) DEALLOCATE(ML%nmode)
+
+      end subroutine Flush_ModeComb
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine StartModeComb(ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Main routine for reading and processing mode combination data
+
+      implicit none
+      TYPE (MLtree) :: ML
+      character(len=64) :: inpfile
+
+      IF (mpirank.eq.0) &
+      write(*,'(/X,A/)') 'Setting up mode-combination module...'
+
+      IF (.not. MC_SETUP) CALL Init_ModeComb
+      inpfile='layers.inp'
+      CALL ReadModeDat(ML,inpfile)
+      CALL ValidateModeDat(ML)
+      CALL PrintModeDat(ML)
+      CALL BcastModeDat(ML)
+
+      end subroutine StartModeComb
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine ReadModeDat(ML,fnm)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -56,8 +118,10 @@
       real*8  :: t1,t2
 
       IF (.not. MC_SETUP) CALL Init_ModeComb
-
       CALL CPU_TIME(t1)
+
+!     Read from MPI rank 0
+      rank0 : IF (mpirank.eq.0) THEN
 
 !     For line reading (change if working with a larger system)
       maxndof=1024
@@ -74,7 +138,7 @@
       OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
       IF (InpStat /= 0) THEN
          write(*,*) TRIM(ADJUSTL(fnm)),' not found'
-         call AbortWithError("Oh, no! Error reading input file")
+         call AbortWithError("Error reading input file")
       ENDIF
 
       ALLOCATE(blankline(maxlines))
@@ -180,19 +244,23 @@
 225      continue
       ENDDO
 
+      ML%ndof=0
+      DO im=1,maxndof
+         IF (bas_tmp(1,im).gt.0) ML%ndof=ML%ndof+1
+      ENDDO
+
+      ALLOCATE(ML%nmode(ML%nlayr),ML%resort(ML%ndof))
+      ALLOCATE(ML%modcomb(ML%nlayr,ML%ndof),ML%gdim(ML%nlayr,ML%ndof))
+      ALLOCATE(ML%modstart(ML%nlayr,ML%ndof))
+      ALLOCATE(ML%whichmod(max(1,ML%nlayr-1),ML%ndof))
+
 !     Determine nmode from length of temporary basis array
-      ALLOCATE(ML%nmode(ML%nlayr))
       DO il=1,ML%nlayr
          ML%nmode(il)=0
          DO im=1,maxndof
             IF (bas_tmp(il,im).gt.0) ML%nmode(il)=ML%nmode(il)+1
          ENDDO
       ENDDO
-      ML%ndof=ML%nmode(1)
-
-      ALLOCATE(ML%modcomb(ML%nlayr,ML%ndof),ML%gdim(ML%nlayr,ML%ndof))
-      ALLOCATE(ML%modstart(ML%nlayr,ML%ndof),ML%resort(ML%ndof))
-      ALLOCATE(ML%whichmod(max(1,ML%nlayr-1),ML%ndof))
 
 !     Fill resort array
       ML%resort(1:ML%ndof)=res_tmp(1:ML%ndof)
@@ -250,6 +318,8 @@
       DEALLOCATE(blankline)
       CLOSE(u)
 
+      ENDIF rank0
+
       call CPU_TIME(t2)
       mc_time=mc_time+t2-t1
 
@@ -265,6 +335,11 @@
       implicit none
       TYPE (MLtree)        :: ML
       integer :: il,im
+      real*8  :: t1,t2
+
+      call CPU_TIME(t1)
+
+      rank0 : IF (mpirank.eq.0) THEN
 
       write(*,'(X,A/)') '** Structure of multilayer CP-format tree **'
       write(*,*) 'Number of DOF    : ',ML%ndof
@@ -307,6 +382,11 @@
 
       write(*,'(/X,A)') '********************************************'
 
+      ENDIF rank0
+
+      call CPU_TIME(t2)
+      mc_time=mc_time+t2-t1
+
 1233  format(6X,32(I4,X))
 1234  format(I4,2X,32(I4,X))
 1235  format(A5,1X,32(A4,X))
@@ -323,6 +403,8 @@
       implicit none
       TYPE (MLtree) :: ML
       integer :: il,im,k,nbloc,nsubm,mstart,sum,prod
+
+      rank0: IF (mpirank.eq.0) THEN
 
       DO im=1,ML%nmode(1)
          sum=ML%resort(im)
@@ -384,7 +466,39 @@
          ENDDO
       ENDDO
 
+      ENDIF rank0
+
       end subroutine ValidateModeDat
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine BcastModeDat(ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Broadcasts MLtree to all MPI ranks
+
+      implicit none
+      TYPE (MLtree) :: ML
+
+      call bcast(ML%nlayr)
+      call bcast(ML%ndof)
+
+      IF (mpirank.ne.0) THEN
+         ALLOCATE(ML%nmode(ML%nlayr),ML%resort(ML%ndof))
+         ALLOCATE(ML%modcomb(ML%nlayr,ML%ndof),ML%gdim(ML%nlayr,ML%ndof))
+         ALLOCATE(ML%modstart(ML%nlayr,ML%ndof))
+         ALLOCATE(ML%whichmod(max(1,ML%nlayr-1),ML%ndof))
+      ENDIF
+
+!     Broadcast arrays
+      call bcast(ML%nmode)
+      call bcast(ML%resort)
+      call bcast(ML%modcomb)
+      call bcast(ML%gdim)
+      call bcast(ML%modstart)
+      call bcast(ML%whichmod)
+
+      end subroutine BcastModeDat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -499,27 +613,6 @@
       ENDDO
 
       end function resortedmode
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine Flush_ModeComb(ML)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Disposes the MLtree type
-
-      implicit none
-      TYPE (MLtree) :: ML
-
-      IF (.not. MC_SETUP) CALL Init_ModeComb
-
-      MC_SETUP=.FALSE.
-      IF (ALLOCATED(ML%modcomb)) DEALLOCATE(ML%modcomb)
-      IF (ALLOCATED(ML%modstart)) DEALLOCATE(ML%modstart)
-      IF (ALLOCATED(ML%whichmod)) DEALLOCATE(ML%whichmod)
-      IF (ALLOCATED(ML%gdim)) DEALLOCATE(ML%gdim)
-      IF (ALLOCATED(ML%nmode)) DEALLOCATE(ML%nmode)
-
-      end subroutine Flush_ModeComb
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

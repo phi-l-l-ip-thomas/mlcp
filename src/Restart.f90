@@ -8,7 +8,7 @@
       USE ERRORTRAP
       USE UTILS
       USE MODECOMB
-      USE INPUTFIELDS
+      USE INPUTCP
       USE HAMILSETUP
       USE SEPDREPN
 
@@ -105,7 +105,7 @@
 
 !     Read the restart input files
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
-      call ReadMLCPInputFile(cprst,fnm)
+      call ReadMLCPInputs(cprst,fnm)
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_layers.rst'
       call ReadModeDat(MLrst,fnm)
 

@@ -10,7 +10,7 @@
       USE LINALG
       USE SEPDREPN
       USE HAMILSETUP
-      USE INPUTFIELDS
+      USE INPUTCP
       USE TARGETEDSTATES
 
       implicit none

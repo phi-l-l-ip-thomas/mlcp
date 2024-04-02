@@ -57,12 +57,14 @@ OBJDIR = obj
 COBJS = \
 	${OBJDIR}/ErrorTrap.o \
 	${OBJDIR}/Utils.o \
+	${OBJDIR}/MyMPI.o \
 	${OBJDIR}/DSORTPLUSDEP.o \
 	${OBJDIR}/ChebLib.o \
 	${OBJDIR}/LinAlg.o \
 	${OBJDIR}/Munkres.o \
 	${OBJDIR}/TargetedStates.o \
-	${OBJDIR}/InputFields.o \
+	${OBJDIR}/InputCP.o \
+	${OBJDIR}/InputCS.o \
 	${OBJDIR}/ModeComb.o \
 	${OBJDIR}/SepdRepn.o \
 	${OBJDIR}/CPConfig.o \
@@ -163,10 +165,11 @@ clean :
 # ----------------------------------------------------------------------
 
 COMMONDEP1 = ${OBJDIR}/DSORTPLUSDEP.o ${OBJDIR}/ErrorTrap.o \
-             ${OBJDIR}/Utils.o ${OBJDIR}/ChebLib.o Makefile
+             ${OBJDIR}/Utils.o ${OBJDIR}/MyMPI.o \
+             ${OBJDIR}/ChebLib.o Makefile
 
 COMMONDEP2 = ${OBJDIR}/LinAlg.o ${OBJDIR}/Munkres.o \
-	     ${OBJDIR}/InputFields.o ${OBJDIR}/ModeComb.o \
+	     ${OBJDIR}/InputCP.o ${OBJDIR}/InputCS.o ${OBJDIR}/ModeComb.o \
 	     ${OBJDIR}/SepdRepn.o ${OBJDIR}/CPConfig.o \
 	     ${OBJDIR}/MODVECVECML.o ${OBJDIR}/CPMM.o \
 	     ${OBJDIR}/ALSOO.o ${OBJDIR}/FFPES.o \
@@ -182,6 +185,9 @@ ${OBJDIR}/ErrorTrap.o    : ${SRCDIR}/ErrorTrap.f90 Makefile
 # Utilities
 ${OBJDIR}/Utils.o        : ${SRCDIR}/Utils.f90 ${OBJDIR}/ErrorTrap.o Makefile
 
+# MPI wrapper functions
+${OBJDIR}/MyMPI.o        : ${SRCDIR}/MyMPI.f90 ${OBJDIR}/ErrorTrap.o Makefile
+
 # Chebyshev library
 ${OBJDIR}/ChebLib.o      : ${SRCDIR}/ChebLib.f90 ${OBJDIR}/ErrorTrap.o Makefile
 
@@ -194,8 +200,11 @@ ${OBJDIR}/TargetedStates.o : ${SRCDIR}/TargetedStates.f90 ${COMMONDEP1}
 # Hungarian algorithm matrix assignment
 ${OBJDIR}/Munkres.o      : ${SRCDIR}/Munkres.f90 ${COMMONDEP1}
 
-# Input file reading
-${OBJDIR}/InputFields.o  : ${SRCDIR}/InputFields.f90 ${COMMONDEP1}
+# CP.inp input reading
+${OBJDIR}/InputCP.o  : ${SRCDIR}/InputCP.f90 ${COMMONDEP1}
+
+# CS.inp input reading
+${OBJDIR}/InputCS.o  : ${SRCDIR}/InputCS.f90 ${COMMONDEP1}
 
 # Mode combination module
 ${OBJDIR}/ModeComb.o     : ${SRCDIR}/ModeComb.f90 ${COMMONDEP1}

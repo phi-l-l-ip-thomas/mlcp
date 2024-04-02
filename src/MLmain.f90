@@ -6,10 +6,11 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE MODECOMB
       USE SEPDREPN
       USE HAMILSETUP 
-      USE INPUTFIELDS
+      USE INPUTCP
       USE RESTART
       USE REDUCTION
       USE ALSPOW
@@ -36,7 +37,9 @@
       integer :: rs(33),d(3),t(3)
       integer :: il,im,j,trm,ilrst,imrst
       real*8  :: t1,t2
-      character(len=64) :: inpfile,frmt
+      character(len=64) :: frmt
+
+      call prepare_mpi()
 
       call idate(d)
       call itime(t)
@@ -44,8 +47,8 @@
       rs=(/1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,&
           mod(INT(t1),7),d(1),d(2),d(3),t(1),t(2),t(3),mod(INT(t1),5)/)
       call random_seed(PUT=rs)
-!      write(*,*) 'Random seed = ',rs
 
+      IF (mpirank.eq.0) then
       write(*,'(X,A/)') '############################################'
       write(*,*)        '     Multi-layer CP-format TISE solver      '
       write(*,*)        '           by Phillip S. Thomas             '
@@ -53,25 +56,22 @@
       write(*,*)        '             of Arnaud Leclerc              '
       write(*,*)        '          Version ML2f 03-07-2024           '
       write(*,'(/X,A/)') '############################################'
+      ENDIF
 
-      call PrintWallTime('MLCP initialized')
+      call sync_mpi()
+      write(*,'(A,I0,A,I0,A)') 'running MLCP from rank (',&
+                                mpirank,'/',mpinodes,')...'
+      call sync_mpi()
 
-!      call Test_calcPk()
+      IF (mpirank.eq.0) call PrintWallTime('MLCP initialized')
 
 !     Set up the mode combination module, read input
-      write(*,'(/X,A/)') 'Setting up mode-combination module...'
-      inpfile='layers.inp'
-      CALL Init_ModeComb
-      CALL ReadModeDat(ML,inpfile)
-      CALL ValidateModeDat(ML)
-      CALL PrintModeDat(ML)
+      CALL StartModeComb(ML)     
 
 !     Read input file, assign parameters
-      write(*,'(/X,A/)') 'Reading input file (CP.inp)...' 
-      inpfile='CP.inp'
-      CALL ReadMLCPInputFile(cpp,inpfile)
-      CALL PrintMLCPInputs(cpp)
+      call StartInputCP(cpp)
 
+      if (mpirank.eq.0) then !!! TEST-RK0
       write(*,'(/X,A/)') 'Hamiltonian setup...'
 
       CALL SetupHamiltonian(cpp%system,cpp%opt,Ham,ML)
@@ -135,7 +135,7 @@
             IF (Ham%ndof(trm,il).eq.1 .and. Ham%nop(trm,il).eq.1) THEN
                write(*,'(3X,A)') '(Mode solved previously)'
             ELSE
-               call SolverAlg(eigv,delta,cpp,Q,H,W,il,ML%nlayr)
+               call SolveHPsi(eigv,delta,cpp,Q,H,W)
 
 !              Print the wall time upon completion of the solver
                write(frmt,'(X,2(A,I0),A)') &
@@ -161,7 +161,7 @@
       write(*,*)
 
 !     Free memory
-      call Flush_ModeComb(ML)
+      call DisposeModeComb(ML)
       call FlushHamiltonian(Ham)
 
 !     Dispose modules and get CPU time
@@ -185,9 +185,15 @@
       IF (cpp%ncpu.eq.1) write(*,'(/X,A,11X,f20.3)') &
          'MLCP total CPU run time (s)',t2-t1
 
-      write(*,*)
-      call PrintWallTime('MLCP finished')
-      write(*,*)
+      endif !!! TEST-RK0
+
+      IF (mpirank.eq.0) then      
+         write(*,*)
+         call PrintWallTime('MLCP finished')
+        write(*,*)
+      ENDIF
+
+      call finalize_mpi()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

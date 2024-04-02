@@ -7,7 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
-      USE INPUTFIELDS
+      USE INPUTCP
       USE SEPDREPN
       USE RESTART
       USE BLOCKPOWER
@@ -26,18 +26,13 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolverAlg(eigv,delta,cpp,Q,H,W,il,nlayr)
+      integer function GetSolverType(cpp,Q) result(styp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       TYPE (CPpar), INTENT(INOUT) :: cpp
       TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
-      TYPE (CP), INTENT(IN) :: H,W
-      real*8, allocatable, intent(inout) :: eigv(:)
-      real*8, allocatable, intent(out)   :: delta(:)
-      integer, intent(in) :: il,nlayr
-      integer :: styp
 
 !     Determine styp
       IF (cpp%solver .seq. 'powr') THEN
@@ -58,12 +53,10 @@
       ELSEIF (cpp%solver .seq. 'inv1') THEN
          styp=-4
       ELSE
-         call AbortWithError('SolverAlg(): Solver not recognized')
+         call AbortWithError('GetSolverType(): Solver not recognized')
       ENDIF
 
-      call SolveHPsi(eigv,delta,cpp,Q,H,W,styp)
-
-      end subroutine SolverAlg
+      end function GetSolverType
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -283,7 +276,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolveHPsi(eigv,delta,cpp,Q,H,W,styp)
+      subroutine SolveHPsi(eigv,delta,cpp,Q,H,W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for computing the eigenfunctions and 
@@ -294,18 +287,14 @@
       TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
       TYPE (CP), ALLOCATABLE :: Qg(:)
       TYPE (CP), INTENT(IN)  :: H,W
-      integer, intent(in) :: styp
       real*8, allocatable, intent(inout) :: eigv(:)
       real*8, allocatable, intent(out)   :: delta(:)
       real*8, allocatable  :: eigg(:),eigtmp(:),ccoef(:)
       real*8  :: bounds(2)
-      integer :: i,j,nev,nup,ndown,nsame,nloc,ist
+      integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp
       logical :: conv,showFmG,diag,readsuccess
       real*8  :: rmsdelta,oldrms,maxdelta,sumdelta
       real*8, parameter :: redtol=1.d-12
-
-!      TYPE (CP) :: w,v
-!      real*8 :: rq
 
 !     Initializations
       nev=SIZE(eigv)
@@ -315,7 +304,7 @@
       bounds=0.d0
       ALLOCATE(delta(nev))
       delta=0.d0
-
+      styp=GetSolverType(cpp,Q)
 
 !     For Davidson alg, save guess eigenvalues and vectors
       IF (styp.eq.-2) THEN
@@ -448,14 +437,14 @@
       TYPE (CP), INTENT(INOUT) :: Q(:)
       TYPE (CP), INTENT(IN)    :: Qg(:),H,W
 !!! 
-      TYPE (CP) :: F,G,G1,Hmod ! Test
-      integer :: conv
+!      TYPE (CP) :: F,G,G1,Hmod ! Test
+!      integer :: conv
 !!!
       integer, intent(inout) :: nconv
       integer, intent(in)    :: i,styp
       real*8, intent(inout)  :: eigv(:)
       real*8, intent(in)     :: eigg(:),eigvo(:),bounds(2)
-      real*8 :: exact(9)
+!      real*8 :: exact(9)
       real*8, parameter      :: tol=1.d-15
       character(len=18)      :: tag
       real*8  :: Eshift
@@ -490,18 +479,6 @@
          call AbortWithError('Iterate(): invalid solver type')
       ENDIF
 
-!!! TEST
-      exact(1)=5781.019410744418
-      exact(2)=6937.345474297758
-      exact(3)=7030.002658466121
-      exact(4)=7283.838891204568
-      exact(5)=7530.384810906951
-      exact(6)=8088.252255440537
-      exact(7)=8196.850787019019
-      exact(8)=8273.954635158201
-      exact(9)=8437.645462876293
-!!! END TEST
-
 
 !     Run power iterations on each vector in the block
 !$omp parallel
@@ -518,7 +495,7 @@
          ELSEIF (styp.eq.-4) THEN
 !            call InvItn_wrapper(H,Q(j),eigv(j),cpp%psinals)
 !!! TEST (only for max 8 eigenvals)
-             call InvItn_shift_test(H,Q(j),exact(j),exact(j+1),cpp%psinals)
+!             call InvItn_shift_test(H,Q(j),exact(j),exact(j+1),cpp%psinals)
 !!! END TEST
          ENDIF
       ENDDO
@@ -566,48 +543,6 @@
 !     Print the eigenvalues
       write(*,*)
       write(*,*) tag,i,(eigv(j),j=1,nbloc)
-
-!!! TEST
-
-!      IF (i.eq.1) THEN
-!         DO j=nconv+1,nbloc
-!            G=CopyCP(Q(j))
-!            G=RandomCP(Q(j),Q(j)%R())
-!            call NORMALIZE(G)
-!            call FilterSolver(H,G,cpp%npow,cpp%psinals,cpp%lowmem)
-!            call LinSolver_alg(H,Q(j),G,cpp%psinals,1,eigv(j),1,.TRUE.)
-!            conv=ALS_solve(H,G,Q(j),cpp%psinals,0,eigv(j),'grilch')
-!            call FlushCP(G)
-!            call LintertwinedInvItn_1(H,Q(j),cpp%psinals,eigv(j))
-!            write(*,*)
-!         ENDDO
-!          call AbortWithError('Done fooling around')
-!      ENDIF
-!      call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
-!      call GetQHQdiag(Q,H,eigv,nconv)
-!      call SortVecs(Q,eigv,nconv,bounds(1))
-!      write(*,*)
-!      write(*,*) tag,i,(eigv(j),j=1,nbloc)
-!      call toyproblem()
-!     HG test
-!      F=HGGuess(H,cpp%psirank,(/2,2,2,2,2,2/))
-!      DO j=1,cpp%ncycle
-!         call HGPowrRecurse(H,F,10*cpp%npow,cpp%psinals,1,bounds(2))
-!         call HGPowrRecurse(H,F,cpp%npow,cpp%psinals,1,bounds(2),W)
-!      ENDDO
-!!! TEST (linear solver)
-!      G=IdentityCPMatrix(H%rows,H%cols,H%sym)
-!      DO j=1,nbloc
-!         write(*,*) 'Inverting (H - ',eigv(j),'*I)'
-!         write(*,*) 'Inverting H'
-!         F=ALS_solve_adaptive(150,H,G,1.d-8,200,1,eigv(j))
-!         F=ALS_solve_adaptive(150,H,G,1.d-8,200,0,0.d0)
-!         write(*,*)
-!         call FlushCP(F)
-!      ENDDO
-!      call FlushCP(G)
-!      call AbortWithError('done inverting H')
-!!!
 
       end subroutine Iterate
 
