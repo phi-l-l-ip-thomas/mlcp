@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE, INTRINSIC :: ISO_C_BINDING
 
       TYPE CP
@@ -19,9 +20,11 @@
             PROCEDURE :: D => Getndof
             PROCEDURE :: M => Getrows
             PROCEDURE :: N => Getcols
+!            PROCEDURE :: new => NewCP
             PROCEDURE :: show => CPShowStats
             PROCEDURE :: print => PrintCPmat_all
             PROCEDURE :: printvec => PrintCPvec
+!            PROCEDURE :: flush => FlushCP
       END TYPE CP
 
       INTERFACE NewCP
@@ -791,6 +794,52 @@
       ENDDO
 
       end subroutine CPMatrixZeroOffDiag_gen
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine BcastCP(v,irank)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Broadcasts CP-vec v from MPI rank irank to other ranks
+
+      implicit none
+      TYPE (CP) :: v
+      integer, intent(in)  :: irank
+      integer, allocatable :: rows(:),cols(:)
+      logical, allocatable :: sym(:)
+      integer   :: rk,ndof
+
+      IF (mpirank.eq.irank) THEN
+         rk=v%R()
+         ndof=v%D()
+      ENDIF
+
+      call bcast(rk,irank)
+      call bcast(ndof,irank)
+
+      ALLOCATE(rows(ndof),cols(ndof),sym(ndof))
+
+      IF (mpirank.eq.irank) THEN
+         rows(:)=v%rows(:)
+         cols(:)=v%cols(:)
+         sym(:)=v%sym(:)
+      ENDIF
+
+      call bcast(rows,irank)
+      call bcast(cols,irank)
+      call bcast(sym,irank)
+
+      IF (mpirank.ne.irank) THEN
+         call FlushCP(v)
+         v=NewCP(rk,rows,cols,sym)
+      ENDIF
+
+      call bcast(v%base,irank)
+      call bcast(v%coef,irank)
+
+      DEALLOCATE(rows,cols,sym)
+
+      end subroutine BcastCP
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

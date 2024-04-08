@@ -82,17 +82,21 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_string_ch(p)
+      subroutine bcast_string_ch(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
-
       character(len=*) :: p
       integer :: n
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n=len(p)
-      call bcast_ch(p,n,0)
+      call bcast_ch(p,n,iin)
 
       end subroutine bcast_string_ch
 
@@ -116,7 +120,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_l_0d(m)
+      subroutine bcast_l_0d(m,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -125,27 +129,37 @@
       logical, intent(inout) :: m
       logical :: ma(1)
       integer :: n
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       ma=.false.
       if (mpirank.eq.0) ma=m
       n=1
-      call bcast_l(ma,n,0)
+      call bcast_l(ma,n,iin)
       m=ma(1)
 
       end subroutine bcast_l_0d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_l_1d(p)
+      subroutine bcast_l_1d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n
       logical :: p(:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n=SIZE(p)
-      call bcast_l(p,n,0)
+      call bcast_l(p,n,iin)
 
       end subroutine bcast_l_1d
 
@@ -169,7 +183,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_i4_0d(m)
+      subroutine bcast_i4_0d(m,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -178,60 +192,80 @@
       integer, intent(inout) :: m
       integer :: ma(1)
       integer :: n
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       ma=0
       if (mpirank.eq.0) ma=m
       n=1
-      call bcast_i4(ma,n,0)
+      call bcast_i4(ma,n,iin)
       m=ma(1)
 
       end subroutine bcast_i4_0d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_i4_1d(p)
+      subroutine bcast_i4_1d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n
       integer :: p(:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n=SIZE(p)
-      call bcast_i4(p,n,0)
+      call bcast_i4(p,n,iin)
 
       end subroutine bcast_i4_1d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_i4_2d(p)
+      subroutine bcast_i4_2d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n(2)
       integer :: p(:,:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n(1)=SIZE(p,1)
       n(2)=SIZE(p,2)
-      call bcast_i4(p,PRODUCT(n),0)
+      call bcast_i4(p,PRODUCT(n),iin)
 
       end subroutine bcast_i4_2d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_i4_3d(p)
+      subroutine bcast_i4_3d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n(3)
       integer :: p(:,:,:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n(1)=SIZE(p,1)
       n(2)=SIZE(p,2)
       n(3)=SIZE(p,3)
-      call bcast_i4(p,PRODUCT(n),0)
+      call bcast_i4(p,PRODUCT(n),iin)
 
       end subroutine bcast_i4_3d
 
@@ -254,69 +288,88 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r4_0d(m)
+      subroutine bcast_r4_0d(m,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
-
       real*4, intent(inout) :: m
       real*4  :: ma(1)
       integer :: n
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       ma=0.d0
       if (mpirank.eq.0) ma=m
       n=1
-      call bcast_r4(ma,n,0)
+      call bcast_r4(ma,n,iin)
       m=ma(1)
 
       end subroutine bcast_r4_0d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r4_1d(p)
+      subroutine bcast_r4_1d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n
       real*4  :: p(:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n=SIZE(p)
-      call bcast_r4(p,n,0)
+      call bcast_r4(p,n,iin)
 
       end subroutine bcast_r4_1d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r4_2d(p)
+      subroutine bcast_r4_2d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n(2)
       real*4  :: p(:,:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n(1)=SIZE(p,1)
       n(2)=SIZE(p,2)
-      call bcast_r4(p,PRODUCT(n),0)
+      call bcast_r4(p,PRODUCT(n),iin)
 
       end subroutine bcast_r4_2d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r4_3d(p)
+      subroutine bcast_r4_3d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n(3)
       real*4  :: p(:,:,:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n(1)=SIZE(p,1)
       n(2)=SIZE(p,2)
       n(3)=SIZE(p,3)
-      call bcast_r4(p,PRODUCT(n),0)
+      call bcast_r4(p,PRODUCT(n),iin)
 
       end subroutine bcast_r4_3d
 
@@ -340,7 +393,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r8_0d(m)
+      subroutine bcast_r8_0d(m,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -349,60 +402,80 @@
       real*8, intent(inout) :: m
       real*8  :: ma(1)
       integer :: n
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       ma=0.d0
       if (mpirank.eq.0) ma=m
       n=1
-      call bcast_r8(ma,n,0)
+      call bcast_r8(ma,n,iin)
       m=ma(1)
 
       end subroutine bcast_r8_0d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r8_1d(p)
+      subroutine bcast_r8_1d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n
       real*8  :: p(:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n=SIZE(p)
-      call bcast_r8(p,n,0)
+      call bcast_r8(p,n,iin)
 
       end subroutine bcast_r8_1d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r8_2d(p)
+      subroutine bcast_r8_2d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n(2)
       real*8  :: p(:,:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n(1)=SIZE(p,1)
       n(2)=SIZE(p,2)
-      call bcast_r8(p,PRODUCT(n),0)
+      call bcast_r8(p,PRODUCT(n),iin)
 
       end subroutine bcast_r8_2d
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine bcast_r8_3d(p)
+      subroutine bcast_r8_3d(p,iproc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer :: n(3)
       real*8  :: p(:,:,:)
+      integer, optional :: iproc
+      integer :: iin
+
+      iin=0
+      if (present(iproc)) iin=iproc
 
       n(1)=SIZE(p,1)
       n(2)=SIZE(p,2)
       n(3)=SIZE(p,3)
-      call bcast_r8(p,PRODUCT(n),0)
+      call bcast_r8(p,PRODUCT(n),iin)
 
       end subroutine bcast_r8_3d
 

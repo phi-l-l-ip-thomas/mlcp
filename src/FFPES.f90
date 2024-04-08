@@ -9,6 +9,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE SEPDREPN
       USE CPCONFIG
 
@@ -141,6 +142,7 @@
       integer, allocatable :: nbas(:)
       integer :: i,j,k,betalen
 
+      IF (mpirank.eq.0) &
       write(*,'(X,A)') "--> Setting up Dummy Hamiltonian"
 
 !     Allocate configs. This PES has two linear terms which cancel one
@@ -155,9 +157,11 @@
       V(1)%coef(2)=-1.d0
       DEALLOCATE(nbas)
 
-      write(*,'(/X,A,I0/)') 'Potential constants, order: ',1
-      call PrintConfigs(V(1))
-      write(*,*)
+      IF (mpirank.eq.0) THEN
+         write(*,'(/X,A,I0/)') 'Potential constants, order: ',1
+         call PrintConfigs(V(1))
+         write(*,*)
+      ENDIF
 
       end subroutine DummyHamiltonian
 
@@ -175,6 +179,7 @@
       real*8, parameter    :: beta=0.1 ! Bilinear coupling constant
       integer :: i,j,k,betalen
 
+      IF (mpirank.eq.0) &
       write(*,'(X,A)') "--> Setting up Coupled Oscillator Hamiltonian"
 
 !     Size of anharmonic term array
@@ -211,9 +216,11 @@
          enddo
       enddo
 
-      write(*,'(/X,A,I0/)') 'Potential constants, order: ',2
-      call PrintConfigs(V(2))
-      write(*,*)
+      IF (mpirank.eq.0) THEN
+         write(*,'(/X,A,I0/)') 'Potential constants, order: ',2
+         call PrintConfigs(V(2))
+         write(*,*)
+      ENDIF
 
       end subroutine CoupledOscillatorHamiltonian
 
@@ -233,6 +240,7 @@
       integer :: i,k
       real*8  :: beta2
 
+      IF (mpirank.eq.0) &
       write(*,'(X,A)') "--> Setting up Henon-Heiles Hamiltonian"
 
 !     Potential constants (same for all DOF)
@@ -295,11 +303,13 @@
          k=k+1
       enddo
 
-      DO i=2,4
-         write(*,'(/X,A,I0/)') 'Potential constants, order: ',i
-         call PrintConfigs(V(i))
-      ENDDO
-      write(*,*)
+      IF (mpirank.eq.0) THEN
+         DO i=2,4
+            write(*,'(/X,A,I0/)') 'Potential constants, order: ',i
+            call PrintConfigs(V(i))
+         ENDDO
+         write(*,*)
+      ENDIF
 
       end subroutine HenonHeilesHamiltonian
 
@@ -322,12 +332,16 @@
       character(LEN=20) :: fname
       character*64 :: frmt
 
-      write(*,'(/X,A,A/)')   '--> Reading force field for: ',id
-      write(*,'(X,A,X,I0)') 'Max nr of products per term:',ncp
+      IF (mpirank.eq.0) THEN
+         write(*,'(/X,A,A/)')   '--> Reading force field for: ',id
+         write(*,'(X,A,X,I0)') 'Max nr of products per term:',ncp
+      ENDIF
 
       ALLOCATE(ncoef(ncp),W(ncp))
       ncoef(:)=0
       ndof=0
+
+      IF (mpirank.eq.0) THEN
 
 !     Count the number of potential constants and DOF
       DO k=1,ncp
@@ -363,6 +377,11 @@
       write(*,'(X,A,X,I0)') &
             'Number of DOF detected in force constant files:',ndof
 
+      ENDIF
+
+      call bcast(ncoef)
+      call bcast(ndof)
+
 !     Read potential constants and store as configurations
       DO k=1,ncp
 
@@ -374,31 +393,37 @@
 
          IF (ncoef(k).lt.1) CYCLE
 
-         write(*,'(/X,2A,I0/)') 'Potential constants (.dat file',&
-                                ' ordering), order: ',k
+         IF (mpirank.eq.0) THEN
 
-         write(fname,'(A5,I0,A5,A4)') 'pes/f',k,id,'.dat'
-         u=LookForFreeUnit()
-         open(u,status='old',file=fname)
+            write(*,'(/X,2A,I0/)') 'Potential constants (.dat file',&
+                                   ' ordering), order: ',k
 
-         write(frmt,'(A,I0,A)') '(X,',k,'(I3,X),f26.12)'
+            write(fname,'(A5,I0,A5,A4)') 'pes/f',k,id,'.dat'
+            u=LookForFreeUnit()
+            open(u,status='old',file=fname)
 
-         DO i=1,ncoef(k)
-            read(u,*) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
+            write(frmt,'(A,I0,A)') '(X,',k,'(I3,X),f26.12)'
 
-!           Divide here if needed to account for degeneracy factors
-            IF (divide) THEN
-               call DistribModePower(W(k)%qns(i,:),modpowr)
-               ndf=SIZE(modpowr,1)
-               do j=1,ndf
-                  W(k)%coef(i)=W(k)%coef(i)/FACRL(modpowr(j,2))
-               enddo
-               deallocate(modpowr)
-            ENDIF
+            DO i=1,ncoef(k)
+               read(u,*) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
 
-            write(*,frmt) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
-         ENDDO
-         close(u)
+!              Divide here if needed to account for degeneracy factors
+               IF (divide) THEN
+                  call DistribModePower(W(k)%qns(i,:),modpowr)
+                  ndf=SIZE(modpowr,1)
+                  do j=1,ndf
+                     W(k)%coef(i)=W(k)%coef(i)/FACRL(modpowr(j,2))
+                  enddo
+                  deallocate(modpowr)
+               ENDIF
+
+               write(*,frmt) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
+            ENDDO
+            close(u)
+         ENDIF ! rnk0
+
+         call bcast(W(k)%qns)
+         call bcast(W(k)%coef)
       ENDDO
 
       end subroutine ReadFFHamiltonian
@@ -564,21 +589,22 @@
 
       IF (morsify) THEN
 
-         write(*,'(/X,A,A/)') '--> The PES will be transformed into ',&
-              'asymptotically-decaying coordinates'
-         write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
-!                            ' y_i = 1-exp(-alpha_i*q_i)'
-                            ' y_i = q_i'
-         write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
-                            ' y_i = q_i' 
-         write(*,'(X,A,A)') ' d-D coupling potentials :',&
-                            ' y_i = tanh(alpha_i*q_i)'
-         write(*,'(/X,A,f10.6,A)') 'DOF Sym Alpha-values (scaled by ',&
-                                   afac,')'
-       
-         DO i=1,ndof
-            write(*,'(X,I3,2X,L1,2X,ES15.8)') i,sympes(i),alpha(i)
-         ENDDO
+         IF (mpirank.eq.0) THEN
+            write(*,'(/X,A,A/)') '--> The PES will be transformed ',&
+                 'into asymptotically-decaying coordinates'
+            write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
+!                               ' y_i = 1-exp(-alpha_i*q_i)'
+                               ' y_i = q_i'
+            write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
+                               ' y_i = q_i' 
+            write(*,'(X,A,A)') ' d-D coupling potentials :',&
+                               ' y_i = tanh(alpha_i*q_i)'
+            write(*,'(/X,A,f10.6,A)') &
+                           'DOF Sym Alpha-values (scaled by ',afac,')'
+            DO i=1,ndof
+               write(*,'(X,I3,2X,L1,2X,ES15.8)') i,sympes(i),alpha(i)
+            ENDDO
+         ENDIF
 
          l=1
          DO k=1,ncoup

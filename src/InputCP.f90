@@ -133,6 +133,86 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine SaveMLCPInputFile(cpp)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Regurgitates input file ('CP.inp') to another file for restart
+
+      implicit none
+      TYPE (CPpar), intent(in) :: cpp
+      character(len=64) :: fnm
+      integer :: u,j
+
+      rank0 : IF (mpirank.eq.0) THEN
+
+      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
+
+!     Open output file
+      u = LookForFreeUnit()
+      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
+
+!     System = Hamiltonian to use
+      write(u,'(A)') 'System'
+      write(u,'(A16)') cpp%system
+!     NCPU = number of processors      
+      write(u,'(A)') 'NCPU'
+      write(u,'(I16)') cpp%ncpu
+!     reduction type, 2-D modes
+      write(u,'(A)') 'red2D'
+      write(u,'(A16)') cpp%red2D
+!     reduction type, >2-D modes
+      write(u,'(A)') 'redND'
+      write(u,'(A16)') cpp%redND
+!     reduction rank for wavefunction
+      write(u,'(A)') 'psirank'
+      write(u,'(I16)') cpp%psirank
+!     reduction rank for Hamiltonian
+      write(u,'(A)') 'hrank'
+      write(u,'(I16)') cpp%hrank
+!     number of ALS iterations for wavefunction
+      write(u,'(A)') 'psinals'
+      write(u,'(I16)') cpp%psinals
+!     number of ALS iterations for Hamiltonian
+      write(u,'(A)') 'hnals'
+      write(u,'(I16)') cpp%hnals
+!     Eigensolver algorithm
+      write(u,'(A)') 'solver'
+      write(u,'(A16)') cpp%solver
+!     number of power/Cheb iteration cycles
+      write(u,'(A)') 'ncycle'
+      write(u,'(I16)') cpp%ncycle
+!     number of power iterations per cycle
+      write(u,'(A)') 'npow'
+      write(u,'(I16)') cpp%npow
+!     low memory calculation type
+      write(u,'(A)') 'lowmem'
+      write(u,'(I16)') cpp%lowmem
+!     truncation layer criterion
+      write(u,'(A)') 'truncation'
+      write(u,'(I16)') cpp%truncation
+!     USE vector updates
+      write(u,'(A)') 'update'
+      write(u,'(L16)') cpp%update
+!     PES optimization by coordinate rotation
+      write(u,'(A)') 'optimize PES'
+      write(u,'(L16)') cpp%opt
+!     solver tolerance (relative rms error of all states)
+      write(u,'(A)') 'solvtol'
+      write(u,'(ES16.1)') cpp%solvtol
+!     restart file name
+      write(u,'(A)') 'resfile'
+      write(u,'(A48)') cpp%resfile
+!     random seed
+      write(u,'(A)') 'random'
+      write(u,'(33(I0,X))') (cpp%rs(j),j=1,33)
+      close(u)
+
+      ENDIF rank0
+
+      end subroutine SaveMLCPInputFile
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine PrintMLCPInputs(cpp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

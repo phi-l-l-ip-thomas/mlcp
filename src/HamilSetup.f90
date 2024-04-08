@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE MODECOMB
       USE OPFUNCS
       USE LINALG
@@ -52,6 +53,9 @@
       real*8, allocatable  :: alpha(:),omega(:)
       real*8  :: t1,t2
 
+      if (mpirank.eq.0) &
+      write(*,'(/X,A/)') 'Hamiltonian setup...'
+
       call CPU_TIME(t1)
 
       call GetPotential(V,sys,ML%nmode(1))
@@ -84,6 +88,7 @@
 !     Construct bottom-layer mode operators from primitive operator
 !     matrices, then solve and update primitive operators
       call SolveandUpdateFirstLayer(H)
+      call PrintFirstLayerEnergies(H,ML)
 
       call CPU_TIME(t2)
       Ham_time=Ham_time+t2-t1
@@ -113,6 +118,7 @@
       IF (ALLOCATED(H%ndof)) DEALLOCATE(H%ndof)
       IF (ALLOCATED(H%dofs)) DEALLOCATE(H%dofs)
 
+      IF (mpirank.eq.0) &
       write(*,'(X,A,X,f20.3)') 'Total Hamiltonian generation time (s)',&
                              Ham_time
 
@@ -130,6 +136,7 @@
       integer      :: u,il,nlayr,i,j,k,maxdof,poplen
       character*64 :: frmt
 
+      rank0 : IF (mpirank.eq.0) THEN
 !      u = LookForFreeUnit()
 !      open(u,status='unknown',file='Hamiltonian.out')
 
@@ -194,6 +201,8 @@
 !      ENDDO
       write(*,'(/A/)') '******************************************'
 
+      ENDIF rank0
+
       end subroutine printHamiltonianInfo
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -214,6 +223,7 @@
       integer :: il,mil,nm,nlayr,thismode
       logical :: unique
 
+      IF (mpirank.eq.0) &
       write(*,'(/X,A)') "--> Sorting Hamiltonian terms into layers"
 
       nlayr=ML%nlayr
@@ -525,6 +535,7 @@
       integer :: il,pass,i,j,k,l,opct,maxops
       logical :: unique
 
+      IF (mpirank.eq.0) &
       write(*,'(X,A)') "--> Determining unique primitive operators"
 
 !     Find terms for bottom layer only
@@ -603,6 +614,7 @@
       integer :: i,j,k,colsi,symi,dofi,symj,dofj
       real*8  :: fac
 
+      IF (mpirank.eq.0) &
       write(*,'(X,A)') "--> Solving layer 1 Hamiltonian..."
 
 !     Loop over terms in Hamiltonian
@@ -664,6 +676,34 @@
       ENDDO
 
       end subroutine SolveandUpdateFirstLayer
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine PrintFirstLayerEnergies(H,ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Assembles terms in the bottom-layer Hamiltonian by summing primitive
+! operator matrices.
+
+      implicit none
+      TYPE (Hamiltonian), intent(in) :: H
+      TYPE (MLtree), intent(in)      :: ML
+      integer :: im,j
+
+      IF (mpirank.eq.0) THEN
+         DO im=1,ML%nmode(1)
+            write(*,'(/,X,A,I0,A,I0,/)') 'LAYER-MODE: ',1,'-',im
+            write(*,*) 'Eigenvalues   : ',0,&
+            (H%eig(1,im)%evals(j),j=1,SIZE(H%eig(1,im)%evals))
+            write(*,*)
+            DO j=1,SIZE(H%eig(1,im)%evals)
+               write(*,'(I4,A,X,I2,X,f19.12)') j,')',j-1,&
+                   H%eig(1,im)%evals(j)-H%eig(1,im)%evals(1)
+            ENDDO
+         ENDDO
+      ENDIF
+
+      end subroutine PrintFirstLayerEnergies
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -846,44 +886,28 @@
 !     Get the full assignment in terms of primitive DOFs
       ALLOCATE(modind(il),qntmp(ML%nmode(1)))
 
-!      write(*,*) '--------------------------------'
-!      write(*,*) 'GetPartialAssignment(): il = ',il
-!      write(*,*) '--------------------------------'
-
-
       qntmp=0
       nagn=0
       modind=1
       modind(2)=jmode
       DO
-
-!         write(*,*) 'DO:'
-
          imn=im
 
-!         IF (modind(1).gt.1) EXIT
          IF (modind(2).gt.jmode) EXIT        
 
 !        Trace each assignment to the bottom layer
          DO j=il,2,-1
             mst=ML%modstart(j,imn)
 
-!            write(*,*) 'j=',j,'; modstart=',mst
-
 !           Take number of sub-modes from input array on first pass,
 !           then extract the number from stored assignment array
             IF (j.eq.il) THEN
                nsubm=jmode!SIZE(qns)
-!               write(*,*) 'j=',j,'; (qns) nsubm=',nsubm
             ELSE
                nsubm=SIZE(Ham%eig(j,imn)%assgn,2)
-!               write(*,*) 'j=',j,'; (eig) nsubm=',nsubm
             ENDIF
 
             IF (modind(il-j+2).gt.nsubm) THEN
-!               write(*,*) 'j=',j,';   modind(',il-j+2,') = ',modind(il-j+2),'>',nsubm
-!               write(*,*) '   so ...  modind(',il-j+1,'):',modind(il-j+1),'->',modind(il-j+1)+1
-!               write(*,*) ' and reset modind(',il-j+2,':) to 1'
                modind(il-j+1)=modind(il-j+1)+1
                modind(il-j+2:)=1
                EXIT
@@ -891,24 +915,17 @@
 
 !           Use input array to get 'eigind' on first pass here, too
             IF (j.eq.il) THEN
-!               write(*,*) 'j=',j,'; (=il) eigind=',jmode!qns(modind(2))
-               eigind=ibas !qns(modind(2))
+               eigind=ibas
             ELSE
-!               write(*,*) 'j=',j,'; (<il) eigind=',Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
                eigind=Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
             ENDIF
 
             imn=mst+modind(il-j+2)-1
-!            write(*,*) 'j=',j,'; imn=',imn
 
             IF (j.eq.2) THEN
                nagn=nagn+1
                qntmp(nagn)=eigind
                modind(il-j+2)=modind(il-j+2)+1
-!               write(*,*) 'j=',j,' update nagn =',nagn
-!               write(*,*) 'j=',j,' qntmp(',nagn,') = ',eigind
-!               write(*,*) 'j=',j,' update modind(',il-j+2,'):',modind(il-j+2),&
-!                          ' -> ',modind(il-j+2)+1
             ENDIF
          ENDDO
       ENDDO

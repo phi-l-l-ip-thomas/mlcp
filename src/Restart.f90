@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE MODECOMB
       USE INPUTCP
       USE HAMILSETUP
@@ -26,54 +27,32 @@
       TYPE (MLtree), INTENT(IN)   :: ML
       TYPE (Hamiltonian), INTENT(INOUT) :: Ham
       integer, intent(out) :: il,im
-      character(len=64) :: fnm
-      logical :: success,found
+      logical :: success
 
-!     Look for _CP.rst and _layers.rst. If both are present
-!     then set dorestart=.TRUE.
-
-      cpp%dorestart=.FALSE.
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
-      INQUIRE(FILE=TRIM(ADJUSTL(fnm)), EXIST=found)
-      IF (found) THEN
-         write(*,'(/X,2A)') TRIM(ADJUSTL(fnm)),' exists'
-         write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_layers.rst'
-         INQUIRE(FILE=TRIM(ADJUSTL(fnm)), EXIST=found)
-         IF (found) THEN
-            write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' exists'
-            cpp%dorestart=.TRUE.
-         ELSE
-            write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' is missing'
-         ENDIF
-      ENDIF 
+!     Check for restart files to determine if this is a restart run
+      call CheckForRestartFile(cpp)
 
 !     Check restart data
       IF (cpp%dorestart) THEN
-         write(*,'(X,A)') &
+         IF (mpirank.eq.0) write(*,'(X,A)') &
                'This job is a restart. Validating restart data...'
          call ValidateRestart(cpp,ML)
 
 !        Read the file containing eigenvalues from finished nodes
-         write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_1_eigv.rst'
-         call ReadEigenvalues(il,im,Ham,ML,fnm,success)
+         call ReadEigenvalues(il,im,cpp,Ham,ML,1,success)
          IF (.not.success) THEN
-            write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_2_eigv.rst'
-            call ReadEigenvalues(il,im,Ham,ML,fnm,success)
+            call ReadEigenvalues(il,im,cpp,Ham,ML,2,success)
             IF (.not.success) call AbortWithError(&
                "Eigenvalue restart file could not be read")
          ENDIF
-         write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
 
 !        Read the file containing operator matrices
-         write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_1_oper.rst'
-         call ReadOperMats(Ham,fnm,success)
+         call ReadOperMats(cpp,Ham,1,success)
          IF (.not.success) THEN
-            write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_2_oper.rst'
-            call ReadOperMats(Ham,fnm,success)
+            call ReadOperMats(cpp,Ham,2,success)
             IF (.not.success) call AbortWithError(&
                "Operator matrix restart file could not be read")
          ENDIF
-         write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
       ELSE
          il=0
          im=0
@@ -86,6 +65,42 @@
       call SaveModeDat(ML,cpp%resfile)
 
       end subroutine RestartSetup
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine CheckForRestartFile(cpp)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      TYPE (CPpar), INTENT(INOUT) :: cpp
+      character(len=64) :: fnm
+      logical :: found
+
+!     Look for _CP.rst and _layers.rst. If both are present
+!     then set dorestart=.TRUE.
+      IF (mpirank.eq.0) THEN
+
+         cpp%dorestart=.FALSE.
+         write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
+         INQUIRE(FILE=TRIM(ADJUSTL(fnm)), EXIST=found)
+         IF (found) THEN
+            write(*,'(/X,2A)') TRIM(ADJUSTL(fnm)),' exists'
+            write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_layers.rst'
+            INQUIRE(FILE=TRIM(ADJUSTL(fnm)), EXIST=found)
+            IF (found) THEN
+               write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' exists'
+               cpp%dorestart=.TRUE.
+            ELSE
+               write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' is missing'
+            ENDIF
+         ENDIF
+
+      ENDIF
+
+      call bcast(cpp%dorestart)
+
+      end subroutine CheckForRestartFile
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -102,6 +117,8 @@
       TYPE (MLtree) :: MLrst
       character(len=64) :: fnm
       integer :: il,im,j
+
+      rank0: IF (mpirank.eq.0) THEN
 
 !     Read the restart input files
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
@@ -180,133 +197,9 @@
 
       call Flush_ModeComb(MLrst)
 
+      ENDIF rank0
+
       end subroutine ValidateRestart
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine SaveMLCPInputFile(cpp)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Regurgitates input file ('CP.inp') to another file for restart
-
-      implicit none
-      TYPE (CPpar) :: cpp
-      character(len=64) :: fnm
-      integer :: u,j
-
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
-
-!     Open output file
-      u = LookForFreeUnit()
-      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
-
-!     System = Hamiltonian to use
-      write(u,'(A)') 'System'
-      write(u,'(A16)') cpp%system
-!     NCPU = number of processors      
-      write(u,'(A)') 'NCPU'
-      write(u,'(I16)') cpp%ncpu
-!     reduction type, 2-D modes
-      write(u,'(A)') 'red2D'
-      write(u,'(A16)') cpp%red2D
-!     reduction type, >2-D modes
-      write(u,'(A)') 'redND'
-      write(u,'(A16)') cpp%redND
-!     reduction rank for wavefunction
-      write(u,'(A)') 'psirank'
-      write(u,'(I16)') cpp%psirank
-!     reduction rank for Hamiltonian
-      write(u,'(A)') 'hrank'
-      write(u,'(I16)') cpp%hrank
-!     number of ALS iterations for wavefunction
-      write(u,'(A)') 'psinals'
-      write(u,'(I16)') cpp%psinals
-!     number of ALS iterations for Hamiltonian
-      write(u,'(A)') 'hnals'
-      write(u,'(I16)') cpp%hnals
-!     Eigensolver algorithm
-      write(u,'(A)') 'solver'
-      write(u,'(A16)') cpp%solver
-!     number of power/Cheb iteration cycles
-      write(u,'(A)') 'ncycle'
-      write(u,'(I16)') cpp%ncycle
-!     number of power iterations per cycle
-      write(u,'(A)') 'npow'
-      write(u,'(I16)') cpp%npow
-!     low memory calculation type
-      write(u,'(A)') 'lowmem'
-      write(u,'(I16)') cpp%lowmem
-!     truncation layer criterion
-      write(u,'(A)') 'truncation'
-      write(u,'(I16)') cpp%truncation
-!     USE vector updates
-      write(u,'(A)') 'update'
-      write(u,'(L16)') cpp%update
-!     PES optimization by coordinate rotation
-      write(u,'(A)') 'optimize PES'
-      write(u,'(L16)') cpp%opt
-!     solver tolerance (relative rms error of all states)
-      write(u,'(A)') 'solvtol'
-      write(u,'(ES16.1)') cpp%solvtol
-!     restart file name
-      write(u,'(A)') 'resfile'
-      write(u,'(A48)') cpp%resfile
-!     random seed
-      write(u,'(A)') 'random'
-      write(u,'(33(I0,X))') (cpp%rs(j),j=1,33)
-      close(u)
-
-      end subroutine SaveMLCPInputFile
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine SaveModeDat(ML,fnm)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Regurgitates input file ('layers.inp') with mode combination data to
-! file (i.e. a restart file)
-
-      implicit none
-      TYPE (MLtree), INTENT(IN) :: ML
-      character(len=48), intent(in) :: fnm
-      character(len=64) :: fname,frmt
-      integer :: u,il,im
-
-      write(fname,'(2A)') TRIM(ADJUSTL(fnm)),'_layers.rst'
-
-!     Open output file
-      u = LookForFreeUnit()
-      OPEN(u, FILE=TRIM(ADJUSTL(fname)), STATUS="UNKNOWN")
-
-!     Write resort section
-      write(u,*)
-      write(u,'(A)') '$resort'
-      write(frmt,'(A,I0,A)') '(',ML%ndof,'(I0,X),A)'
-      write(u,frmt) (ML%resort(im),im=1,ML%ndof),'/'
-      write(u,'(A)') '$end-resort'
-
-!     Write basis section
-      write(u,*)
-      write(u,'(A)') '$basis'
-      DO il=1,ML%nlayr
-         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X),A)'
-         write(u,frmt) (ML%gdim(il,im),im=1,ML%nmode(il)),'/'
-      ENDDO
-      write(u,'(A)') '$end-basis'
-
-!     Write layers section
-      write(u,*)
-      write(u,'(A)') '$layers'
-      DO il=2,ML%nlayr
-         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X),A)'
-         write(u,frmt) (ML%modcomb(il,im),im=1,ML%nmode(il)),'/'
-      ENDDO
-      write(u,'(A)') '$end-layers'
-      write(u,*)
-
-      close(u)
-
-      end subroutine SaveModeDat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -320,40 +213,41 @@
       TYPE (MLtree), INTENT(IN) :: ML
       TYPE (Hamiltonian), INTENT(IN) :: Ham
       integer, intent(in) :: il,im
-      character(len=64) :: fnm
 
 !     If restart file is 'none', exit without saving
 !     Also, no need to save after the last layer is finished
       IF (il.eq.ML%nlayr .or. (cpp%resfile(1:4).seq.'none')) RETURN
 
 !     Save data twice to prevent a potential corrupted file write
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_1_eigv.rst'
-      call SaveEigenvalues(il,im,Ham,ML,fnm)
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_2_eigv.rst'
-      call SaveEigenvalues(il,im,Ham,ML,fnm)
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_1_oper.rst'
-      call SaveOperMats(Ham,fnm)
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_2_oper.rst'
-      call SaveOperMats(Ham,fnm)
+      call SaveEigenvalues(il,im,cpp,Ham,ML,1)
+      call SaveEigenvalues(il,im,cpp,Ham,ML,2)
+      call SaveOperMats(cpp,Ham,1)
+      call SaveOperMats(cpp,Ham,2)
 
       end subroutine SaveEigenInfo
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ReadOperMats(H,fnm,success)
+      subroutine ReadOperMats(cpp,H,nr,success)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Writes list of operator matrices to file for restart
 
       implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (Hamiltonian), INTENT(INOUT) :: H
-      character(len=64), intent(in)     :: fnm
+      integer, intent(in)  :: nr
+      character(len=64)    :: fnm
       logical, intent(out) :: success
       integer :: u,i,k,nmat,n,InpStat
 
       success=.TRUE.
 
+      rank0: IF (mpirank.eq.0) THEN
+
 !     Open file containing the operator matrices
+      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+              '_',nr,'_oper.rst'
       u = LookForFreeUnit()
       OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
       IF (InpStat /= 0) THEN
@@ -404,22 +298,77 @@
 
       close(u)
 
+      IF (success) &
+         write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
+
+      ENDIF rank0
+
+      call BcastOperMats(H,success)
+
       end subroutine ReadOperMats
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SaveOperMats(H,fnm)
+      subroutine BcastOperMats(H,success)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Broadcasts Operator matrices from MPI rank 0 to other ranks
+        
+      implicit none
+      TYPE (Hamiltonian), INTENT(INOUT) :: H
+      integer, allocatable :: ndofs(:,:)
+      logical :: success
+      integer :: i,nmat,n
+
+!     If read did not succeed, do not broadcast data
+      call bcast(success)
+      IF (.not.success) RETURN
+
+      nmat=SIZE(H%pops)
+
+      ALLOCATE(ndofs(nmat,2))
+      DO i=1,nmat
+         ndofs(i,1)=SIZE(H%pops(i)%mat)
+         ndofs(i,2)=H%pops(i)%dof
+      ENDDO
+
+      call bcast(ndofs)
+
+      DO i=1,nmat
+         n=ndofs(i,1)
+         H%pops(i)%dof=ndofs(i,2)
+
+         IF (mpirank.ne.0) THEN
+            IF (allocated(H%pops(i)%mat)) DEALLOCATE(H%pops(i)%mat)
+               ALLOCATE(H%pops(i)%mat(n))
+         ENDIF
+
+         call bcast(H%pops(i)%mat)
+      ENDDO
+
+      DEALLOCATE(ndofs)
+
+      end subroutine BcastOperMats
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SaveOperMats(cpp,H,nr)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Writes list of operator matrices to file for restart
 
       implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (Hamiltonian), INTENT(IN) :: H
-      character(len=64), intent(in)  :: fnm
-      character(len=64) :: frmt
+      integer, intent(in) :: nr
+      character(len=64)   :: fnm,frmt
       integer :: u,i,k,n
 
+      rank0 : IF (mpirank.eq.0) THEN
+
 !     Open output file
+      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+              '_',nr,'_oper.rst'
       u = LookForFreeUnit()
       OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
 
@@ -438,28 +387,37 @@
       write(u,*)
       close(u)
 
+      ENDIF rank0
+
       end subroutine SaveOperMats
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ReadEigenvalues(il,im,H,ML,fnm,success)
+      subroutine ReadEigenvalues(il,im,cpp,H,ML,nr,success)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Reads list of eigenvalues/assignments from restart file
 
       implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (MLtree), INTENT(IN) :: ML
       TYPE (Hamiltonian), INTENT(INOUT) :: H
+      integer, intent(in)  :: nr
       integer, intent(out) :: il,im
       logical, intent(out) :: success
-      character(len=64), intent(in) :: fnm
-      character(len=64) :: frmt
+      character(len=64) :: fnm, frmt
       integer :: u,i,j,k,l,nm,nev,nsubm,InpStat,itmp,jtmp
 
       success=.TRUE.
+      il=-1
+      im=-1
+
+      rank0: IF (mpirank.eq.0) THEN
 
 !     Open file containing the eigenvalue lists
       u = LookForFreeUnit()
+      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+              '_',nr,'_eigv.rst'
       OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
       IF (InpStat /= 0) THEN
          write(*,*) TRIM(ADJUSTL(fnm)),' not found'
@@ -526,24 +484,76 @@
 
       close(u)
 
+      IF (success) &
+         write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
+
+      ENDIF rank0
+
+      call BcastEigenvalues(il,im,H,ML,success)
+
       end subroutine ReadEigenvalues
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SaveEigenvalues(il,im,H,ML,fnm)
+      subroutine BcastEigenvalues(il,im,H,ML,success)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Broadcasts eigenvalues from MPI rank 0 to other ranks
+
+      implicit none
+      TYPE (Hamiltonian), INTENT(INOUT) :: H
+      TYPE (MLtree), INTENT(IN) :: ML
+      integer, intent(inout) :: il,im
+      logical :: success
+      integer :: i,j,nm,nev,nsubm
+
+!     If read did not succeed, do not broadcast data
+      call bcast(success)
+      IF (.not.success) RETURN
+
+      call bcast(il)
+      call bcast(im)
+
+      DO i=1,il
+         nm=ML%nmode(i)
+         DO j=1,nm
+            nev=ML%gdim(i,j)
+            nsubm=ML%modcomb(i,j)
+
+            IF (mpirank.ne.0) THEN
+               IF (.not.ALLOCATED(H%eig(i,j)%assgn)) &
+                  ALLOCATE(H%eig(i,j)%assgn(nev,nsubm))
+               IF (.not.ALLOCATED(H%eig(i,j)%evals)) &
+                  ALLOCATE(H%eig(i,j)%evals(nev))
+            ENDIF
+
+            call bcast(H%eig(i,j)%assgn)
+            call bcast(H%eig(i,j)%evals)
+         ENDDO
+      ENDDO
+
+      end subroutine BcastEigenvalues
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SaveEigenvalues(il,im,cpp,H,ML,nr)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Writes list of eigenvalues/assignments to file for restart
 
       implicit none
+      TYPE (CPpar), INTENT(IN)  :: cpp
       TYPE (MLtree), INTENT(IN) :: ML
       TYPE (Hamiltonian), INTENT(IN) :: H
-      integer, intent(in) :: il,im
-      character(len=64), intent(in)  :: fnm
-      character(len=64) :: frmt
+      integer, intent(in) :: il,im,nr
+      character(len=64) :: fnm,frmt
       integer :: u,i,j,k,l,nm,nev,nsubm
 
+      rank0 : IF (mpirank.eq.0) THEN
+
 !     Open output file
+      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+              '_',nr,'_eigv.rst'
       u = LookForFreeUnit()
       OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
 
@@ -574,6 +584,8 @@
       write(u,*)
       close(u)
 
+      ENDIF rank0
+
       end subroutine SaveEigenvalues
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -589,20 +601,17 @@
       real*8, intent(inout)  :: bounds(2),eigv(:),delta(:)
       integer, intent(inout) :: isavi
       logical, intent(out) :: success
-      character(len=64) :: fnm
 
       success=.FALSE.
 
       IF (.not.cpp%dorestart) RETURN
 
 !     Try to read the first psi file
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_1_psi.rst'
-      call ReadPsiFile(isavi,bounds,eigv,delta,Q,fnm,success)
+      call ReadPsiFile(isavi,bounds,eigv,delta,Q,cpp,1,success)
 
 !     If that didn't work, try the second file
       IF (.not.success) THEN
-         write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_2_psi.rst'
-         call ReadPsiFile(isavi,bounds,eigv,delta,Q,fnm,success)
+         call ReadPsiFile(isavi,bounds,eigv,delta,Q,cpp,2,success)
       ENDIF
 
 !     If this job is a restart, after a read, successful or not, the
@@ -613,17 +622,19 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ReadPsiFile(isvi,bounds,eigv,delta,Q,fnm,success)
+      subroutine ReadPsiFile(isvi,bounds,eigv,delta,Q,cpp,nr,success)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Writes wavefunction to file for restart
 
       implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
       TYPE (CP), ALLOCATABLE :: Qt(:)
+      integer, intent(in)    :: nr
       real*8, intent(inout)  :: bounds(2),eigv(:),delta(:)
       integer, intent(inout) :: isvi
-      character(len=64), intent(in) :: fnm
+      character(len=64)    :: fnm
       logical, intent(out) :: success
       integer, allocatable :: nbas(:)
       real*8, allocatable  :: eigt(:),deltt(:)
@@ -632,7 +643,11 @@
 
       success=.TRUE.
 
+      rank0 : IF (mpirank.eq.0) THEN
+
 !     Open file containing the eigenvalue list
+      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+              '_',nr,'_psi.rst'
       u = LookForFreeUnit()
       OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", &
            FORM='UNFORMATTED',IOSTAT=InpStat)
@@ -728,7 +743,41 @@
       IF (ALLOCATED(eigt)) DEALLOCATE(eigt)
       IF (ALLOCATED(deltt)) DEALLOCATE(deltt)
 
+      ENDIF rank0
+
+      call BcastPsi(isvi,bounds,eigv,delta,Q,success)
+
       end subroutine ReadPsiFile
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine BcastPsi(isvi,bounds,eigv,delta,Q,success)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Broadcasts eigenvalues from MPI rank 0 to other ranks
+
+      implicit none
+      TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
+      real*8, intent(inout)  :: bounds(2),eigv(:),delta(:)
+      integer, intent(inout) :: isvi
+      logical :: success
+      integer :: i,nev
+
+!     If read did not succeed, do not broadcast data
+      call bcast(success)
+      IF (.not.success) RETURN
+
+      call bcast(isvi)
+      call bcast(bounds)
+      call bcast(eigv)
+      call bcast(delta)
+
+      nev=SIZE(eigv)
+      DO i=1,nev
+         call BcastCP(Q(i),0)
+      ENDDO
+
+      end subroutine BcastPsi
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -742,39 +791,40 @@
       TYPE (CP), ALLOCATABLE, INTENT(IN) :: Q(:)
       real*8, intent(in)  :: bounds(2),eigv(:),delta(:)
       integer, intent(in) :: isavi
-      character(len=64)   :: fnm
 
 !     If restart file is 'none', exit without saving
       IF (cpp%resfile(1:4).seq.'none') RETURN
 
 !     Save the psi file TWICE just in case job crashes during a write,
 !     resulting in a corrupt psi file
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_1_psi.rst'
-      call SavePsiFile(isavi,bounds,eigv,delta,Q,fnm)
-      write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_2_psi.rst'
-      call SavePsiFile(isavi,bounds,eigv,delta,Q,fnm)
+      call SavePsiFile(isavi,bounds,eigv,delta,Q,cpp,1)
+      call SavePsiFile(isavi,bounds,eigv,delta,Q,cpp,2)
 
       end subroutine SavePsi
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SavePsiFile(isavi,bounds,eigv,delta,Q,fnm)
+      subroutine SavePsiFile(isavi,bounds,eigv,delta,Q,cpp,nr)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Writes wavefunction to file for restart
 
       implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (CP), ALLOCATABLE, INTENT(IN) :: Q(:)
       real*8, intent(in)  :: bounds(2),eigv(:),delta(:)
-      integer, intent(in) :: isavi
-      character(len=64), intent(in) :: fnm
-      character(len=64) :: frmt
+      integer, intent(in) :: isavi,nr
+      character(len=64) :: fnm,frmt
       integer :: u,i,j,k,l,nm,nev,nsubm
+
+      rank0 : IF (mpirank.eq.0) THEN
 
 !     Set parameters
       nev=SIZE(eigv)
 
 !     Open output file
+      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+              '_',nr,'_psi.rst'
       u = LookForFreeUnit()
       open(u, FILE=TRIM(ADJUSTL(fnm)),FORM='UNFORMATTED',&
            STATUS="UNKNOWN")
@@ -791,6 +841,8 @@
       ENDDO
 
       close(u)
+
+      ENDIF rank0
 
       end subroutine SavePsiFile
 

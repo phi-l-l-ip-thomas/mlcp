@@ -39,7 +39,7 @@
       real*8  :: t1,t2
       character(len=64) :: frmt
 
-      call prepare_mpi()
+      CALL prepare_mpi()
 
       call idate(d)
       call itime(t)
@@ -69,30 +69,19 @@
       CALL StartModeComb(ML)     
 
 !     Read input file, assign parameters
-      call StartInputCP(cpp)
+      CALL StartInputCP(cpp)
 
-      if (mpirank.eq.0) then !!! TEST-RK0
-      write(*,'(/X,A/)') 'Hamiltonian setup...'
-
+!     Set up and sort operators into layers; solve bottom layer nodes
       CALL SetupHamiltonian(cpp%system,cpp%opt,Ham,ML)
 
 !     Parallelization setup
       CALL omp_set_num_threads(cpp%ncpu)
 
-!     Print the eigenvalues for the bottom layer
-      DO im=1,ML%nmode(1)
-         write(*,'(/,X,A,I0,A,I0,/)') 'LAYER-MODE: ',1,'-',im
-         write(*,*) 'Eigenvalues   : ',0,&
-         (Ham%eig(1,im)%evals(j),j=1,SIZE(Ham%eig(1,im)%evals))
-         write(*,*)
-         DO j=1,SIZE(Ham%eig(1,im)%evals)
-            write(*,'(I4,A,X,I2,X,f19.12)') j,')',j-1,&
-                 Ham%eig(1,im)%evals(j)-Ham%eig(1,im)%evals(1)
-         ENDDO
-      ENDDO
-
+!     Restart a previous run
       call RestartSetup(ilrst,imrst,cpp,Ham,ML)
       IF (ilrst.lt.1) call SaveEigenInfo(1,ML%nmode(1),cpp,Ham,ML)
+
+      IF (mpirank.eq.0) THEN !!! TEST-RK0
 
       IF (ANY(cpp%rs.ne.0)) THEN
          rs(1:33)=cpp%rs(1:33)

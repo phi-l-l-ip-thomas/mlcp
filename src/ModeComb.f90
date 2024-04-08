@@ -91,9 +91,9 @@
       IF (.not. MC_SETUP) CALL Init_ModeComb
       inpfile='layers.inp'
       CALL ReadModeDat(ML,inpfile)
+      CALL BcastModeDat(ML)
       CALL ValidateModeDat(ML)
       CALL PrintModeDat(ML)
-      CALL BcastModeDat(ML)
 
       end subroutine StartModeComb
 
@@ -324,6 +324,60 @@
       mc_time=mc_time+t2-t1
 
       end subroutine ReadModeDat
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SaveModeDat(ML,fnm)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Regurgitates input file ('layers.inp') with mode combination data to
+! file (i.e. a restart file)
+
+      implicit none
+      TYPE (MLtree), INTENT(IN) :: ML
+      character(len=48), intent(in) :: fnm
+      character(len=64) :: fname,frmt
+      integer :: u,il,im
+
+      rank0 : IF (mpirank.eq.0) THEN
+
+      write(fname,'(2A)') TRIM(ADJUSTL(fnm)),'_layers.rst'
+
+!     Open output file
+      u = LookForFreeUnit()
+      OPEN(u, FILE=TRIM(ADJUSTL(fname)), STATUS="UNKNOWN")
+
+!     Write resort section
+      write(u,*)
+      write(u,'(A)') '$resort'
+      write(frmt,'(A,I0,A)') '(',ML%ndof,'(I0,X),A)'
+      write(u,frmt) (ML%resort(im),im=1,ML%ndof),'/'
+      write(u,'(A)') '$end-resort'
+
+!     Write basis section
+      write(u,*)
+      write(u,'(A)') '$basis'
+      DO il=1,ML%nlayr
+         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X),A)'
+         write(u,frmt) (ML%gdim(il,im),im=1,ML%nmode(il)),'/'
+      ENDDO
+      write(u,'(A)') '$end-basis'
+
+!     Write layers section
+      write(u,*)
+      write(u,'(A)') '$layers'
+      DO il=2,ML%nlayr
+         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X),A)'
+         write(u,frmt) (ML%modcomb(il,im),im=1,ML%nmode(il)),'/'
+      ENDDO
+      write(u,'(A)') '$end-layers'
+      write(u,*)
+
+      close(u)
+
+      ENDIF rank0
+
+      end subroutine SaveModeDat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
