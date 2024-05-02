@@ -5,6 +5,7 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Basic operations (add, dot product, normalize) for CP-format vectors
 
+      USE MYMPI
       USE SEPDREPN
       USE LINALG
 
@@ -67,12 +68,14 @@
       IF (.NOT. MVV_SETUP) call InitializeMVV()
 
       MVV_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) THEN
       write(*,'(X,A,X,f20.3)') 'Total vector inner-product time   (s)',&
                             pvv_time
       write(*,'(X,A,X,f20.3)') 'Total vector normalization time   (s)',&
                             norm_time
       write(*,'(X,A,X,f20.3)') 'Total vector-vector addition time (s)',&
                             svv_time
+      ENDIF
 
       end subroutine DisposeMVV
 

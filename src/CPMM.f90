@@ -6,6 +6,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE MODVECVEC
       USE SEPDREPN
 
@@ -61,6 +62,7 @@
       IF (.NOT. MVP_SETUP) call InitializePRODHVModule()
 
       MVP_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total matrix-vector product time  (s)',&
                             mvp_time
 

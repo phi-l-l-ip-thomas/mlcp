@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE LINALG
       USE SEPDREPN
       USE HAMILSETUP
@@ -43,6 +44,7 @@
       IF (.NOT. GUESS_SETUP) call InitializeGuessModule()
 
       GUESS_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total wave-function guess time    (s)',&
                              guess_time
 
@@ -50,7 +52,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GuessPsi(il,im,evalsND,Q,H,ML,cpp)
+      subroutine GuessPsi(il,im,evalsND,delta,Q,H,ML,cpp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for generating the initial guess
@@ -65,7 +67,7 @@
       integer, allocatable :: qns(:,:),nbas(:),nmode(:,:),nexci(:,:)
       integer, allocatable :: qnfull(:)
       real*8, allocatable  :: evals1D(:,:)
-      real*8, allocatable, intent(out) :: evalsND(:)
+      real*8, allocatable, intent(out) :: evalsND(:),delta(:)
       integer :: i,j,mi,nsubm,mstart,nbloc,maxbas,nagn
       integer :: prodND,nmsum,nesum,neibas,mst,mfi,constraint
       real *8 :: t1,t2,Etarget
@@ -106,10 +108,11 @@
          call AbortWithError('Error in GuessPsi()')
       ENDIF
 
-!     Allocate the block vectors (Q), guess energy, and guess quantum
-!     number arrays
-      ALLOCATE(Q(nbloc),evalsND(nbloc),qns(nbloc,nsubm))
+!     Allocate the block vectors (Q), guess energy, solver deltas,
+!     and guess quantum number arrays
+      ALLOCATE(Q(nbloc),evalsND(nbloc),delta(nbloc),qns(nbloc,nsubm))
       ALLOCATE(nmode(maxbas,nsubm),nexci(maxbas,nsubm))
+      delta(:)=0.d0
 
 !     Copy the eigenvalues of the sub-modes to evals1D
       ALLOCATE(evals1D(nsubm,maxbas))
@@ -130,41 +133,43 @@
 !      call sortDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
 !      call structuredDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
 
-      IF (nsubm.gt.1 .or. (nsubm.eq.1 .and. nbloc.lt.maxbas)) THEN
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         IF (nsubm.gt.1 .or. (nsubm.eq.1 .and. nbloc.lt.maxbas)) THEN
 
-         IF (nsubm.gt.1) THEN
-            write(*,'(/3X,A/)') 'Initial guess product functions:'
-         ELSE
-            select case (cpp%truncation)
-            case(0)
-               tag='energy'
-            case(1)
-               tag='n-mode coupling, then by energy'
-            case(2)
-               tag='total excitation, then by energy'
-            case(12)
-               tag='n-mode coupling, then by total excitation'
-            case(21)
-               tag='total excitation, then by n-mode coupling'
-            case default
-               tag='invalid truncation choice'
-            end select
-            write(*,'(/3X,2(A,I0),A,A/)') &
-            'Truncating basis from ',maxbas,' to ',nbloc,&
-            ' functions by ',trim(adjustl(tag))
+            IF (nsubm.gt.1) THEN
+               write(*,'(/3X,A/)') 'Initial guess product functions:'
+            ELSE
+               select case (cpp%truncation)
+               case(0)
+                  tag='energy'
+               case(1)
+                  tag='n-mode coupling, then by energy'
+               case(2)
+                  tag='total excitation, then by energy'
+               case(12)
+                  tag='n-mode coupling, then by total excitation'
+               case(21)
+                  tag='total excitation, then by n-mode coupling'
+               case default
+                  tag='invalid truncation choice'
+               end select
+               write(*,'(/3X,2(A,I0),A,A/)') &
+              'Truncating basis from ',maxbas,' to ',nbloc,&
+               ' functions by ',trim(adjustl(tag))
+            ENDIF
+
+            write(frmt,'(2(A,I0),A)') '(',4*nsubm+26,'X,',nagn,'(I2,X))'
+            write(*,frmt) (ML%resort(j),j=mst,mfi)
+            write(frmt,'(2(A,I0),A)') &
+            '(3X,',nsubm,'(I3,X),f19.12,X,A,X',nagn,'(I2,X))'
+            DO i=1,nbloc
+               call GetFullAssignment(il,im,H,ML,qns(i,:),qnfull)
+               write(*,frmt) (qns(i,j)-1,j=1,nsubm),evalsND(i),&
+               '->',(qnfull(j)-1,j=1,nagn)
+               deallocate(qnfull)
+            ENDDO
+            write(*,*)
          ENDIF
-
-         write(frmt,'(2(A,I0),A)') '(',4*nsubm+26,'X,',nagn,'(I2,X))'
-         write(*,frmt) (ML%resort(j),j=mst,mfi)
-         write(frmt,'(2(A,I0),A)') &
-         '(3X,',nsubm,'(I3,X),f19.12,X,A,X',nagn,'(I2,X))'
-         DO i=1,nbloc
-            call GetFullAssignment(il,im,H,ML,qns(i,:),qnfull)
-            write(*,frmt) (qns(i,j)-1,j=1,nsubm),evalsND(i),&
-            '->',(qnfull(j)-1,j=1,nagn)
-            deallocate(qnfull)
-         ENDDO
-         write(*,*)
       ENDIF
 
 !     Build the N-D separable eigenfunctions

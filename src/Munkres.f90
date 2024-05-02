@@ -8,6 +8,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
 
       implicit none
       real*8, private  :: munkres_time=0.d0
@@ -39,6 +40,7 @@
       IF (.NOT. MUNKRES_SETUP) call InitializeMunkres()
 
       MUNKRES_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total munkres assignment time     (s)',&
                             munkres_time
 

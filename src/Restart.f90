@@ -34,8 +34,6 @@
 
 !     Check restart data
       IF (cpp%dorestart) THEN
-         IF (mpirank.eq.0) write(*,'(X,A)') &
-               'This job is a restart. Validating restart data...'
          call ValidateRestart(cpp,ML)
 
 !        Read the file containing eigenvalues from finished nodes
@@ -74,31 +72,36 @@
 
       implicit none
       TYPE (CPpar), INTENT(INOUT) :: cpp
-      character(len=64) :: fnm
-      logical :: found
+      character(len=64) :: fnm_cp, fnm_layers
+      logical :: found(2)
 
 !     Look for _CP.rst and _layers.rst. If both are present
 !     then set dorestart=.TRUE.
-      IF (mpirank.eq.0) THEN
+      write(fnm_cp,    '(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
+      write(fnm_layers,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_layers.rst'
 
-         cpp%dorestart=.FALSE.
-         write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
-         INQUIRE(FILE=TRIM(ADJUSTL(fnm)), EXIST=found)
-         IF (found) THEN
-            write(*,'(/X,2A)') TRIM(ADJUSTL(fnm)),' exists'
-            write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_layers.rst'
-            INQUIRE(FILE=TRIM(ADJUSTL(fnm)), EXIST=found)
-            IF (found) THEN
-               write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' exists'
-               cpp%dorestart=.TRUE.
-            ELSE
-               write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' is missing'
-            ENDIF
-         ENDIF
-
+      IF (mpirank.eq.mpi_io_rank) THEN
+         INQUIRE(FILE=TRIM(ADJUSTL(fnm_cp)),     EXIST=found(1))
+         INQUIRE(FILE=TRIM(ADJUSTL(fnm_layers)), EXIST=found(2))
       ENDIF
+     
+      call bcast(found,mpi_io_rank)
+      cpp%dorestart=(found(1).and.found(2))
 
-      call bcast(cpp%dorestart)
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         IF (found(1)) THEN
+            write(*,'(/X,2A)') TRIM(ADJUSTL(fnm_cp)),' exists'
+            IF (.not.found(2)) &
+            write(*,'(/X,2A)') TRIM(ADJUSTL(fnm_layers)),' is missing'
+         ENDIF
+         IF (found(2)) THEN
+            write(*,'(/X,2A)') TRIM(ADJUSTL(fnm_layers)),' exists'
+            IF (.not.found(1)) &
+            write(*,'(/X,2A)') TRIM(ADJUSTL(fnm_cp)),' is missing'
+         ENDIF
+         IF (cpp%dorestart) write(*,'(X,A)') &
+            'This job is a restart. Validating restart data...'
+      ENDIF
 
       end subroutine CheckForRestartFile
 
@@ -118,62 +121,66 @@
       character(len=64) :: fnm
       integer :: il,im,j
 
-      rank0: IF (mpirank.eq.0) THEN
-
 !     Read the restart input files
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
       call ReadMLCPInputs(cprst,fnm)
+      call BcastMLCPInputs(cprst)
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_layers.rst'
       call ReadModeDat(MLrst,fnm)
+      call BcastModeDat(MLrst)
 
 !     Validate input against CP.rst
       IF (cpp%system.ne.cprst%system) THEN
-         write(*,*) 'Old system: ',cprst%system,&
-                    '; New system: ',cpp%system
+         IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,*) 'Old system: ',cprst%system,&
+                     '; New system: ',cpp%system
          call AbortWithError(&
          'ValidateRestart(): System change not allowed in a restart!')
       ENDIF
       IF (cpp%opt.neqv.cprst%opt) THEN
-         write(*,*) 'Old choice of opt: ',cprst%opt,&
-                    '; New choice of opt: ',cpp%opt
+         IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,*) 'Old choice of opt: ',cprst%opt,&
+                     '; New choice of opt: ',cpp%opt
          call AbortWithError(&
          'ValidateRestart(): Coord. change not allowed in a restart!')
       ENDIF
 
 !     Print changes to job parameters
-      IF (cpp%ncpu.ne.cprst%ncpu) write(*,*) &
-         ' * ncpu changed from ',cprst%ncpu,' to ',cpp%ncpu
-      IF (cpp%red2D.ne.cprst%red2D) write(*,*) &
-         ' * red2D changed from ',cprst%red2D,' to ',cpp%red2D
-      IF (cpp%redND.ne.cprst%redND) write(*,*) &
-         ' * redND changed from ',cprst%redND,' to ',cpp%redND
-      IF (cpp%psirank.ne.cprst%psirank) write(*,*) &
-         ' * psirank changed from ',cprst%psirank,' to ',cpp%psirank
-      IF (cpp%hrank.ne.cprst%hrank) write(*,*) &
-         ' * hrank changed from ',cprst%hrank,' to ',cpp%hrank
-      IF (cpp%psinals.ne.cprst%psinals) write(*,*) &
-         ' * psinals changed from ',cprst%psinals,' to ',cpp%psinals
-      IF (cpp%hnals.ne.cprst%hnals) write(*,*) &
-         ' * hnals changed from ',cprst%hnals,' to ',cpp%hnals
-      IF (cpp%solver.ne.cprst%solver) write(*,*) &
-         ' * solver changed from ',cprst%solver,' to ',cpp%solver
-      IF (cpp%ncycle.ne.cprst%ncycle) write(*,*) &
-         ' * ncycle changed from ',cprst%ncycle,' to ',cpp%ncycle
-      IF (cpp%npow.ne.cprst%npow) write(*,*) &
-         ' * npow changed from ',cprst%npow,' to ',cpp%npow
-      IF (cpp%lowmem.ne.cprst%lowmem) write(*,*) &
-         ' * lowmem changed from ',cprst%lowmem,' to ',cpp%lowmem
-      IF (cpp%truncation.ne.cprst%truncation) write(*,*) &
-         ' * truncation changed from ',cprst%truncation,&
-                                ' to ',cpp%truncation
-      IF (cpp%update.neqv.cprst%update) write(*,*) &
-         ' * update changed from ',cprst%update,' to ',cpp%update
-      IF (cpp%solvtol.ne.cprst%solvtol) write(*,*) &
-         ' * solvtol changed from ',cprst%solvtol,' to ',cpp%solvtol
-      IF (.not.ALL(cpp%rs.eq.cprst%rs)) write(*,'(X,2(A,33(I0,X)))') &
-         ' * rs changed from ',(cpp%rs(j),j=1,33),&
-                        ' to ',(cprst%rs(j),j=1,33)
-      write(*,*)
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         IF (cpp%ncpu.ne.cprst%ncpu) write(*,*) &
+            ' * ncpu changed from ',cprst%ncpu,' to ',cpp%ncpu
+         IF (cpp%red2D.ne.cprst%red2D) write(*,*) &
+            ' * red2D changed from ',cprst%red2D,' to ',cpp%red2D
+         IF (cpp%redND.ne.cprst%redND) write(*,*) &
+            ' * redND changed from ',cprst%redND,' to ',cpp%redND
+         IF (cpp%psirank.ne.cprst%psirank) write(*,*) &
+            ' * psirank changed from ',cprst%psirank,' to ',cpp%psirank
+         IF (cpp%hrank.ne.cprst%hrank) write(*,*) &
+            ' * hrank changed from ',cprst%hrank,' to ',cpp%hrank
+         IF (cpp%psinals.ne.cprst%psinals) write(*,*) &
+            ' * psinals changed from ',cprst%psinals,' to ',cpp%psinals
+         IF (cpp%hnals.ne.cprst%hnals) write(*,*) &
+            ' * hnals changed from ',cprst%hnals,' to ',cpp%hnals
+         IF (cpp%solver.ne.cprst%solver) write(*,*) &
+            ' * solver changed from ',cprst%solver,' to ',cpp%solver
+         IF (cpp%ncycle.ne.cprst%ncycle) write(*,*) &
+            ' * ncycle changed from ',cprst%ncycle,' to ',cpp%ncycle
+         IF (cpp%npow.ne.cprst%npow) write(*,*) &
+            ' * npow changed from ',cprst%npow,' to ',cpp%npow
+         IF (cpp%lowmem.ne.cprst%lowmem) write(*,*) &
+            ' * lowmem changed from ',cprst%lowmem,' to ',cpp%lowmem
+         IF (cpp%truncation.ne.cprst%truncation) write(*,*) &
+            ' * truncation changed from ',cprst%truncation,&
+                                   ' to ',cpp%truncation
+         IF (cpp%update.neqv.cprst%update) write(*,*) &
+            ' * update changed from ',cprst%update,' to ',cpp%update
+         IF (cpp%solvtol.ne.cprst%solvtol) write(*,*) &
+            ' * solvtol changed from ',cprst%solvtol,' to ',cpp%solvtol
+         IF (.not.ALL(cpp%rs.eq.cprst%rs)) write(*,'(X,2(A,33(I0,X)))') &
+            ' * rs changed from ',(cpp%rs(j),j=1,33),&
+                           ' to ',(cprst%rs(j),j=1,33)
+         write(*,*)
+      ENDIF
 
 !     Validate input against layers.rst. Make sure that the ordering of
 !     DOFs and the tree structure are the same. The basis sizes are
@@ -196,8 +203,6 @@
       ENDDO
 
       call Flush_ModeComb(MLrst)
-
-      ENDIF rank0
 
       end subroutine ValidateRestart
 
@@ -239,77 +244,90 @@
       integer, intent(in)  :: nr
       character(len=64)    :: fnm
       logical, intent(out) :: success
+      logical :: successitems(4)
       integer :: u,i,k,nmat,n,InpStat
 
-      success=.TRUE.
-
-      rank0: IF (mpirank.eq.0) THEN
-
-!     Open file containing the operator matrices
+      successitems(:)=.FALSE.
       write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
               '_',nr,'_oper.rst'
-      u = LookForFreeUnit()
-      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
-      IF (InpStat /= 0) THEN
-         write(*,*) TRIM(ADJUSTL(fnm)),' not found'
-         success=.FALSE.
-         RETURN
-      ENDIF
 
-!     Read the number of matrices
-      read(u,*)
-      read(u,*,IOSTAT=InpStat) nmat
-      IF (InpStat /= 0) success=.FALSE.
-      read(u,*)
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
-!     Make sure that the number of operator matrices in the restart
-!     file matches the number allocated in the current run
+!        Read file containing the operator matrices
+         u = LookForFreeUnit()
+         OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
+         successitems(1)=(InpStat.eq.0)
+        
+         if (successitems(1)) then
 
-      IF (nmat.ne.SIZE(H%pops)) THEN
-         write(*,*) 'Number of operators, current run :',SIZE(H%pops)
-         write(*,*) 'Number of operators, restart file:',nmat
-         success=.FALSE.
-      ENDIF
+!           Read the number of matrices
+            read(u,*)
+            read(u,*,IOSTAT=InpStat) nmat
+            successitems(2)=(InpStat.eq.0)
+            read(u,*)
 
-!     Cycle through the primitive operator matrices
-      IF (success) THEN
-         DO i=1,nmat
-            read(u,*,IOSTAT=InpStat) H%pops(i)%dof,n
-            IF (InpStat /= 0) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
+!           Make sure that the number of operator matrices in the restart
+!           file matches the number allocated in the current run
+            if (successitems(2)) then
+               successitems(3)=(nmat.eq.SIZE(H%pops))
 
-!           The operator matrices are allocated and written when the 1D
-!           (bottom layer) problems are solved, so these must be 
-!           deallocated and reallocated in a restarted run
-            IF (allocated(H%pops(i)%mat)) DEALLOCATE(H%pops(i)%mat)
-            ALLOCATE(H%pops(i)%mat(n))
+               if (successitems(3)) then
 
-!           Read the matrix for each operator
-            read(u,*,IOSTAT=InpStat) (H%pops(i)%mat(k),k=1,n)
-            IF (InpStat /= 0) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
-            IF (.not.success) EXIT
-         ENDDO
-      ENDIF
+!                 Cycle through the primitive operator matrices
+                  do i=1,nmat
+                     read(u,*,IOSTAT=InpStat) H%pops(i)%dof,n
+                     successitems(4)=(InpStat.eq.0)
+                     if (.not.successitems(4)) exit
 
-      close(u)
+!                    The operator matrices are allocated and written when the 1D
+!                    (bottom layer) problems are solved, so these must be 
+!                    deallocated and reallocated in a restarted run
+                     IF (allocated(H%pops(i)%mat)) DEALLOCATE(H%pops(i)%mat)
+                     ALLOCATE(H%pops(i)%mat(n))
 
-      IF (success) &
-         write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
+!                    Read the matrix for each operator
+                     read(u,*,IOSTAT=InpStat) (H%pops(i)%mat(k),k=1,n)
+                     successitems(4)=(InpStat.eq.0)
+                     if (.not.successitems(4)) exit
+                  enddo
+               endif ! successitems(3)
+            endif ! successitems(2)
+         endif ! successitems(1)
+      
+         close(u)
 
       ENDIF rank0
 
-      call BcastOperMats(H,success)
+      call bcast(nmat,mpi_io_rank)
+      call bcast(successitems,mpi_io_rank)
+      success=ALL(successitems(:))
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+
+         if (.not.successitems(1)) then
+            write(*,*) TRIM(ADJUSTL(fnm)),' not found'
+         elseif (.not.successitems(2)) then
+            write(*,*) 'Number of primitive operators could not be read' 
+         elseif (.not.successitems(3)) then
+            write(*,*) 'Number of operators, current run :',SIZE(H%pops)
+            write(*,*) 'Number of operators, restart file:',nmat
+            write(*,*) 'Wrong number of operators in restart file'
+         elseif (.not.successitems(4)) then
+            write(*,*) 'Primitive operator matrices could not be read'
+         else
+            write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
+         endif
+
+      ENDIF
+
+!     Broadcast operator matrices if read succeeded
+      if (success) call BcastOperMats(H)
 
       end subroutine ReadOperMats
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine BcastOperMats(H,success)
+      subroutine BcastOperMats(H)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Broadcasts Operator matrices from MPI rank 0 to other ranks
@@ -317,12 +335,7 @@
       implicit none
       TYPE (Hamiltonian), INTENT(INOUT) :: H
       integer, allocatable :: ndofs(:,:)
-      logical :: success
       integer :: i,nmat,n
-
-!     If read did not succeed, do not broadcast data
-      call bcast(success)
-      IF (.not.success) RETURN
 
       nmat=SIZE(H%pops)
 
@@ -332,18 +345,18 @@
          ndofs(i,2)=H%pops(i)%dof
       ENDDO
 
-      call bcast(ndofs)
+      call bcast(ndofs,mpi_io_rank)
 
       DO i=1,nmat
          n=ndofs(i,1)
          H%pops(i)%dof=ndofs(i,2)
 
-         IF (mpirank.ne.0) THEN
+         IF (mpirank.ne.mpi_io_rank) THEN
             IF (allocated(H%pops(i)%mat)) DEALLOCATE(H%pops(i)%mat)
                ALLOCATE(H%pops(i)%mat(n))
          ENDIF
 
-         call bcast(H%pops(i)%mat)
+         call bcast(H%pops(i)%mat,mpi_io_rank)
       ENDDO
 
       DEALLOCATE(ndofs)
@@ -364,28 +377,28 @@
       character(len=64)   :: fnm,frmt
       integer :: u,i,k,n
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
-!     Open output file
-      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
-              '_',nr,'_oper.rst'
-      u = LookForFreeUnit()
-      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
+!        Open output file
+         write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+                 '_',nr,'_oper.rst'
+         u = LookForFreeUnit()
+         OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
 
-!     Record the number of matrices
-      write(u,'(A)') 'Number of operators:'
-      write(u,'(I0)') SIZE(H%pops)
-      write(u,'(A)') 'DOF# / n'
+!        Record the number of matrices
+         write(u,'(A)') 'Number of operators:'
+         write(u,'(I0)') SIZE(H%pops)
+         write(u,'(A)') 'DOF# / n'
 
-!     Write each operator matrix to file
-      DO i=1,SIZE(H%pops)
-         n=SIZE(H%pops(i)%mat)
-         write(u,'(4(I0,X))') H%pops(i)%dof,n
-         write(frmt,'(A,I0,A)') '(',n,'(E23.16,X))'
-         write(u,frmt) (H%pops(i)%mat(k),k=1,n)
-      ENDDO
-      write(u,*)
-      close(u)
+!        Write each operator matrix to file
+         DO i=1,SIZE(H%pops)
+            n=SIZE(H%pops(i)%mat)
+            write(u,'(4(I0,X))') H%pops(i)%dof,n
+            write(frmt,'(A,I0,A)') '(',n,'(E23.16,X))'
+            write(u,frmt) (H%pops(i)%mat(k),k=1,n)
+         ENDDO
+         write(u,*)
+         close(u)
 
       ENDIF rank0
 
@@ -405,97 +418,116 @@
       integer, intent(in)  :: nr
       integer, intent(out) :: il,im
       logical, intent(out) :: success
+      logical :: successitems(5)
+      integer :: gotvals(4),expvals(4)
       character(len=64) :: fnm, frmt
       integer :: u,i,j,k,l,nm,nev,nsubm,InpStat,itmp,jtmp
 
-      success=.TRUE.
       il=-1
       im=-1
-
-      rank0: IF (mpirank.eq.0) THEN
-
-!     Open file containing the eigenvalue lists
-      u = LookForFreeUnit()
+      successitems(:)=.FALSE.
       write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
               '_',nr,'_eigv.rst'
-      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
-      IF (InpStat /= 0) THEN
-         write(*,*) TRIM(ADJUSTL(fnm)),' not found'
-         success=.FALSE.
-         RETURN
-      ENDIF
 
-!     Read the number of matrices
-      read(u,*)
-      read(u,*) il,im
-      IF (InpStat /= 0) success=.FALSE.
-      read(u,*)
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
-!     Loop over layers and modes
-      DO i=1,il
-         nm=ML%nmode(i)
-         IF (i.eq.il) nm=im
-         DO j=1,nm
-!           Read the layer #, mode #, # eigenvalues and # sub-modes
-            read(u,*) itmp,jtmp,nev,nsubm
-            IF (InpStat /= 0) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
+!        Read file containing the eigenvalue lists
+         u = LookForFreeUnit()
+         OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
+         successitems(1)=(InpStat.eq.0)
 
-!           Error checking
-            IF (itmp.ne.i .or. jtmp.ne.j .or. & 
-               nsubm.ne.ML%modcomb(i,j)) THEN
-               write(*,*) 'layer :',itmp,'; mode :',jtmp,&
-                          '; nsubm :',nsubm,' read'
-               write(*,*) 'layer :',i,'; mode :',j,&
-                          '; nsubm :',ML%modcomb(i,j),' expected'
-               success=.FALSE.
-               EXIT
-            ENDIF
-            IF (nev.ne.ML%gdim(i,j)) THEN
-               write(*,*) 'layer :',itmp,'; mode :',jtmp
-               write(*,*) ' nev = ',nev,' read'
-               write(*,*) ' nev = ',ML%gdim(i,j),' expected'
-               success=.FALSE.
-               EXIT
-            ENDIF
+         if (successitems(1)) then
 
-!           Make sure eigenvalue and assignment arrays are allocated
-!           The bottom layer should be already allocated
-            IF (.not.ALLOCATED(H%eig(i,j)%assgn)) &
-               ALLOCATE(H%eig(i,j)%assgn(nev,nsubm))
-            IF (.not.ALLOCATED(H%eig(i,j)%evals)) &
-               ALLOCATE(H%eig(i,j)%evals(nev))
+!           Read the last layer-mode numbers
+            read(u,*)
+            read(u,*,IOSTAT=InpStat) il,im
+            successitems(2)=(InpStat.eq.0)
+            read(u,*)
 
-!           Read the eigenvalues/assignments for each layer/mode
-            DO k=1,nev
-               read(u,*) &
-               (H%eig(i,j)%assgn(k,l),l=1,nsubm),H%eig(i,j)%evals(k)
-               IF (InpStat /= 0) THEN
-                  success=.FALSE.
-                  EXIT
-               ENDIF
-            ENDDO
-            IF (.not.success) EXIT
-         ENDDO
-         IF (.not.success) EXIT
-      ENDDO
+            if (successitems(2)) then
 
-      close(u)
+!              Loop over layers and modes
+               DO i=1,il
+                  nm=ML%nmode(i)
+                  IF (i.eq.il) nm=im
 
-      IF (success) &
-         write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
+                  DO j=1,nm
+
+!                    Read the layer #, mode #, # eigenvalues and # sub-modes
+                     read(u,*,IOSTAT=InpStat) itmp,jtmp,nev,nsubm
+                     successitems(3)=(InpStat.eq.0)
+                     if (.not.successitems(3)) exit
+
+!                    Error checking
+                     gotvals=(/itmp,jtmp,nev,nsubm/)
+                     expvals=(/i,j,ML%gdim(i,j),ML%modcomb(i,j)/)
+                     successitems(4)=( itmp.eq.i .and. jtmp.eq.j .and. &
+                                      nsubm.eq.ML%modcomb(i,j) .and. &
+                                        nev.eq.ML%gdim(i,j))
+                     if (.not.successitems(4)) exit
+
+!                    Make sure eigenvalue and assignment arrays are allocated
+!                    The bottom layer should be already allocated
+                     IF (.not.ALLOCATED(H%eig(i,j)%assgn)) &
+                     ALLOCATE(H%eig(i,j)%assgn(nev,nsubm))
+                     IF (.not.ALLOCATED(H%eig(i,j)%evals)) &
+                     ALLOCATE(H%eig(i,j)%evals(nev))
+
+!                    Read the eigenvalues/assignments for each layer/mode
+                     DO k=1,nev
+                        read(u,*,IOSTAT=InpStat) &
+                        (H%eig(i,j)%assgn(k,l),l=1,nsubm),H%eig(i,j)%evals(k)
+                        successitems(5)=(InpStat.eq.0)
+                        if (.not.successitems(5)) exit
+                     ENDDO
+                     if (.not.successitems(5)) exit
+                  ENDDO
+                  if (.not.ALL(successitems)) exit
+               ENDDO
+            endif ! successitems(2)
+         endif ! successitems(1)
+
+         close(u)
 
       ENDIF rank0
 
-      call BcastEigenvalues(il,im,H,ML,success)
+      call bcast(gotvals,mpi_io_rank)
+      call bcast(expvals,mpi_io_rank)
+      call bcast(successitems,mpi_io_rank)
+      success=ALL(successitems(:))
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+
+         if (.not.successitems(1)) then
+            write(*,*) TRIM(ADJUSTL(fnm)),' not found'
+         elseif (.not.successitems(2)) then
+            write(*,*) 'Final layer and mode numbers could not be read'
+         elseif (.not.successitems(3)) then
+            write(*,*) 'layer-mode-nev-nsubm designations', &
+                       ' could not be read'
+         elseif (.not.successitems(4)) then
+            write(*,*) 'layer :',gotvals(1),'; mode :',gotvals(2),&
+                       '; nev :',gotvals(3),'; nsubm :',gotvals(4),&
+                       ' read, but'
+            write(*,*) 'layer :',expvals(1),'; mode :',expvals(2),&
+                       '; nev :',expvals(3),'; nsubm :',expvals(4),&
+                       ' expected'
+         elseif (.not.successitems(5)) then
+            write(*,*) 'Eigenvalues and assignments could not be read'
+         else
+            write(*,'(X,2A)') TRIM(ADJUSTL(fnm)),' read successfully!'
+         endif
+
+      ENDIF
+
+!     Broadcast eigenvalues if read succeeded
+      if (success) call BcastEigenvalues(il,im,H,ML)
 
       end subroutine ReadEigenvalues
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine BcastEigenvalues(il,im,H,ML,success)
+      subroutine BcastEigenvalues(il,im,H,ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Broadcasts eigenvalues from MPI rank 0 to other ranks
@@ -504,15 +536,10 @@
       TYPE (Hamiltonian), INTENT(INOUT) :: H
       TYPE (MLtree), INTENT(IN) :: ML
       integer, intent(inout) :: il,im
-      logical :: success
       integer :: i,j,nm,nev,nsubm
 
-!     If read did not succeed, do not broadcast data
-      call bcast(success)
-      IF (.not.success) RETURN
-
-      call bcast(il)
-      call bcast(im)
+      call bcast(il,mpi_io_rank)
+      call bcast(im,mpi_io_rank)
 
       DO i=1,il
          nm=ML%nmode(i)
@@ -520,15 +547,15 @@
             nev=ML%gdim(i,j)
             nsubm=ML%modcomb(i,j)
 
-            IF (mpirank.ne.0) THEN
+            IF (mpirank.ne.mpi_io_rank) THEN
                IF (.not.ALLOCATED(H%eig(i,j)%assgn)) &
                   ALLOCATE(H%eig(i,j)%assgn(nev,nsubm))
                IF (.not.ALLOCATED(H%eig(i,j)%evals)) &
                   ALLOCATE(H%eig(i,j)%evals(nev))
             ENDIF
 
-            call bcast(H%eig(i,j)%assgn)
-            call bcast(H%eig(i,j)%evals)
+            call bcast(H%eig(i,j)%assgn,mpi_io_rank)
+            call bcast(H%eig(i,j)%evals,mpi_io_rank)
          ENDDO
       ENDDO
 
@@ -549,40 +576,40 @@
       character(len=64) :: fnm,frmt
       integer :: u,i,j,k,l,nm,nev,nsubm
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
-!     Open output file
-      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
-              '_',nr,'_eigv.rst'
-      u = LookForFreeUnit()
-      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
+!        Open output file
+         write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+                 '_',nr,'_eigv.rst'
+         u = LookForFreeUnit()
+         OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
 
-!     Record the number of matrices
-      write(u,'(A)') 'Last layer/mode to be solved:'
-      write(u,'(2(I0,X))') il,im
-      write(u,'(A)') 'Layer / Mode / eigenvalues / sub-modes'
+!        Record the number of matrices
+         write(u,'(A)') 'Last layer/mode to be solved:'
+         write(u,'(2(I0,X))') il,im
+         write(u,'(A)') 'Layer / Mode / eigenvalues / sub-modes'
 
-!     Loop over layers and modes
-      DO i=1,il
-         nm=ML%nmode(i)
-         IF (i.eq.il) nm=im
-         DO j=1,nm
-!           Save the layer #, mode #, # eigenvalues, # sub-modes
-            nev=SIZE(H%eig(i,j)%assgn,1)
-            nsubm=SIZE(H%eig(i,j)%assgn,2)
-            write(u,'(4(I0,X))') i,j,nev,nsubm
+!        Loop over layers and modes
+         DO i=1,il
+            nm=ML%nmode(i)
+            IF (i.eq.il) nm=im
+            DO j=1,nm
+!              Save the layer #, mode #, # eigenvalues, # sub-modes
+               nev=SIZE(H%eig(i,j)%assgn,1)
+               nsubm=SIZE(H%eig(i,j)%assgn,2)
+               write(u,'(4(I0,X))') i,j,nev,nsubm
 
-!           Write the eigenvalues/assignments for each layer/mode
-            write(frmt,'(A,I0,A)') '(',nsubm,'(I0,X),E23.16,X)'
-            DO k=1,nev
-               write(u,frmt) &
-               (H%eig(i,j)%assgn(k,l),l=1,nsubm),H%eig(i,j)%evals(k)
+!              Write the eigenvalues/assignments for each layer/mode
+               write(frmt,'(A,I0,A)') '(',nsubm,'(I0,X),E23.16,X)'
+               DO k=1,nev
+                  write(u,frmt) &
+                  (H%eig(i,j)%assgn(k,l),l=1,nsubm),H%eig(i,j)%evals(k)
+               ENDDO
+
             ENDDO
-
          ENDDO
-      ENDDO
-      write(u,*)
-      close(u)
+         write(u,*)
+         close(u)
 
       ENDIF rank0
 
@@ -636,122 +663,178 @@
       integer, intent(inout) :: isvi
       character(len=64)    :: fnm
       logical, intent(out) :: success
+      logical :: successitems(12)
       integer, allocatable :: nbas(:)
       real*8, allocatable  :: eigt(:),deltt(:)
       real*8  :: boundt(2)
+      integer :: gotvals(5)
       integer :: u,i,j,ndof,nev,nrk,isavti,InpStat
 
-      success=.TRUE.
+      successitems(:)=.FALSE.
+      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+              '_',nr,'_psi.rst'
 
       rank0 : IF (mpirank.eq.0) THEN
 
-!     Open file containing the eigenvalue list
-      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
-              '_',nr,'_psi.rst'
-      u = LookForFreeUnit()
-      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", &
-           FORM='UNFORMATTED',IOSTAT=InpStat)
-      IF (InpStat /= 0) THEN
-         write(*,'(/X,A/)') 'Psi restart file ',TRIM(ADJUSTL(fnm)),&
-                            ' not found'
-         success=.FALSE.
-         RETURN
-      ENDIF
+!        Read file containing the eigenvalue list
+         u = LookForFreeUnit()
+         OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", &
+              FORM='UNFORMATTED',IOSTAT=InpStat)
+         successitems(1)=(InpStat.eq.0)
 
-!     Try to read the iteration, # eigenvalues, and spectral bounds
-      read(u,IOSTAT=InpStat) isavti,nev
-      IF (Inpstat /=0) success=.FALSE.
+         if (successitems(1)) then
+!           Read the iteration, # eigenvalues
+            read(u,IOSTAT=InpStat) isavti,nev
+            successitems(2)=(InpStat.eq.0)
+         endif
 
-!     Make sure # eigenvalues matches what is in the block
-      IF (nev.ne.SIZE(eigv)) success=.FALSE.
+         if (successitems(2)) then     
+!           Make sure # eigenvalues matches what is in the block
+            successitems(3)=(nev.eq.SIZE(eigv))
+            gotvals(1)=nev
+         endif
 
-      read(u,IOSTAT=InpStat) boundt
-      IF (Inpstat /=0) success=.FALSE.
+         if (successitems(3)) then
+!           Read spectral bounds
+            read(u,IOSTAT=InpStat) boundt
+            successitems(4)=(InpStat.eq.0)
+         endif
 
-!     If previous reads succeeded, read the eigenvalues and deltas
-      IF (success) THEN
-         ALLOCATE(eigt(nev),deltt(nev))
-         read(u,IOSTAT=InpStat) eigt
-         IF (Inpstat /=0) success=.FALSE.
-         read(u,IOSTAT=InpStat) deltt
-         IF (Inpstat /=0) success=.FALSE.
-      ENDIF
+         if (successitems(4)) then
+!           Read the eigenvalues
+            ALLOCATE(eigt(nev),deltt(nev))
+            read(u,IOSTAT=InpStat) eigt
+            successitems(5)=(InpStat.eq.0)
+         endif
 
-!     If eigenvalues and deltas read successfully, read the wavefunction
-      IF (success) THEN
-         ALLOCATE(Qt(nev))
-         DO i=1,nev
-            read(u,IOSTAT=InpStat) ndof,nrk
-            IF (Inpstat /=0) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
+         if (successitems(5)) then
+!           Read the deltas
+            read(u,IOSTAT=InpStat) deltt
+            successitems(6)=(InpStat.eq.0)
+         endif
 
-!           Make sure ndof of w.f. to be read matches that of Q
-            IF (ndof.ne.SIZE(Q(i)%nbas)) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
+         if (successitems(6)) then
+!           Read the wavefunction
+            ALLOCATE(Qt(nev))
+            DO i=1,nev
+               gotvals(2)=i
+               read(u,IOSTAT=InpStat) ndof,nrk
+               successitems(7)=(InpStat.eq.0)
+               if (.not.successitems(7)) exit
 
-            ALLOCATE(nbas(ndof))
-            read(u,IOSTAT=InpStat) nbas
-            IF (Inpstat /=0) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
+!              Make sure ndof of w.f. read matches that of Q
+               successitems(8)=(ndof.eq.SIZE(Q(i)%nbas))
+               gotvals(3)=ndof
+               if (.not.successitems(8)) exit
 
-!           Make sure nbas of w.f. to be read matches that of Q
-            DO j=1,ndof
-               IF (nbas(j).ne.Q(i)%nbas(j)) success=.FALSE.
+               ALLOCATE(nbas(ndof))
+               read(u,IOSTAT=InpStat) nbas
+               successitems(9)=(InpStat.eq.0)
+               if (.not.successitems(9)) exit
+
+               successitems(10)=.TRUE.
+!              Make sure nbas of w.f. to be read matches that of Q
+               DO j=1,ndof
+                  gotvals(4)=j
+                  IF (nbas(j).ne.Q(i)%nbas(j)) THEN
+                     successitems(10)=.FALSE.
+                     gotvals(5)=nbas(j)
+                     EXIT
+                  ENDIF
+               ENDDO
+               if (.not.successitems(10)) exit
+
+               Qt(i)=NewCP(nrk,nbas)
+               DEALLOCATE(nbas)
+               read(u,IOSTAT=InpStat) Qt(i)%coef
+               successitems(11)=(InpStat.eq.0)
+               if (.not.successitems(11)) exit
+
+               read(u,IOSTAT=InpStat) Qt(i)%base
+               successitems(12)=(InpStat.eq.0)
+               if (.not.successitems(12)) exit
+
             ENDDO
-            IF (.not.success) EXIT
+         endif ! successitems(6)
 
-            Qt(i)=NewCP(nrk,nbas)
-            DEALLOCATE(nbas)
-            read(u,IOSTAT=InpStat) Qt(i)%coef
-            IF (Inpstat /=0) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
-            read(u,IOSTAT=InpStat) Qt(i)%base
-            IF (Inpstat /=0) THEN
-               success=.FALSE.
-               EXIT
-            ENDIF
-         ENDDO
-      ENDIF
+         close(u)
 
-      close(u)
+         if (ALL(successitems(:))) then
+            isvi=isavti
+            eigv=eigt
+            delta=deltt
+            bounds=boundt
+            DO i=1,nev
+               call ReplaceVwithW(Q(i),Qt(i))
+            ENDDO
+         endif
 
-!     If all was read successfully, replace existing data with read data
-      IF (success) THEN
-         isvi=isavti
-         eigv=eigt
-         delta=deltt
-         bounds=boundt
-         DO i=1,nev
-            call ReplaceVwithW(Q(i),Qt(i))
-         ENDDO
-         write(*,'(X,3A)') 'Psi restart file ',TRIM(ADJUSTL(fnm)),&
-                            ' read successfully!'
-      ELSE
-         write(*,'(X,3A)') 'Psi restart file ',TRIM(ADJUSTL(fnm)),&
-                            ' could not be read'
+      ENDIF rank0
+
+      call bcast(gotvals,mpi_io_rank)
+      call bcast(successitems,mpi_io_rank)
+      success=ALL(successitems(:))
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+
+         if (.not.successitems(1)) then
+            write(*,*) TRIM(ADJUSTL(fnm)),' not found'
+         elseif (.not.successitems(2)) then
+            write(*,*) 'Could not write iteration nr, nr eigenvalues'
+         elseif (.not.successitems(3)) then
+            write(*,*) 'Number of eigenvalues read:',gotvals(1)
+            write(*,*) 'Number of eigenvalues expected:',SIZE(eigv)
+         elseif (.not.successitems(4)) then
+            write(*,*) 'Could not read spectral bounds'
+         elseif (.not.successitems(5)) then
+            write(*,*) 'Could not read eigenvalues'
+         elseif (.not.successitems(6)) then
+            write(*,*) 'Could not read deltas'
+         elseif (.not.successitems(7)) then
+            write(*,'(X,A,I0,A)') 'Psi(',gotvals(2),&
+              '): could not read ndof, nrk'
+         elseif (.not.successitems(8)) then
+            write(*,'(X,A,I0,A,I0)') 'Psi(',gotvals(2),&
+              ': number of degrees-of-freedom read:',gotvals(3)
+            write(*,*) 'Number of degrees-of-freedom expected:',&
+              SIZE(Q(i)%nbas)
+         elseif (.not.successitems(9)) then
+            write(*,'(X,A,I0,A)') 'Psi(',gotvals(2),&
+              '): could not read nbas'
+         elseif (.not.successitems(10)) then
+            write(*,'(X,3(A,I0,A))') 'Psi(',gotvals(2),&
+              '): nbas(',gotvals(4),') = ',gotvals(5),'read'
+            write(*,'(X,3(A,I0,A))') 'Psi(',gotvals(2),&
+              '): nbas(',gotvals(4),') = ',&
+              Q(gotvals(2))%nbas(gotvals(4)),'expected'
+         elseif (.not.successitems(11)) then
+            write(*,'(X,A,I0,A)') 'Psi(',gotvals(2),&
+              '): could not read coefficients'
+         elseif (.not.successitems(12)) then
+            write(*,'(X,A,I0,A)') 'Psi(',gotvals(2),&
+              '): could not read base'
+         else
+            write(*,'(X,3A)') 'Psi restart file ',TRIM(ADJUSTL(fnm)),&
+                              ' read successfully!'
+         endif
+         
+         if (.not.success) &
+            write(*,'(X,3A)') 'Psi restart file ',TRIM(ADJUSTL(fnm)),&
+                              ' could not be read'
+
       ENDIF
 
       IF (ALLOCATED(Qt)) DEALLOCATE(Qt)
       IF (ALLOCATED(eigt)) DEALLOCATE(eigt)
       IF (ALLOCATED(deltt)) DEALLOCATE(deltt)
 
-      ENDIF rank0
-
-      call BcastPsi(isvi,bounds,eigv,delta,Q,success)
+      if (success) call BcastPsi(isvi,bounds,eigv,delta,Q)
 
       end subroutine ReadPsiFile
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine BcastPsi(isvi,bounds,eigv,delta,Q,success)
+      subroutine BcastPsi(isvi,bounds,eigv,delta,Q)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Broadcasts eigenvalues from MPI rank 0 to other ranks
@@ -760,21 +843,16 @@
       TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
       real*8, intent(inout)  :: bounds(2),eigv(:),delta(:)
       integer, intent(inout) :: isvi
-      logical :: success
       integer :: i,nev
 
-!     If read did not succeed, do not broadcast data
-      call bcast(success)
-      IF (.not.success) RETURN
-
-      call bcast(isvi)
-      call bcast(bounds)
-      call bcast(eigv)
-      call bcast(delta)
+      call bcast(isvi,mpi_io_rank)
+      call bcast(bounds,mpi_io_rank)
+      call bcast(eigv,mpi_io_rank)
+      call bcast(delta,mpi_io_rank)
 
       nev=SIZE(eigv)
       DO i=1,nev
-         call BcastCP(Q(i),0)
+         call BcastCP(Q(i),mpi_io_rank)
       ENDDO
 
       end subroutine BcastPsi
@@ -817,30 +895,30 @@
       character(len=64) :: fnm,frmt
       integer :: u,i,j,k,l,nm,nev,nsubm
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
-!     Set parameters
-      nev=SIZE(eigv)
+!        Set parameters
+         nev=SIZE(eigv)
 
-!     Open output file
-      write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
-              '_',nr,'_psi.rst'
-      u = LookForFreeUnit()
-      open(u, FILE=TRIM(ADJUSTL(fnm)),FORM='UNFORMATTED',&
-           STATUS="UNKNOWN")
+!        Open output file
+         write(fnm,'(2A,I0,A)') TRIM(ADJUSTL(cpp%resfile)),&
+                 '_',nr,'_psi.rst'
+         u = LookForFreeUnit()
+         open(u, FILE=TRIM(ADJUSTL(fnm)),FORM='UNFORMATTED',&
+              STATUS="UNKNOWN")
 
-      write(u) isavi,nev
-      write(u) bounds
-      write(u) eigv
-      write(u) delta
-      DO i=1,nev
-         write(u) SIZE(Q(i)%nbas),SIZE(Q(i)%coef)
-         write(u) Q(i)%nbas
-         write(u) Q(i)%coef
-         write(u) Q(i)%base
-      ENDDO
+         write(u) isavi,nev
+         write(u) bounds
+         write(u) eigv
+         write(u) delta
+         DO i=1,nev
+            write(u) SIZE(Q(i)%nbas),SIZE(Q(i)%coef)
+            write(u) Q(i)%nbas
+            write(u) Q(i)%coef
+            write(u) Q(i)%base
+         ENDDO
 
-      close(u)
+         close(u)
 
       ENDIF rank0
 

@@ -8,6 +8,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE SEPDREPN
       USE MODVECVEC
       USE LINALG
@@ -74,6 +75,7 @@
       IF (.NOT. RED_SETUP) call SetupReduction()
 
       RED_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total reduction time (REDUCTION)  (s)',&
                             redn_time
 

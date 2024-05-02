@@ -204,7 +204,7 @@
 
 !     Calculate QHQ and S matrices
       IF (intw) THEN
-          call GetQHQ3(Q,H,QHQ,nitn,lm)  ! Reduces H*Q, then calcs Q^THQ
+          call GetQHQ_intw(Q,H,QHQ,nitn,lm)  ! Reduces H*Q, then calcs Q^THQ
       ELSE
          call GetQHQ(Q,H,QHQ)
       ENDIF
@@ -213,14 +213,10 @@
 !     Diagonalize QHQ, accounting for overlaps
       call SolveGenEigval(avec,S,QHQ,'V')
 
-!!!   TEST
-!      call TestAssignQHQ(H,QHQ,avec,Q(1)%rows,Q(1)%rows)
-!!!
-
 !     Update block vectors after diagonalization
 !     q^n_{new} <- sum_{i=1} ^ m U_{im} q^i_{old}
       IF (intw) THEN
-         call UpdateVecs2(Q,QHQ,nitn,lm) ! Avoids long vectors
+         call UpdateVecs_intw(Q,QHQ,nitn,lm) ! Avoids long vectors
       ELSE
          call UpdateVecs(Q,QHQ)
       ENDIF
@@ -228,182 +224,6 @@
       deallocate(QHQ,S)
 
       end subroutine Diagonalize
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine TestAssignQHQ(H,M,eig,rows,cols)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Assigns QHQ by applying Munkres algorithm on squared eigenvectors
-
-      implicit none
-      TYPE (CP), INTENT(IN) :: H
-      TYPE (CP) :: U,F
-      integer, intent(in) :: rows(:),cols(:)
-      real*8, intent(in)  :: M(:,:),eig(:)
-      real*8, allocatable :: QHQ(:,:),QHQ2(:,:),AGN(:,:),ET(:,:)
-      integer :: nbloc,i,j,npars,ngrp
-
-      nbloc=SIZE(M,1)
-
-      ALLOCATE(QHQ(nbloc,nbloc),QHQ2(nbloc,nbloc))
-      QHQ(:,:)=M(:,:)
-      QHQ2(:,:)=0.d0
-      do i=1,nbloc
-         do j=1,nbloc
-            QHQ2(i,j)=QHQ(i,j)**2
-         enddo
-      enddo
-
-      write(*,*)
-      write(*,*) 'Eigenvector magns:'
-      npars=10
-      ngrp=(nbloc+npars-1)/npars
-      do i=1,ngrp
-         call PrintMatrix(QHQ2(:,((i-1)*npars+1):min(i*npars,nbloc)))
-      enddo
-
-      write(*,*)
-      write(*,*) 'Assignment matrix:'
-      AGN=AssignMatrix(QHQ2)
-      do i=1,ngrp
-         call PrintMatrix(AGN(:,((i-1)*npars+1):min(i*npars,nbloc)))
-      enddo
-
-      write(*,*)
-      write(*,*) 'Assigned eigenvector magns:'
-      call MatrixMult(QHQ2,.FALSE.,AGN,.TRUE.)
-      do i=1,ngrp
-         call PrintMatrix(QHQ2(:,((i-1)*npars+1):min(i*npars,nbloc)))
-      enddo
-      DEALLOCATE(QHQ2)
-
-      write(*,*)
-      write(*,*) 'Assigned eigenvector coefs:'
-      call MatrixMult(QHQ,.FALSE.,AGN,.TRUE.)
-!     Sign align the eigenvectors
-      DO i=1,nbloc
-         IF (QHQ(i,i).lt.0.d0) QHQ(:,i)=-QHQ(:,i)
-      ENDDO
-      do i=1,ngrp
-         call PrintMatrix(QHQ(:,((i-1)*npars+1):min(i*npars,nbloc)))
-      enddo
-
-      write(*,*)
-      write(*,*) 'Assigned eigenvalue matrix:'
-      ALLOCATE(ET(1,nbloc))
-      ET(1,:)=eig(:)
-      call MatrixMult(ET,.FALSE.,AGN,.TRUE.)
-      do i=1,ngrp
-         call PrintMatrix(ET(:,((i-1)*npars+1):min(i*npars,nbloc)))
-      enddo
-      ALLOCATE(QHQ2(nbloc,nbloc))
-      QHQ2(:,:)=0.d0
-      DO i=1,nbloc
-         QHQ2(i,i)=ET(1,i)
-      ENDDO
-
-      write(*,*)
-      write(*,*) 'CP-ified eigenvectors:'
-      U=Matrix2CP(QHQ,rows,cols)
-      call U%print()
-
-      call ShowVecRanks(H,U,30)
-!      call TestRankSuccessive(U)
-      call FlushCP(U)
-
-      write(*,*)
-      write(*,*) 'CP-ified eigenvalues:'
-      F=Matrix2CP(QHQ2,rows,cols)
-      call F%print()
-      call TestRankSuccessive(F)
-      call FlushCP(F)
-
-      DEALLOCATE(QHQ,QHQ2,AGN,ET)
-
-      end subroutine TestAssignQHQ
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine TestRankSuccessive(F)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Reduce rank of F from 1 to rkF-1, and check error
-
-      implicit none
-      TYPE (CP), INTENT(IN) :: F
-      TYPE (CP) :: Fr
-      integer :: i,redstat
-      character(len=64) :: tag
-
-      DO i=1,F%R()-1
-         write(tag,'(A,I0)') 'Test rank = ',i
-!         Fr=IdentityCPMatrix(F%rows,F%cols,F%sym)
-!         call AugmentVWithRandom(Fr,i)
-         Fr=RandomCP(F,i)
-         redstat=ALS_reduce(Fr,F,100,tag)
-         call FlushCP(Fr)
-!         write(*,*)
-         IF (redstat.eq.1) EXIT ! Convergence reached
-      ENDDO
-
-      end subroutine TestRankSuccessive
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine ShowVecRanks(H,U,maxrank)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Prints normalization values for all the vectors in U
-
-      implicit none
-      TYPE (CP), INTENT(IN) :: H,U
-      TYPE (CP) :: F,G,Z
-      integer, intent(in)  :: maxrank
-      integer, allocatable :: indx(:)
-      integer :: i,j,k,l,ndof,redstat
-      real*8  :: norm,rq
-      character(len=64) :: frmt,tag
-
-      ndof=SIZE(U%cols)
-
-      allocate(indx(ndof))
-      indx(:)=U%cols(:)
-
-      write(*,*)
-      DO i=1,PRODUCT(U%cols)
-         call NextIndex(indx,U%cols)
-         G=ExtractCPvec(U,indx,.TRUE.)
-         norm=sqrt(abs(PRODVV(G)))
-         call NORMALIZE(G)
-         rq=RayleighQuotient(G,H)
-         write(frmt,'(A,I0,A)') '(A,I8,A,',ndof,'(I2,X),2(A,f16.8))'
-         write(*,frmt) "Vec: ",i," (",(indx(k),k=1,ndof),&
-         "); RQ = ",rq,'; ||G|| = ',norm
-!         F=ALS_reduce_adaptive(mxrk,G,1.d-7,100,nm)
-         DO j=1,maxrank
-            write(frmt,'(A,I0,A)') '(A,I8,A,',ndof,'(I2,X),A,I0)'
-            write(tag,frmt) "Vec: ",i," (",(indx(k),k=1,ndof),&
-            "); rk = ",j
-            F=RandomCP(G,j)
-            redstat=ALS_reduce(F,G,100,tag)
-            IF (redstat.eq.1) THEN
-               DO l=1,SIZE(G%coef)
-                  Z=NewCP(G,1)
-                  call GenCopyWtoV(Z,G,1,1,l,l)
-                  write(*,*) 'Term: ',l,'<F,G(l)> = ',PRODVV(F,Z)
-               ENDDO
-               call FlushCP(F)
-               EXIT ! Convergence reached
-            ENDIF
-            call FlushCP(F)
-         ENDDO
-         write(*,*)
-         call FlushCP(G)
-      ENDDO
-      deallocate(indx)
-
-      end subroutine ShowVecRanks
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -416,31 +236,51 @@
       TYPE (CP), INTENT(IN)  :: H
       TYPE (CP), INTENT(IN)  :: Q(:)
       TYPE (CP), ALLOCATABLE :: HQ(:)
-      real*8, intent(inout) :: QHQ(:,:)
-      integer :: i,j,nbloc
+      real*8, intent(inout)  :: QHQ(:,:)
+      integer, allocatable   :: mvecs(:),moffs(:)
+      integer :: i,j,nbloc,sz,os,ierr
 
       nbloc=SIZE(Q)
-      ALLOCATE(HQ(nbloc))
       QHQ=0.d0
 
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc,sz,os)
+      ALLOCATE(HQ(sz))
+
+      do j=1,sz
+!        HQ=H*Q(os+j)
+         call CPMM(H,.FALSE.,Q(os+j),.FALSE.,HQ(j))
+!        Reduce the rank of HQ to accelerate computing the dot products
+         call reduc(HQ(j))
 !$omp parallel
-!$omp do private(i,j)
-      do i=1,nbloc
-!        HQ=H*Q(i)
-         call CPMM(H,.FALSE.,Q(i),.FALSE.,HQ(i))
-!        Reduce the rank of HQ as this greatly accelerates computing the
-!        inner products below
-         call reduc(HQ(i))
-         do j=i,nbloc
-!           QHQ(i,j)=<Q(j),H(Q(i))>
-            QHQ(i,j)=PRODVV(Q(j),HQ(i))
+!$omp do private(i)
+         do i=1,os+j
+!           QHQ(i,j)=<Q(i),H(Q(os+j))>
+            QHQ(i,os+j)=PRODVV(Q(i),HQ(j))
          enddo
-         call FlushCP(HQ(i))
-      enddo
 !$omp enddo
 !$omp end parallel
+         call FlushCP(HQ(j))
+      enddo
 
       DEALLOCATE(HQ)
+
+      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
+      mvecs(:)=0
+      do j=1,nbloc
+         i=mod(j-1,mpinodes)+1
+         mvecs(i)=mvecs(i)+nbloc
+      enddo
+      moffs(1)=0
+      do i=2,mpinodes
+         moffs(i)=moffs(i-1)+mvecs(i-1)
+      enddo
+
+!     Gather the columns from all processors
+      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
+           QHQ,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
+
+      DEALLOCATE(mvecs,moffs)
 
       end subroutine GetQHQ
 
@@ -525,7 +365,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetQHQ3(Q,H,QHQ,nitn,lm)
+      subroutine GetQHQ_intw(Q,H,QHQ,nitn,lm)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Computes Q^T H Q for a block of vectors. The matrix-vector product H*Q
@@ -535,31 +375,55 @@
       TYPE (CP), INTENT(IN)  :: H
       TYPE (CP), INTENT(IN)  :: Q(:)
       TYPE (CP), ALLOCATABLE :: HQ(:)
-      integer, intent(in)   :: nitn,lm
-      real*8, intent(inout) :: QHQ(:,:)
-      integer :: i,j,nbloc
+      integer, intent(in)    :: nitn,lm
+      real*8, intent(inout)  :: QHQ(:,:)
+      integer, allocatable   :: mvecs(:),moffs(:)
+      integer :: i,j,nbloc,sz,os,ierr
 
       nbloc=SIZE(Q)
-      ALLOCATE(HQ(nbloc))
+!      ALLOCATE(HQ(nbloc))
       QHQ=0.d0
 
+!      call sync_mpi()
+
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc,sz,os)
+
+      ALLOCATE(HQ(sz))
+
+      do j=1,sz
+!        HQ=H*Q(os+j)
+         call PRODHV_ALS_alg(Q(os+j),HQ(j),H,0,0.d0,nitn,lm)
 !$omp parallel
-!$omp do private(i,j)
-      do i=1,nbloc
-!        HQ=H*Q(i)
-         call PRODHV_ALS_alg(Q(i),HQ(i),H,0,0.d0,nitn,lm)
-         do j=i,nbloc
-!           QHQ(i,j)=<Q(j),H(Q(i))>
-            QHQ(i,j)=PRODVV(Q(j),HQ(i))
+!$omp do private(i)
+         do i=1,os+j
+!           QHQ(i,j)=<Q(i),H(Q(os+j))>
+            QHQ(i,os+j)=PRODVV(Q(i),HQ(j))
          enddo
-         call FlushCP(HQ(i))
-      enddo
 !$omp enddo
 !$omp end parallel
+      enddo
 
       DEALLOCATE(HQ)
 
-      end subroutine GetQHQ3
+      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
+      mvecs(:)=0
+      do j=1,nbloc
+         i=mod(j-1,mpinodes)+1
+         mvecs(i)=mvecs(i)+nbloc
+      enddo
+      moffs(1)=0
+      do i=2,mpinodes
+         moffs(i)=moffs(i-1)+mvecs(i-1)
+      enddo
+
+!     Gather the columns from all processors
+      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
+           QHQ,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
+
+      DEALLOCATE(mvecs,moffs)
+
+      end subroutine GetQHQ_intw
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -571,31 +435,42 @@
       implicit none
       TYPE (CP), INTENT(IN) :: Q(:)
       real*8, intent(inout) :: S(:,:)
-      integer, allocatable  :: ijc(:,:)
-      integer :: i,j,ij,nij,nbloc
+      integer, allocatable   :: mvecs(:),moffs(:)
+      integer :: i,j,nbloc,sz,os,ierr
 
       nbloc=SIZE(Q)
-      nij=nbloc*(nbloc+1)/2
-
-      ALLOCATE(ijc(nij,2))
-      ij=0
-      DO i=1,nbloc
-         DO j=i,nbloc
-            ij=ij+1
-            ijc(ij,:)=(/i,j/)
-         ENDDO
-      ENDDO
-
       S=0.d0
+
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc,sz,os)
+
+      do j=1,sz
 !$omp parallel
-!$omp do private(ij)
-      DO ij=1,nij
-         S(ijc(ij,1),ijc(ij,2))=PRODVV(Q(ijc(ij,2)),Q(ijc(ij,1)))
-      ENDDO
+!$omp do private(i)
+         do i=1,os+j
+!           S(i,os+j)=<Q(i),Q(os+j)>
+            S(i,os+j)=PRODVV(Q(i),Q(os+j))
+         enddo
 !$omp enddo
 !$omp end parallel
+      enddo
 
-      DEALLOCATE(ijc)
+      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
+      mvecs(:)=0
+      do j=1,nbloc
+         i=mod(j-1,mpinodes)+1
+         mvecs(i)=mvecs(i)+nbloc
+      enddo
+      moffs(1)=0
+      do i=2,mpinodes
+         moffs(i)=moffs(i-1)+mvecs(i-1)
+      enddo
+
+!     Gather the columns from all processors
+      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
+           S,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
+
+      DEALLOCATE(mvecs,moffs)
 
       end subroutine GetOverlaps
 
@@ -610,46 +485,39 @@
       implicit none
       TYPE (CP), INTENT(IN)  :: H
       TYPE (CP), INTENT(IN)  :: Q(:)
-      integer, intent(in)   :: nconv
-      real*8, intent(inout) :: QHQd(:)
-      integer :: i,nbloc
+      integer, intent(in)    :: nconv
+      real*8, intent(inout)  :: QHQd(:)
+      integer, allocatable   :: mvecs(:),moffs(:)
+      integer :: b,i,nbloc,sz,os,ierr
 
       nbloc=SIZE(Q)
 
-!$omp parallel
-!$omp do private(i)
-      do i=nconv+1,nbloc
-         QHQd(i)=RayleighQuotient2(Q(i),H)   
+!     Shifts, number of (unconverged) vectors for MPI
+      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
+      mvecs(:)=0
+      do b=1,nbloc-nconv
+         i=mod(b-1,mpinodes)+1
+         mvecs(i)=mvecs(i)+1
       enddo
-!$omp enddo
-!$omp end parallel
+      moffs(1)=nconv
+      do i=2,mpinodes
+         moffs(i)=moffs(i-1)+mvecs(i-1)
+      enddo
+
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc-nconv,sz,os)
+      os=os+nconv
+
+      do i=1,sz
+         QHQd(os+i)=RayleighQuotient2(Q(os+i),H)   
+      enddo
+
+      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
+              QHQd,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
+
+      DEALLOCATE(mvecs,moffs)
 
       end subroutine GetQHQdiag
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine GetOverlapQ1Q2(Q1,Q2,S)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Computes Q^T Q for a block of vectors
-
-      implicit none
-      TYPE (CP), INTENT(IN) :: Q1(:),Q2(:)
-      real*8, intent(inout) :: S(:,:)
-      integer :: i,j,n1,n2
-
-      n1=SIZE(Q1)
-      n2=SIZE(Q2)
-
-      S=0.d0
-      do i=1,n1
-         do j=1,n2
-!           S(i,j)=<Q1(i),Q2(j)>
-            S(i,j)=PRODVV(Q1(i),Q2(j))
-         enddo
-      enddo
-
-      end subroutine GetOverlapQ1Q2
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -663,7 +531,7 @@
       TYPE (CP), INTENT(INOUT) :: Q(:)
       TYPE (CP), ALLOCATABLE   :: Qold(:)
       real*8, intent(in) :: QHQ(:,:)
-      integer :: i,nbloc
+      integer :: i,nbloc,sz,os
 
       nbloc=SIZE(Q)
 
@@ -678,24 +546,29 @@
 !$omp enddo
 !$omp end parallel
 
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc,sz,os)
+
 !$omp parallel
 !$omp do private(i)
-      DO i=1,nbloc
-         call GetEigenFxn(Q(i),Qold,QHQ,i)
+      DO i=1,sz
+         call GetEigenFxn(Q(i+os),Qold,QHQ,i+os)
 !        reduce and normalize Q(i)
-         call reduc(Q(i))
-         call NORMALIZE(Q(i))
+         call reduc(Q(i+os))
+         call NORMALIZE(Q(i+os))
       ENDDO
 !$omp enddo
 !$omp end parallel
 
       DEALLOCATE(Qold)
 
+      call MPI_Sync_CP_block(Q)
+
       end subroutine UpdateVecs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine UpdateVecs2(Q,QHQ,nitn,lm)
+      subroutine UpdateVecs_intw(Q,QHQ,nitn,lm)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Replaces a block of vectors Q with the eigenvectors whose coefficients
@@ -706,7 +579,7 @@
       TYPE (CP), ALLOCATABLE   :: Qold(:)
       real*8, intent(in)  :: QHQ(:,:)
       integer, intent(in) :: nitn,lm
-      integer :: i,nbloc
+      integer :: i,nbloc,sz,os
 
       nbloc=SIZE(Q)
 
@@ -721,18 +594,23 @@
 !$omp enddo
 !$omp end parallel
 
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc,sz,os)
+
 !     Build and reduce the eigenfunction
 !$omp parallel
 !$omp do private(i)
-      DO i=1,nbloc
-         call ALS_SUMLCVEC_alg(Q(i),Qold,QHQ(:,i),nitn,lm)
+      DO i=1,sz
+         call ALS_SUMLCVEC_alg(Q(os+i),Qold,QHQ(:,os+i),nitn,lm)
       ENDDO
 !$omp enddo
 !$omp end parallel
 
       DEALLOCATE(Qold)
 
-      end subroutine UpdateVecs2
+      call MPI_Sync_CP_block(Q)
+
+      end subroutine UpdateVecs_intw
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

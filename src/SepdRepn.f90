@@ -843,6 +843,144 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      SUBROUTINE MPI_Sync_CP_block(Q)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+!     MPI CP-format block of vectors
+
+      IMPLICIT NONE
+      TYPE (CP), INTENT(INOUT) :: Q(:)
+      integer, allocatable :: dims(:,:),ranks(:),starts(:),widths(:)
+      integer, allocatable :: mvecs(:),moffs(:),mstarts(:),mwidths(:)
+      logical, allocatable :: syms(:)
+      real*8, allocatable  :: cpblock(:)
+      integer :: nbloc,ndofs,termlen
+      integer :: p,b,i,j,ierr,totlen,ist,jst,nbas
+
+      nbloc=SIZE(Q)
+
+!     Number of CP-vecs on each MPI rank, and mpi offsets
+      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
+      mvecs(:)=0
+      do b=1,nbloc
+         i=mod(b-1,mpinodes)+1
+         mvecs(i)=mvecs(i)+1
+      enddo
+      moffs(1)=0
+      do p=2,mpinodes
+         moffs(p)=moffs(p-1)+mvecs(p-1)
+      enddo
+
+!     Array of CP-ranks depends on the CP-ranks of vectors distributed
+!     over different MPI-ranks
+      ALLOCATE(ranks(nbloc))
+      ranks(:)=0
+      do i=1,mvecs(mpirank+1)
+         b=moffs(mpirank+1)+i
+         ranks(b)=Q(b)%R()
+      enddo
+
+!     Gather the list of ranks
+      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
+                          ranks,mvecs,moffs,mpi_i4,mpi_comm_wd,ierr)
+
+!     Extract size information from the vecs
+      if (mpirank.eq.0) then
+         ndofs=Q(1)%D()
+      endif
+      call bcast(ndofs)
+
+!     Arrays of rows, cols, sym are same for all vectors in the block 
+      ALLOCATE(dims(ndofs,2),syms(ndofs))
+      if (mpirank.eq.0) then
+         dims(:,1)=Q(1)%rows(:)
+         dims(:,2)=Q(1)%cols(:)
+         syms(:)=Q(1)%sym(:)
+      endif
+      call bcast(dims)
+      call bcast(syms)
+
+      termlen=1 ! Start at 1 for coef
+      do j=1,ndofs
+         termlen=termlen+dims(j,1)*dims(j,2)
+      enddo
+
+!     Compute offsets and widths for CP-vecs in the big array
+      ALLOCATE(starts(nbloc),widths(nbloc))
+      starts(1)=0
+      widths(1)=ranks(1)*termlen
+      do b=2,nbloc
+         starts(b)=starts(b-1)+widths(b-1)
+         widths(b)=ranks(b)*termlen
+      enddo
+      totlen=starts(nbloc)+widths(nbloc)
+
+!     Compute offsets and widths for MPI blocks in the big array
+      ALLOCATE(mstarts(mpinodes),mwidths(mpinodes))
+      mstarts(:)=0
+      do p=1,mpinodes
+         mwidths(p)=0
+         do i=1,mvecs(p)
+            b=moffs(p)+i
+            if (i.eq.1) mstarts(p)=starts(b)
+            mwidths(p)=mwidths(p)+widths(b)
+         enddo
+      enddo
+
+!     Pack the base and coefs into the big array
+      ALLOCATE(cpblock(totlen))
+      cpblock(:)=0.d0
+      do p=1,mvecs(mpirank+1)
+         b=moffs(mpirank+1)+p
+         ist=starts(b)
+!        Copy coefs to big array first
+         cpblock(ist+1:ist+ranks(b))=Q(b)%coef(1:ranks(b))
+         ist=ist+ranks(b)
+!        Copy base to big array
+         jst=0
+         do j=1,ndofs
+            nbas=dims(j,1)*dims(j,2)
+            do i=1,ranks(b)
+               cpblock(ist+1:ist+nbas)=Q(b)%base(jst+1:jst+nbas,i)
+               ist=ist+nbas
+            enddo
+            jst=jst+nbas
+         enddo
+      enddo
+
+!     Sync the big array over all MPI ranks
+      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,cpblock,&
+                          mwidths,mstarts,mpi_r8,mpi_comm_wd,ierr)
+
+!     Reconstruct the block of CP vectors on all MPI ranks
+      do b=1,nbloc
+         call FlushCP(Q(b))
+         Q(b)=NewCP(ranks(b),dims(:,1),dims(:,2),syms)
+
+         ist=starts(b)
+!        Copy coefs from big array first
+         Q(b)%coef(1:ranks(b))=cpblock(ist+1:ist+ranks(b))
+         ist=ist+ranks(b)
+
+!        Copy base to big array
+         jst=0
+         do j=1,ndofs
+            nbas=dims(j,1)*dims(j,2)
+            do i=1,ranks(b)
+               Q(b)%base(jst+1:jst+nbas,i)=cpblock(ist+1:ist+nbas)
+               ist=ist+nbas
+            enddo
+            jst=jst+nbas
+         enddo
+      enddo
+
+      deallocate(dims,syms,cpblock)
+      deallocate(mvecs,moffs,ranks,starts,widths,mstarts,mwidths)
+
+      end subroutine MPI_Sync_CP_block
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine ReplaceVwithW(v,w)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

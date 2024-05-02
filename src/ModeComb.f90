@@ -49,6 +49,7 @@
       call Flush_ModeComb(ML)
 
       MC_SETUP=.FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total mode-combination time       (s)',&
                              mc_time
 
@@ -85,7 +86,7 @@
       TYPE (MLtree) :: ML
       character(len=64) :: inpfile
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(/X,A/)') 'Setting up mode-combination module...'
 
       IF (.not. MC_SETUP) CALL Init_ModeComb
@@ -120,8 +121,8 @@
       IF (.not. MC_SETUP) CALL Init_ModeComb
       CALL CPU_TIME(t1)
 
-!     Read from MPI rank 0
-      rank0 : IF (mpirank.eq.0) THEN
+!     Read from mpi_io_rank
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
 !     For line reading (change if working with a larger system)
       maxndof=1024
@@ -339,7 +340,7 @@
       character(len=64) :: fname,frmt
       integer :: u,il,im
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
       write(fname,'(2A)') TRIM(ADJUSTL(fnm)),'_layers.rst'
 
@@ -393,7 +394,7 @@
 
       call CPU_TIME(t1)
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_prnt_rank) THEN
 
       write(*,'(X,A/)') '** Structure of multilayer CP-format tree **'
       write(*,*) 'Number of DOF    : ',ML%ndof
@@ -458,8 +459,6 @@
       TYPE (MLtree) :: ML
       integer :: il,im,k,nbloc,nsubm,mstart,sum,prod
 
-      rank0: IF (mpirank.eq.0) THEN
-
       DO im=1,ML%nmode(1)
          sum=ML%resort(im)
          IF (sum.lt.1 .or. sum.gt.ML%nmode(1)) &
@@ -473,8 +472,10 @@
 !     Check mode counts
       DO il=2,ML%nlayr
          IF (ML%nmode(il).gt.ML%nmode(il-1)) THEN
-            write(*,*) 'Modes in layer ',il,' : ',ML%nmode(il)
-            write(*,*) 'Modes in layer ',il-1,' : ',ML%nmode(il-1)
+            IF (mpirank.eq.mpi_prnt_rank) THEN
+               write(*,*) 'Modes in layer ',il,' : ',ML%nmode(il)
+               write(*,*) 'Modes in layer ',il-1,' : ',ML%nmode(il-1)
+            ENDIF
             CALL AbortWithError('The number of modes must not&
                  & increase with increasing layer number')
          ENDIF
@@ -487,8 +488,10 @@
             sum=sum+ML%modcomb(il,im)
          ENDDO
          IF (sum.ne.ML%nmode(il-1)) THEN
-            write(*,*) '# modes in layer ',il-1,' : ',ML%nmode(il-1)
-            write(*,*) 'Of these, ',sum,' are represented in layer ',il
+            IF (mpirank.eq.mpi_prnt_rank) THEN
+               write(*,*) '# modes in layer ',il-1,' : ',ML%nmode(il-1)
+               write(*,*) 'Of these, ',sum,' are represented in layer ',il
+            ENDIF
             CALL AbortWithError('DOF are not mapped 1:1 into modes')
          ENDIF
       ENDDO
@@ -497,8 +500,10 @@
       DO il=1,ML%nlayr
          DO im=1,ML%nmode(il)
             IF (ML%gdim(il,im).lt.1) THEN
-               write(*,*) 'Layer: ',il,' Mode: ',im, ', nbasis: ',&
-               ML%gdim(il,im)
+               IF (mpirank.eq.mpi_prnt_rank) THEN
+                  write(*,*) 'Layer: ',il,' Mode: ',im, ', nbasis: ',&
+                  ML%gdim(il,im)
+               ENDIF
                CALL AbortWithError('Must have >=1 basis fxn per mode')
             ENDIF
             IF (il.gt.1) THEN
@@ -511,16 +516,16 @@
                   IF (nbloc.lt.prod) EXIT
                ENDDO
                IF (nbloc.gt.prod) THEN
-                  write(*,*) 'Layer: ',il,' Mode: ',im,&
-                  ' # functions desired: ',nbloc,&
-                  ' product basis size: ',prod
+                  IF (mpirank.eq.mpi_prnt_rank) THEN
+                     write(*,*) 'Layer: ',il,' Mode: ',im,&
+                     ' # functions desired: ',nbloc,&
+                     ' product basis size: ',prod
+                  ENDIF
                   CALL AbortWithError('Product basis exceeded')
                ENDIF
             ENDIF
          ENDDO
       ENDDO
-
-      ENDIF rank0
 
       end subroutine ValidateModeDat
 
@@ -534,10 +539,10 @@
       implicit none
       TYPE (MLtree) :: ML
 
-      call bcast(ML%nlayr)
-      call bcast(ML%ndof)
+      call bcast(ML%nlayr,mpi_io_rank)
+      call bcast(ML%ndof,mpi_io_rank)
 
-      IF (mpirank.ne.0) THEN
+      IF (mpirank.ne.mpi_io_rank) THEN
          ALLOCATE(ML%nmode(ML%nlayr),ML%resort(ML%ndof))
          ALLOCATE(ML%modcomb(ML%nlayr,ML%ndof),ML%gdim(ML%nlayr,ML%ndof))
          ALLOCATE(ML%modstart(ML%nlayr,ML%ndof))
@@ -545,12 +550,12 @@
       ENDIF
 
 !     Broadcast arrays
-      call bcast(ML%nmode)
-      call bcast(ML%resort)
-      call bcast(ML%modcomb)
-      call bcast(ML%gdim)
-      call bcast(ML%modstart)
-      call bcast(ML%whichmod)
+      call bcast(ML%nmode,mpi_io_rank)
+      call bcast(ML%resort,mpi_io_rank)
+      call bcast(ML%modcomb,mpi_io_rank)
+      call bcast(ML%gdim,mpi_io_rank)
+      call bcast(ML%modstart,mpi_io_rank)
+      call bcast(ML%whichmod,mpi_io_rank)
 
       end subroutine BcastModeDat
 

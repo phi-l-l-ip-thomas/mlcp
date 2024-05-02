@@ -142,7 +142,7 @@
       integer, allocatable :: nbas(:)
       integer :: i,j,k,betalen
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A)') "--> Setting up Dummy Hamiltonian"
 
 !     Allocate configs. This PES has two linear terms which cancel one
@@ -157,7 +157,7 @@
       V(1)%coef(2)=-1.d0
       DEALLOCATE(nbas)
 
-      IF (mpirank.eq.0) THEN
+      IF (mpirank.eq.mpi_prnt_rank) THEN
          write(*,'(/X,A,I0/)') 'Potential constants, order: ',1
          call PrintConfigs(V(1))
          write(*,*)
@@ -179,7 +179,7 @@
       real*8, parameter    :: beta=0.1 ! Bilinear coupling constant
       integer :: i,j,k,betalen
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A)') "--> Setting up Coupled Oscillator Hamiltonian"
 
 !     Size of anharmonic term array
@@ -216,7 +216,7 @@
          enddo
       enddo
 
-      IF (mpirank.eq.0) THEN
+      IF (mpirank.eq.mpi_prnt_rank) THEN
          write(*,'(/X,A,I0/)') 'Potential constants, order: ',2
          call PrintConfigs(V(2))
          write(*,*)
@@ -240,7 +240,7 @@
       integer :: i,k
       real*8  :: beta2
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A)') "--> Setting up Henon-Heiles Hamiltonian"
 
 !     Potential constants (same for all DOF)
@@ -303,7 +303,7 @@
          k=k+1
       enddo
 
-      IF (mpirank.eq.0) THEN
+      IF (mpirank.eq.mpi_prnt_rank) THEN
          DO i=2,4
             write(*,'(/X,A,I0/)') 'Potential constants, order: ',i
             call PrintConfigs(V(i))
@@ -332,7 +332,7 @@
       character(LEN=20) :: fname
       character*64 :: frmt
 
-      IF (mpirank.eq.0) THEN
+      IF (mpirank.eq.mpi_prnt_rank) THEN
          write(*,'(/X,A,A/)')   '--> Reading force field for: ',id
          write(*,'(X,A,X,I0)') 'Max nr of products per term:',ncp
       ENDIF
@@ -341,46 +341,48 @@
       ncoef(:)=0
       ndof=0
 
-      IF (mpirank.eq.0) THEN
+      IF (mpirank.eq.mpi_io_rank) THEN
 
-!     Count the number of potential constants and DOF
-      DO k=1,ncp
+!        Count the number of potential constants and DOF
+         DO k=1,ncp
 
-!        Look for potential file with k coupled DOFs
-         write(fname,'(A5,I0,A5,A4)') 'pes/f',k,id,'.dat'
-         u=LookForFreeUnit()
-         open(u,status='old',file=fname,IOSTAT=InpStat)
+!           Look for potential file with k coupled DOFs
+            write(fname,'(A5,I0,A5,A4)') 'pes/f',k,id,'.dat'
+            u=LookForFreeUnit()
+            open(u,status='old',file=fname,IOSTAT=InpStat)
 
-!        Next k if file cannot be found
-         IF (InpStat /= 0) CYCLE
+!           Next k if file cannot be found
+            IF (InpStat /= 0) CYCLE
 
-!        Count the successful potential term reads
-         ALLOCATE(qns(k))
-         DO
-            read(u,*,IOSTAT=ReadStat) (qns(j),j=1,k),ftmp
-            IF (ReadStat /= 0) EXIT
-            ncoef(k)=ncoef(k)+1
-!           For ndof to be determined correctly there must be at least 1
-!           potential constant for the last DOF (should be always true)
-            ndof=MAX(ndof,MAXVAL(qns))
+!           Count the successful potential term reads
+            ALLOCATE(qns(k))
+            DO
+               read(u,*,IOSTAT=ReadStat) (qns(j),j=1,k),ftmp
+               IF (ReadStat /= 0) EXIT
+               ncoef(k)=ncoef(k)+1
+!              For ndof to be determined correctly there must be at least 1
+!              potential constant for the last DOF (should be always true)
+               ndof=MAX(ndof,MAXVAL(qns))
+            ENDDO
+            DEALLOCATE(qns)
+            close(u)
          ENDDO
-         DEALLOCATE(qns)
-         close(u)
-
-         IF (ncoef(k).eq.0) CYCLE
-
-         write(*,'(X,2(A,X,I0,X))') &
-         'Potential constants of order',k,&
-         'read from file :',ncoef(k)
-      ENDDO
-
-      write(*,'(X,A,X,I0)') &
-            'Number of DOF detected in force constant files:',ndof
 
       ENDIF
 
-      call bcast(ncoef)
-      call bcast(ndof)
+      call bcast(ncoef,mpi_io_rank)
+      call bcast(ndof,mpi_io_rank)
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+          DO k=1,ncp
+             IF (ncoef(k).eq.0) CYCLE
+             write(*,'(X,2(A,X,I0,X))') &
+            'Potential constants of order',k,&
+            'read from file :',ncoef(k)
+          ENDDO
+          write(*,'(X,A,X,I0)') &
+         'Number of DOF detected in force constant files:',ndof
+      ENDIF
 
 !     Read potential constants and store as configurations
       DO k=1,ncp
@@ -393,16 +395,11 @@
 
          IF (ncoef(k).lt.1) CYCLE
 
-         IF (mpirank.eq.0) THEN
-
-            write(*,'(/X,2A,I0/)') 'Potential constants (.dat file',&
-                                   ' ordering), order: ',k
+         IF (mpirank.eq.mpi_io_rank) THEN
 
             write(fname,'(A5,I0,A5,A4)') 'pes/f',k,id,'.dat'
             u=LookForFreeUnit()
             open(u,status='old',file=fname)
-
-            write(frmt,'(A,I0,A)') '(X,',k,'(I3,X),f26.12)'
 
             DO i=1,ncoef(k)
                read(u,*) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
@@ -417,14 +414,28 @@
                   deallocate(modpowr)
                ENDIF
 
-               write(*,frmt) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
             ENDDO
             close(u)
          ENDIF ! rnk0
 
-         call bcast(W(k)%qns)
-         call bcast(W(k)%coef)
+         call bcast(W(k)%qns,mpi_io_rank)
+         call bcast(W(k)%coef,mpi_io_rank)
       ENDDO
+
+!     Print out potential constants
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+
+         DO k=1,ncp
+            IF (ncoef(k).lt.1) CYCLE
+            write(*,'(/X,2A,I0/)') 'Potential constants (.dat file',&
+                                   ' ordering), order: ',k
+            write(frmt,'(A,I0,A)') '(X,',k,'(I3,X),f26.12)'
+            DO i=1,ncoef(k)
+               write(*,frmt) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
+            ENDDO
+         ENDDO
+
+      ENDIF
 
       end subroutine ReadFFHamiltonian
 
@@ -589,7 +600,7 @@
 
       IF (morsify) THEN
 
-         IF (mpirank.eq.0) THEN
+         IF (mpirank.eq.mpi_prnt_rank) THEN
             write(*,'(/X,A,A/)') '--> The PES will be transformed ',&
                  'into asymptotically-decaying coordinates'
             write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&

@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
 
       implicit none
       real*8, private  :: eigen_time=0.d0
@@ -50,6 +51,7 @@
       IF (.NOT. EIGEN_SETUP) call InitializeEigen()
 
       EIGEN_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total eigenvalue calculation time (s)',&
                             eigen_time
 

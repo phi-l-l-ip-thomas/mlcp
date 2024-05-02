@@ -26,6 +26,8 @@
       integer, parameter :: mpi_ch=MPI_CHARACTER
       integer, parameter :: mpi_lg=MPI_LOGICAL
       integer, parameter :: mpi_sm=MPI_SUM
+      integer, parameter :: mpi_prnt_rank = 0
+      integer, parameter :: mpi_io_rank = 0
       integer :: mpirank, mpinodes, mpierr
 
       CONTAINS
@@ -496,6 +498,28 @@
       call sync_mpi
 
       end subroutine bcast_r8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine calc_mpi_partition(b,sz,os)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Helper function for computing size and offset of b objects partitioned
+! over MPI ranks
+
+      implicit none
+      integer, intent(in)  :: b
+      integer, intent(out) :: sz,os
+      integer :: bp,mp
+
+      bp=b/mpinodes
+      mp=mod(b,mpinodes)
+
+      sz=bp
+      if (mpirank.lt.mp) sz=sz+1
+      os=mpirank*bp+min(mpirank,mp)
+
+      end subroutine calc_mpi_partition
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

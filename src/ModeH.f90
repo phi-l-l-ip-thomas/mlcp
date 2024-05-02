@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE LINALG
       USE SEPDREPN
       USE HAMILSETUP
@@ -48,6 +49,7 @@
       IF (.NOT. INIT_SETUP) call InitializeInitModule()
 
       INIT_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total H initialization time       (s)',&
                              init_time
 
@@ -91,7 +93,10 @@
       ALLOCATE(nbas(nsubm))
       nbas(1:nsubm)=ML%gdim(il-1,mst:mst+nsubm-1)
 
-      IF (nsubm.gt.1) write(*,'(3X,A)') 'Building mode Hamiltonian...'
+      IF (nsubm.gt.1) THEN
+         IF (mpirank.eq.mpi_prnt_rank) &
+         write(*,'(3X,A)') 'Building mode Hamiltonian...'
+      ENDIF
 
 !     Get the list of primitive operator IDs for the sub-modes
       call GetPrimOpList(il,im,poplist,popct,Ham,ML)
@@ -155,18 +160,23 @@
       oldrank=SIZE(opcp,1)
       call condenseH(opcp)
 
+
       IF (nsubm.gt.1) THEN
-         write(*,'(/3X,A)') '*** ModeH memory usage ***'
-         write(*,'(7X,2(A,I0),A)') 'Hamiltonian rank reduced from ',&
-               oldrank,' to ',SIZE(opcp,1),' by sorting'
 
 !        Calculate memory requirement
          Hstor=0.d0
          DO i=1,nsubm
             Hstor=Hstor+nbas(i)*(2*nbas(i)+1) !!! This is in SVD repn
          ENDDO
-         write(*,'(7X,A,f12.6,A)') 'H memory (sorted)   : ',&
+
+         IF (mpirank.eq.mpi_prnt_rank) THEN
+            write(*,'(/3X,A)') '*** ModeH memory usage ***'
+            write(*,'(7X,2(A,I0),A)') 'Hamiltonian rank reduced from ',&
+                  oldrank,' to ',SIZE(opcp,1),' by sorting'
+            write(*,'(7X,A,f12.6,A)') 'H memory (sorted)   : ',&
                Hstor*SIZE(opcp,1)/2**27,' GB'
+         ENDIF
+
       ENDIF
 
       IF (cpp%ncycle.gt.0) THEN
@@ -190,9 +200,9 @@
             call reduc(Hnew,H)
             call ReplaceVwithW(H,Hnew)
          ENDIF
-!!!
 
-         IF (nsubm.gt.1 .and. SIZE(H%coef).lt.oldrank) THEN
+         IF (nsubm.gt.1 .and. SIZE(H%coef).lt.oldrank .and. &
+            mpirank.eq.mpi_prnt_rank) THEN
             write(*,'(7X,2(A,I0),A)') 'Hamiltonian rank reduced from ',&
                   oldrank,' to ',SIZE(H%coef),' by reduc()'
             write(*,'(7X,A,f12.6,A)') 'H memory (reduced)  : ',&
@@ -207,7 +217,8 @@
          oldrank=SIZE(opcp,1)
          IF (cpp%hrank.gt.0) oldrank=MIN(oldrank,cpp%hrank)
          H=NewCP(oldrank,nbas,.FALSE.)
-         IF (nsubm.gt.1 .and. SIZE(H%coef).lt.SIZE(opcp,1)) THEN
+         IF (nsubm.gt.1 .and. SIZE(H%coef).lt.SIZE(opcp,1) .and. &
+            mpirank.eq.mpi_prnt_rank) THEN
             write(*,'(7X,2(A,I0),A)') 'Hamiltonian rank reduced from ',&
                   SIZE(opcp,1),' to ',SIZE(H%coef),' by reduc()'
             write(*,'(7X,A,f12.6,A)') 'H memory (reduced)  : ',&
@@ -215,16 +226,6 @@
          ENDIF
 
       ENDIF
-
-!      write(*,*)
-!      DO i=1,SIZE(opcp,1)
-!         DO j=1,nsubm
-!            write(*,('(A)')) 'Term DOF Rnk'
-!            write(*,'(3I4)') i,j,SIZE(Hc(i,j)%coef)
-!            call PrintCPvec(Hc(i,j))
-!         ENDDO
-!      ENDDO
-!      call AbortWithError('Done generating the Hamiltonian of doom!!!')
 
       DEALLOCATE(poplist,popct,nbas,opcp)
 

@@ -53,7 +53,7 @@
       real*8, allocatable  :: alpha(:),omega(:)
       real*8  :: t1,t2
 
-      if (mpirank.eq.0) &
+      if (mpirank.eq.mpi_prnt_rank) &
       write(*,'(/X,A/)') 'Hamiltonian setup...'
 
       call CPU_TIME(t1)
@@ -118,7 +118,7 @@
       IF (ALLOCATED(H%ndof)) DEALLOCATE(H%ndof)
       IF (ALLOCATED(H%dofs)) DEALLOCATE(H%dofs)
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total Hamiltonian generation time (s)',&
                              Ham_time
 
@@ -136,7 +136,7 @@
       integer      :: u,il,nlayr,i,j,k,maxdof,poplen
       character*64 :: frmt
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_prnt_rank) THEN
 !      u = LookForFreeUnit()
 !      open(u,status='unknown',file='Hamiltonian.out')
 
@@ -223,7 +223,7 @@
       integer :: il,mil,nm,nlayr,thismode
       logical :: unique
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(/X,A)') "--> Sorting Hamiltonian terms into layers"
 
       nlayr=ML%nlayr
@@ -535,7 +535,7 @@
       integer :: il,pass,i,j,k,l,opct,maxops
       logical :: unique
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A)') "--> Determining unique primitive operators"
 
 !     Find terms for bottom layer only
@@ -614,7 +614,7 @@
       integer :: i,j,k,colsi,symi,dofi,symj,dofj
       real*8  :: fac
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A)') "--> Solving layer 1 Hamiltonian..."
 
 !     Loop over terms in Hamiltonian
@@ -690,7 +690,7 @@
       TYPE (MLtree), intent(in)      :: ML
       integer :: im,j
 
-      IF (mpirank.eq.0) THEN
+      IF (mpirank.eq.mpi_prnt_rank) THEN
          DO im=1,ML%nmode(1)
             write(*,'(/,X,A,I0,A,I0,/)') 'LAYER-MODE: ',1,'-',im
             write(*,*) 'Eigenvalues   : ',0,&

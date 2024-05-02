@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE SEPDREPN
       USE MODVECVEC
       USE LINALG
@@ -42,6 +43,7 @@
 
 !     Set up the module if it was not set up already
       ALSUTILS_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total reduction time (ALSUTILS)   (s)',&
                             alsutils_time
 

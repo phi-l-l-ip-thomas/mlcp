@@ -35,13 +35,13 @@
       TYPE (CPpar) :: cpp
       character(len=64) :: inpfile
 
-      IF (mpirank.eq.0) &
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(/X,A/)') 'Reading input file (CP.inp)...'
 
       inpfile='CP.inp'
       CALL ReadMLCPInputs(cpp,inpfile)
-      CALL PrintMLCPInputs(cpp)
       CALL BcastMLCPInputs(cpp)
+      CALL PrintMLCPInputs(cpp)
 
       end subroutine StartInputCP
 
@@ -57,8 +57,8 @@
       character(len=64), intent(in) :: fnm
       integer      :: i,u,InpStat
 
-!     Read from MPI rank 0
-      rank0 : IF (mpirank.eq.0) THEN
+!     Read from mpi_io_rank 
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
 !     Open input file
       u = LookForFreeUnit()
@@ -143,7 +143,7 @@
       character(len=64) :: fnm
       integer :: u,j
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
       write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
 
@@ -222,7 +222,7 @@
       TYPE (CPpar),INTENT(IN) :: cpp
       integer :: i
 
-      rank0 : IF (mpirank.eq.0) THEN
+      rank0 : IF (mpirank.eq.mpi_prnt_rank) THEN
 
       write(*,'(X,A/)') '********** Input parameters read: ***********'
       write(*,'(X,A,2X,A5)') 'The Hamiltonian will be set up for    :',&
@@ -279,25 +279,25 @@
       TYPE (CPpar) :: cpp
 
 !     Broadcast variables
-      call bcast(cpp%ncycle)
-      call bcast(cpp%npow)
-      call bcast(cpp%lowmem)
-      call bcast(cpp%truncation)
-      call bcast(cpp%ncpu)
-      call bcast(cpp%psirank)
-      call bcast(cpp%hrank)
-      call bcast(cpp%psinals)
-      call bcast(cpp%hnals)
-      call bcast(cpp%rs)
-      call bcast(cpp%solvtol)
-      call bcast(cpp%update)
-      call bcast(cpp%dorestart)
-      call bcast(cpp%opt)
-      call bcast(cpp%resfile)
-      call bcast(cpp%system)
-      call bcast(cpp%solver)
-      call bcast(cpp%red2D)
-      call bcast(cpp%redND)
+      call bcast(cpp%ncycle,mpi_io_rank)
+      call bcast(cpp%npow,mpi_io_rank)
+      call bcast(cpp%lowmem,mpi_io_rank)
+      call bcast(cpp%truncation,mpi_io_rank)
+      call bcast(cpp%ncpu,mpi_io_rank)
+      call bcast(cpp%psirank,mpi_io_rank)
+      call bcast(cpp%hrank,mpi_io_rank)
+      call bcast(cpp%psinals,mpi_io_rank)
+      call bcast(cpp%hnals,mpi_io_rank)
+      call bcast(cpp%rs,mpi_io_rank)
+      call bcast(cpp%solvtol,mpi_io_rank)
+      call bcast(cpp%update,mpi_io_rank)
+      call bcast(cpp%dorestart,mpi_io_rank)
+      call bcast(cpp%opt,mpi_io_rank)
+      call bcast(cpp%resfile,mpi_io_rank)
+      call bcast(cpp%system,mpi_io_rank)
+      call bcast(cpp%solver,mpi_io_rank)
+      call bcast(cpp%red2D,mpi_io_rank)
+      call bcast(cpp%redND,mpi_io_rank)
 
       end subroutine BcastMLCPInputs
 

@@ -58,6 +58,7 @@ COBJS = \
 	${OBJDIR}/ErrorTrap.o \
 	${OBJDIR}/Utils.o \
 	${OBJDIR}/MyMPI.o \
+	${OBJDIR}/Random.o \
 	${OBJDIR}/DSORTPLUSDEP.o \
 	${OBJDIR}/ChebLib.o \
 	${OBJDIR}/LinAlg.o \
@@ -168,7 +169,7 @@ COMMONDEP1 = ${OBJDIR}/DSORTPLUSDEP.o ${OBJDIR}/ErrorTrap.o \
              ${OBJDIR}/Utils.o ${OBJDIR}/MyMPI.o \
              ${OBJDIR}/ChebLib.o Makefile
 
-COMMONDEP2 = ${OBJDIR}/LinAlg.o ${OBJDIR}/Munkres.o \
+COMMONDEP2 = ${OBJDIR}/random.o ${OBJDIR}/LinAlg.o ${OBJDIR}/Munkres.o \
 	     ${OBJDIR}/InputCP.o ${OBJDIR}/InputCS.o ${OBJDIR}/ModeComb.o \
 	     ${OBJDIR}/SepdRepn.o ${OBJDIR}/CPConfig.o \
 	     ${OBJDIR}/MODVECVECML.o ${OBJDIR}/CPMM.o \
@@ -190,6 +191,9 @@ ${OBJDIR}/MyMPI.o        : ${SRCDIR}/MyMPI.f90 ${OBJDIR}/ErrorTrap.o Makefile
 
 # Chebyshev library
 ${OBJDIR}/ChebLib.o      : ${SRCDIR}/ChebLib.f90 ${OBJDIR}/ErrorTrap.o Makefile
+
+# Random initialization
+${OBJDIR}/random.o       : ${SRCDIR}/Random.f90 ${COMMONDEP1}
 
 # Linear algebra wrappers
 ${OBJDIR}/LinAlg.o       : ${SRCDIR}/LinAlg.f90 ${COMMONDEP1}

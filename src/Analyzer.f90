@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE MODECOMB
       USE SEPDREPN
       USE HAMILSETUP
@@ -45,6 +46,7 @@
       IF (.NOT. ANAL_SETUP) call InitializeAnalModule()
 
       ANAL_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total wave-function analysis time (s)',&
                              anal_time
 
@@ -165,16 +167,18 @@
 
       call CPU_TIME(t1)
 
-      write(*,'(/X,A,ES11.4,A,I0,A/)') &
-            'Eigenvectors: configurations with |c|^2 larger than : ',&
-             printtol,' x largest coef, or largest ',ncoefmax,' coefs'
-
 !     Print mode numbers
       mst=firstmode(il,1,im,ML)
       mfi=lastmode(il,1,im,ML)
       nagn=mfi-mst+1
-      write(frmt,*) '(A,X,',nagn,'(I2,X))'
-      write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi)
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         write(*,'(/X,A,ES11.4,A,I0,A/)') &
+         'Eigenvectors: configurations with |c|^2 larger than : ',&
+         printtol,' x largest coef, or largest ',ncoefmax,' coefs'
+         write(frmt,*) '(A,X,',nagn,'(I2,X))'
+         write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi)
+      ENDIF
 
       DO i=1,nev
 !        Get the list of dominant configurations for each eigenvalue
@@ -182,10 +186,12 @@
 
 !        Get and print the full assignment of the largest coefficient
          call GetFullAssignment(il,im,Ham,ML,v%qns(1,:),qns)
-         write(frmt,*) '(I4,A,',3*nagn+1,'X,2(f19.12,X))'
-         write(*,frmt) i,')',eigv(i),eigv(i)-eigv(1)
-         write(frmt,'(A,I0,A)') '(6X,',nagn,'(I2,X),4X,f6.3)'
-         write(*,frmt) (qns(k)-1,k=1,nagn),v%coef(1)**2
+         IF (mpirank.eq.mpi_prnt_rank) THEN
+            write(frmt,*) '(I4,A,',3*nagn+1,'X,2(f19.12,X))'
+            write(*,frmt) i,')',eigv(i),eigv(i)-eigv(1)
+            write(frmt,'(A,I0,A)') '(6X,',nagn,'(I2,X),4X,f6.3)'
+            write(*,frmt) (qns(k)-1,k=1,nagn),v%coef(1)**2
+         ENDIF
          DEALLOCATE(qns)
 
 !        Print other configurations if the coefficients are large enough
@@ -194,7 +200,9 @@
             IF (v%coef(j)**2.gt.printtol*v%coef(1)**2) THEN
                ncoef=ncoef+1
                call GetFullAssignment(il,im,Ham,ML,v%qns(j,:),qns)
-               write(*,frmt) (qns(k)-1,k=1,nagn),v%coef(j)**2
+               IF (mpirank.eq.mpi_prnt_rank) &
+                  write(*,frmt) (qns(k)-1,k=1,nagn),v%coef(j)**2
+               DEALLOCATE(qns)
                IF (ncoef.eq.ncoefmax) EXIT
             ENDIF
          ENDDO
@@ -847,16 +855,18 @@
 
       call CPU_TIME(t1)
 
-      write(*,'(/X,2A/)') 'Eigenvectors, assignments based on ',&
-                          'rank-1 approximation :'
-
 !     Print mode numbers
       mst=firstmode(il,1,im,ML)
       mfi=lastmode(il,1,im,ML)
       nagn=mfi-mst+1
-      write(frmt,*) '(A,X,',nagn,'(I2,X),5X,A,14X,A,11X,A,5X,A)'
-      write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi),'Energy',&
-                    'E-E0','Assignment','delta'
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         write(*,'(/X,2A/)') 'Eigenvectors, assignments based on ',&
+                             'rank-1 approximation :'
+         write(frmt,*) '(A,X,',nagn,'(I2,X),5X,A,14X,A,11X,A,5X,A)'
+         write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi),'Energy',&
+                       'E-E0','Assignment','delta'
+      ENDIF
 
       DO i=1,nev
 !        Get the full assignment
@@ -885,17 +895,19 @@
             labl='    '
          ENDIF
 
-         IF (nexc.ne.1 .or. iexc.ne.2) THEN
-            write(frmt,*) '(I4,A,X,',nagn,&
+         IF (mpirank.eq.mpi_prnt_rank) THEN
+            IF (nexc.ne.1 .or. iexc.ne.2) THEN
+               write(frmt,*) '(I4,A,X,',nagn,&
                           '(I2,X),2(f19.12,X),A,5X,ES11.3)'
-            write(*,frmt) i,')',(qns(j)-1,j=1,nagn),eigv(i),&
-                          eigv(i)-eigv(1),labl,delta(i)
-         ELSE
-            sp=3-int(log10(REAL(ML%resort(mst+jexc-1))))+1
-            write(frmt,*) '(I4,A,X,',nagn,&
+               write(*,frmt) i,')',(qns(j)-1,j=1,nagn),eigv(i),&
+                           eigv(i)-eigv(1),labl,delta(i)
+            ELSE
+               sp=3-int(log10(REAL(ML%resort(mst+jexc-1))))+1
+               write(frmt,*) '(I4,A,X,',nagn,&
                   '(I2,X),2(f19.12,X),A,I0,',sp,'X,ES11.3)'
-            write(*,frmt) i,')',(qns(j)-1,j=1,nagn),eigv(i),&
+               write(*,frmt) i,')',(qns(j)-1,j=1,nagn),eigv(i),&
                     eigv(i)-eigv(1),labl,ML%resort(mst+jexc-1),delta(i)
+            ENDIF
          ENDIF
          DEALLOCATE(qns)
       ENDDO

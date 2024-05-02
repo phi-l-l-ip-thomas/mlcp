@@ -7,6 +7,7 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE MYMPI
       USE INPUTCP
       USE SEPDREPN
       USE HAMILSETUP
@@ -43,6 +44,7 @@
       IF (.NOT. UPDATE_SETUP) call InitializeUpdateModule()
 
       UPDATE_SETUP = .FALSE.
+      IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A,X,f20.3)') 'Total operator update time        (s)',&
                              update_time
 
