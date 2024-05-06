@@ -10,7 +10,7 @@ include ../make.inc
 #FFLAGS=-O3 -!P
 
 #FC=gfortran
-FFLAGS=-O3 -w
+FFLAGS=-O3 -w -fallow-argument-mismatch
 
 #
 # Specify the locations BLASLIB and LAPACK_LIB
