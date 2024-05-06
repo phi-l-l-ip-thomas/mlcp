@@ -20,5 +20,6 @@ make
 
 # Compile the code
 cd ../..
+mkdir obj
 make clean
 make
