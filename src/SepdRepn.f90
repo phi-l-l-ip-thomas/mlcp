@@ -1647,7 +1647,7 @@
       integer :: rk,ndof,ndofv,ndofw,vs,ws
 
       IF (SIZE(v%coef).ne.SIZE(w%coef)) THEN
-         write(*,*) 'Ranks of v,w (',SIZE(v%coef),',',SIZE(v%coef),&
+         write(*,*) 'Ranks of v,w (',SIZE(v%coef),',',SIZE(w%coef),&
                     ') must match'
          call AbortWithError('CPModeJoin(): v,w rank mismatch')
       ENDIF

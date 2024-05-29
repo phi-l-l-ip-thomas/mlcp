@@ -68,6 +68,7 @@ COBJS = \
 	${OBJDIR}/InputCS.o \
 	${OBJDIR}/ModeComb.o \
 	${OBJDIR}/SepdRepn.o \
+	${OBJDIR}/CPr8.o \
 	${OBJDIR}/CPConfig.o \
 	${OBJDIR}/FFPES.o \
 	${OBJDIR}/MODVECVECML.o \
@@ -169,7 +170,7 @@ COMMONDEP1 = ${OBJDIR}/DSORTPLUSDEP.o ${OBJDIR}/ErrorTrap.o \
              ${OBJDIR}/Utils.o ${OBJDIR}/MyMPI.o \
              ${OBJDIR}/ChebLib.o Makefile
 
-COMMONDEP2 = ${OBJDIR}/random.o ${OBJDIR}/LinAlg.o ${OBJDIR}/Munkres.o \
+COMMONDEP2 = ${OBJDIR}/Random.o ${OBJDIR}/LinAlg.o ${OBJDIR}/Munkres.o \
 	     ${OBJDIR}/InputCP.o ${OBJDIR}/InputCS.o ${OBJDIR}/ModeComb.o \
 	     ${OBJDIR}/SepdRepn.o ${OBJDIR}/CPConfig.o \
 	     ${OBJDIR}/MODVECVECML.o ${OBJDIR}/CPMM.o \
@@ -193,7 +194,7 @@ ${OBJDIR}/MyMPI.o        : ${SRCDIR}/MyMPI.f90 ${OBJDIR}/ErrorTrap.o Makefile
 ${OBJDIR}/ChebLib.o      : ${SRCDIR}/ChebLib.f90 ${OBJDIR}/ErrorTrap.o Makefile
 
 # Random initialization
-${OBJDIR}/random.o       : ${SRCDIR}/Random.f90 ${COMMONDEP1}
+${OBJDIR}/Random.o       : ${SRCDIR}/Random.f90 ${COMMONDEP1}
 
 # Linear algebra wrappers
 ${OBJDIR}/LinAlg.o       : ${SRCDIR}/LinAlg.f90 ${COMMONDEP1}
@@ -215,6 +216,9 @@ ${OBJDIR}/ModeComb.o     : ${SRCDIR}/ModeComb.f90 ${COMMONDEP1}
 
 # CP-format types
 ${OBJDIR}/SepdRepn.o     : ${SRCDIR}/SepdRepn.f90 ${COMMONDEP1}
+
+# CP-format types
+${OBJDIR}/CPr8.o         : ${SRCDIR}/CPr8.f90 ${COMMONDEP1}
 
 # CP configuration module
 ${OBJDIR}/CPConfig.o     : ${SRCDIR}/CPConfig.f90 ${OBJDIR}/SepdRepn.o ${COMMONDEP1}
