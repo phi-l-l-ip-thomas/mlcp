@@ -14,18 +14,17 @@
 
       TYPE POINTERMAT8(prec)
          INTEGER, KIND :: prec
-         REAL(kind=prec), POINTER :: mat(:,:) => null()
-         REAL(kind=prec), POINTER :: vec(:) => null()
+         REAL(kind=prec), ALLOCATABLE :: mat(:,:,:)
+         REAL(kind=prec), POINTER :: vec(:,:) => null()
       END TYPE POINTERMAT8
 
       TYPE CP8
-         TYPE (POINTERMAT8(8)), ALLOCATABLE :: data(:,:)
-         REAL*8 , ALLOCATABLE :: base(:,:)
+         TYPE (POINTERMAT8(8)), ALLOCATABLE :: data(:)
+         REAL*8 , ALLOCATABLE :: coef(:)
          INTEGER, ALLOCATABLE :: dims(:,:)
          INTEGER, POINTER :: nbas(:) => null()
          INTEGER, POINTER :: ibas(:) => null(), fbas(:) => null()
          INTEGER, POINTER :: rows(:) => null(), cols(:) => null()
-         REAL*8 , POINTER :: coef(:) => null()
          CONTAINS
             PROCEDURE :: R => GetRank_CP8
             PROCEDURE :: D => GetNdof_CP8
@@ -75,25 +74,21 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function NewPointerMat8(M,row,col) result(P)
+      function NewPointerMat8(rk,row,col) result(P)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Create a 2D array pointing to data in M
 
       implicit none
-      TYPE (POINTERMAT8(8)) :: P
-      real*8, intent(in), target :: M(:)
-      integer, intent(in) :: row,col
+      TYPE (POINTERMAT8(8)), TARGET :: P
+      integer, intent(in) :: rk,row,col
+      integer :: i
 
-!     Error checking
-      if (row*col.ne.SIZE(M)) then
-         write(*,'(4(A,I0))') 'SIZE(M) =',SIZE(m),' must equal row (',&
-         row,') x col(',col,') = ',row*col
-         call AbortWithError('Error in NewPointerMat()')
-      endif
-
-      P%mat(1:row,1:col) => M(1:row*col)
-      P%vec(1:row*col) => M(1:row*col)
+      ALLOCATE(P%mat(row,col,rk))
+!     'vec' points to each row x col portion as a 1D array
+      do i=1,rk
+         P%vec(1:row*col,1:rk) => P%mat(:,:,:)
+      enddo
 
       end function NewPointerMat8
 
@@ -107,7 +102,7 @@
       implicit none
       TYPE (POINTERMAT8(8)) :: P
 
-      P%mat=>null()
+      DEALLOCATE(P%mat)
       P%vec=>null()
 
       end subroutine FlushPointerMat8
@@ -157,34 +152,20 @@
       ENDDO
 
 !     Set arrays containing dimensions
-      ALLOCATE(v%dims(ndof,0:4))
+      ALLOCATE(v%dims(ndof,0:2))
       v%dims(:,0)=rows(:)*cols(:)
       v%dims(:,1)=rows(:)
       v%dims(:,2)=cols(:)
-
-      nrdim=0
-      DO i=1,ndof
-         v%dims(i,3)=nrdim+1
-         nrdim=nrdim+v%dims(i,0)
-         v%dims(i,4)=nrdim
-      ENDDO
-
-      ALLOCATE(v%base(0:nrdim,rk))
 
 !     Assign pointers
       v%nbas(1:ndof) => v%dims(1:ndof,0)
       v%rows(1:ndof) => v%dims(1:ndof,1)
       v%cols(1:ndof) => v%dims(1:ndof,2)
-      v%ibas(1:ndof) => v%dims(1:ndof,3)
-      v%fbas(1:ndof) => v%dims(1:ndof,4)
-      v%coef(1:rk)   => v%base(0,1:rk)
 
-      ALLOCATE(v%data(ndof,rk))
-      DO j=1,rk
-         DO i=1,ndof
-            v%data(i,j)=NewPointerMat8(v%base(v%ibas(i):v%fbas(i),j),&
-                                      v%rows(i),v%cols(i))
-         ENDDO
+!     Allocate the factor matrices
+      ALLOCATE(v%data(ndof),v%coef(rk))
+      DO i=1,ndof
+         v%data(i)=NewPointerMat8(rk,v%rows(i),v%cols(i))
       ENDDO
 
       end function NewGen_CP8
@@ -271,16 +252,14 @@
       ndof=v%D()
 
 !     Dereference pointers
-      DO j=1,rk
-         DO i=1,ndof
-            call FlushPointerMat8(v%data(i,j))
-         ENDDO
+      DO i=1,ndof
+         call FlushPointerMat8(v%data(i))
       ENDDO
 
 !     Deallocate arrays
       IF (ALLOCATED(v%data)) DEALLOCATE(v%data)
       IF (ALLOCATED(v%dims)) DEALLOCATE(v%dims)
-      IF (ALLOCATED(v%base)) DEALLOCATE(v%base)
+      IF (ALLOCATED(v%coef)) DEALLOCATE(v%coef)
 
       end subroutine Flush_CP8
 
@@ -328,7 +307,7 @@
       do j=1,d
          n=v%nbas(j)
          do i=1,n
-            write(*,frmt) j,i,(v%data(j,r)%vec(i),r=1,rk)
+            write(*,frmt) j,i,(v%data(j)%vec(i,r),r=1,rk)
          enddo
       enddo
       write(*,*)
@@ -375,7 +354,7 @@
                n=v%N(j)
                write(frmt,'(A,I0,A)') '(',n,'(X,f14.6))'
                DO i=1,m
-                  write(*,frmt) (v%data(j,r)%mat(i,k),k=1,n)
+                  write(*,frmt) (v%data(j)%mat(i,k,r),k=1,n)
                ENDDO
             ENDDO
             write(*,*)
@@ -396,8 +375,8 @@
       CLASS (CP8), INTENT(IN) :: v
       integer :: rk
 
-      IF (ALLOCATED(v%data)) THEN
-         rk=SIZE(v%data,2)
+      IF (ALLOCATED(v%coef)) THEN
+         rk=SIZE(v%coef)
       ELSE
          rk=0
       ENDIF
@@ -534,7 +513,7 @@
       TYPE (CP8) :: v
 
       v=New_CP8(w,1)
-      v%base=0.d0
+      call SetZero_CP8(v)
 
       end function ZeroRef_CP8
 
@@ -550,9 +529,28 @@
       INTEGER, INTENT(IN) :: rows(:), cols(:)
 
       v=New_CP8(1,rows,cols)
-      v%base=0.d0
+      call SetZero_CP8(v)
 
       end function ZeroGen_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SetZero_CP8(v)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Zeros CP-vector
+
+      implicit none
+      TYPE (CP8), intent(inout) :: v
+      integer :: j,ndof
+
+      ndof=v%D()
+      v%coef=0.d0
+      do j=1,ndof
+         v%data(j)%mat=0.d0
+      enddo
+
+      end subroutine SetZero_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -565,7 +563,7 @@
       TYPE (CP8) :: v
       TYPE (CP8), INTENT(IN) :: w
       INTEGER, INTENT(IN), OPTIONAL :: rk
-      INTEGER :: i,rv,d
+      INTEGER :: rv,d,ndof
       REAL*8  :: fac
 
       IF (present(rk)) THEN
@@ -574,16 +572,17 @@
          rv=w%R()
       ENDIF
 
+      ndof=v%D()
+
 !     Generate v with random entries and equal coefs for all terms
       v=New_CP8(w,rv)
       v%coef(:)=1.d0/sqrt(REAL(rv))
-      call random_number(v%base(:,:))
 
 !     Shift, scale entries for each mode to make rms norm ~ unity
-      DO d=1,v%D()
+      DO d=1,ndof
+         call random_number(v%data(d)%vec(:,:))
          fac=sqrt(12.d0/REAL(v%nbas(d)))
-         v%base(v%ibas(d):v%fbas(d),:)=fac*&
-         (v%base(v%ibas(d):v%fbas(d),:)-0.5d0)
+         v%data(d)%vec=fac*v%data(d)%vec-0.5d0
       ENDDO
 
       end function RandomRef_CP8
@@ -599,14 +598,17 @@
       TYPE (CP8) :: v
       INTEGER, INTENT(IN) :: rows(:),cols(:)
       INTEGER, INTENT(IN) :: rk
-      INTEGER :: i
+      INTEGER :: d,ndof
+
+      ndof=v%D()
 
       v=New_CP8(rk,rows,cols)
-      DO i=1,rk
-         call random_number(v%base(:,i))
-      ENDDO
-      v%base=v%base-0.5d0
       v%coef(:)=1.d0
+
+      DO d=1,ndof
+         call random_number(v%data(d)%vec(:,:))
+         v%data(d)%vec=v%data(d)%vec-0.5d0
+      ENDDO
 
       end function RandomGen_CP8
 
@@ -626,9 +628,9 @@
 
 !     Get an identity matrix for each DOF
       DO j=1,v%D()
-         v%data(j,1)%mat=0.d0
+         v%data(j)%mat=0.d0
          DO i=1,v%M(j)
-            v%data(j,1)%mat(i,i)=1.d0
+            v%data(j)%mat(i,i,1)=1.d0
          ENDDO
       ENDDO
       v%coef=1.d0
@@ -656,9 +658,9 @@
       DO d=1,ndof
          DO i=1,rk
 !           Copy elements of v to diagonal of w
-            w%data(d,i)%mat(:,:)=0.d0
+            w%data(d)%mat(:,:,i)=0.d0
             DO j=1,v%nbas(d)
-               w%data(d,i)%mat(j,j)=v%base(v%ibas(d)+j-1,i)
+               w%data(d)%mat(j,j,i)=v%data(d)%vec(j,i)
             ENDDO
          ENDDO
       ENDDO
@@ -710,10 +712,16 @@
       implicit none
       TYPE (CP8) :: v,w
       INTEGER, INTENT(IN) :: vi,ve,wi,we
-      INTEGER :: rkv,rkw
+      INTEGER :: rkv,rkw,d,ndof
 
       rkv=v%R()
       rkw=w%R()
+      ndof=w%D()
+
+      IF (.not.CHECKNBAS_CP8(v,w)) THEN
+         write(*,*) 'v,w dimension mismatch'
+         CALL AbortWithError('Error in GenCopyWtoV()')
+      ENDIF
 
       IF (vi.lt.1 .or. ve.gt.rkv .or. vi.gt.ve .or. &
           wi.lt.1 .or. we.gt.rkw .or. wi.gt.we .or. &
@@ -723,7 +731,9 @@
           CALL AbortWithError('Error in GenCopyWtoV()')
       ENDIF
 
-      v%base(:,vi:ve)=w%base(:,wi:we)
+      do d=1,ndof
+         v%data(d)%vec(:,vi:ve)=w%data(d)%vec(:,wi:we)
+      enddo
 
       end subroutine GenCopyWtoV_CP8
 
@@ -774,13 +784,12 @@
 !           Reorder the elements in temporary array
             allocate(btmp(v%rows(d),v%cols(d)))
             DO i=1,rk
-               btmp(:,:)=v%data(d,i)%mat(1:v%rows(d),1:v%cols(d))
-               call FlushPointerMat8(v%data(d,i))
-               v%data(d,i)=NewPointerMat8(v%base(v%ibas(d):v%fbas(d),i)&
-                                         ,v%cols(d),v%rows(d))
+               btmp(:,:)=v%data(d)%mat(1:v%rows(d),1:v%cols(d),i)
+               call FlushPointerMat8(v%data(d))
+               v%data(d)=NewPointerMat8(rk,v%cols(d),v%rows(d))
                DO j=1,v%rows(d)
                   DO k=1,v%cols(d)
-                     v%data(d,i)%mat(k,j)=btmp(j,k)
+                     v%data(d)%mat(k,j,i)=btmp(j,k)
                   ENDDO
                ENDDO
             ENDDO
@@ -863,7 +872,7 @@
             DO i=1,rk           
                DO k=1,v%cols(d)
                   DO j=1,v%rows(d)
-                     IF (k.ne.j) v%data(d,i)%mat(j,k)=0.d0
+                     IF (k.ne.j) v%data(d)%mat(j,k,i)=0.d0
                   ENDDO
                ENDDO
             ENDDO
@@ -956,7 +965,7 @@
 
 !     Multiply out coefficients
       DO i=1,rk
-         v%data(d,i)%mat(:,:)=v%coef(i)*v%data(d,i)%mat(:,:)
+         v%data(d)%mat(:,:,i)=v%coef(i)*v%data(d)%mat(:,:,i)
          v%coef(i)=1.d0
       ENDDO
 
@@ -992,7 +1001,7 @@
       DO i=1,rk
          DO d=1,ndof
             fac=v%coef(i)**pows(d)
-            v%data(d,i)%mat(:,:)=fac*v%data(d,i)%mat(:,:)
+            v%data(d)%mat(:,:,i)=fac*v%data(d)%mat(:,:,i)
          ENDDO
          v%coef(i)=1.d0
       ENDDO
@@ -1049,10 +1058,10 @@
       val=v%coef(irk)
       DO d=1,ndof
 !        Use imx (range [1:v%nbas(d)]) to extract row,col indices
-         imx=MAXLOC(ABS(v%base(v%ibas(d):v%fbas(d),irk)))
+         imx=MAXLOC(ABS(v%data(d)%vec(:,irk)))
          rowi(d)=mod(imx(1)-1,v%M(d))+1
          coli(d)=(imx(1)-1)/v%M(d)+1
-         vmx=v%base(v%ibas(d)-1+imx(1),irk)
+         vmx=v%data(d)%mat(rowi(d),coli(d),irk)
          val=val*vmx
       ENDDO
 
@@ -1104,11 +1113,11 @@
 
          IF (getcol) THEN
             DO i=1,rk
-               v%data(d,i)%mat(:,1)=M%data(d,i)%mat(:,indx(d))
+               v%data(d)%mat(:,1,i)=M%data(d)%mat(:,indx(d),i)
             ENDDO
          ELSE
             DO i=1,rk
-               v%data(d,i)%mat(1,:)=M%data(d,i)%mat(indx(d),:)
+               v%data(d)%mat(1,:,i)=M%data(d)%mat(indx(d),:,i)
             ENDDO
          ENDIF
       END DO
@@ -1155,11 +1164,11 @@
          DO i=1,rk
             IF (trans) THEN
                DO j=1,v%rows(d)
-                  w%data(d,i)%mat(1,j)=v%data(d,i)%mat(j,j)
+                  w%data(d)%mat(1,j,i)=v%data(d)%mat(j,j,i)
                ENDDO
             ELSE
                DO j=1,v%rows(d)
-                  w%data(d,i)%mat(j,1)=v%data(d,i)%mat(j,j)
+                  w%data(d)%mat(j,1,i)=v%data(d)%mat(j,j,i)
                ENDDO
             ENDIF
          ENDDO
@@ -1221,10 +1230,8 @@
 !     Copy the selected portion v <- M
       V%coef(:)=M%coef(:)
       DO d=1,ndof
-         DO i=1,rk
-            V%data(d,i)%mat(1:v%rows(d),1:v%cols(d))=&
-            M%data(d,i)%mat(irs(d):irf(d),ics(d):icf(d))
-         ENDDO
+         V%data(d)%mat(1:v%rows(d),1:v%cols(d),:)=&
+         M%data(d)%mat(irs(d):irf(d),ics(d):icf(d),:)
       ENDDO
 
       end function ExtractSubmatrix_CP8
@@ -1281,10 +1288,8 @@
 !     Copy coefs of V -> M directly, base by reshaping
       M%coef(:)=V%coef(:)
       DO d=1,ndof
-         DO i=1,rk
-            M%data(d,i)%mat(irs(d):irf(d),ics(d):icf(d))=&
-            V%data(d,i)%mat(1:v%rows(d),1:v%cols(d))
-         ENDDO
+         M%data(d)%mat(irs(d):irf(d),ics(d):icf(d),:)=&
+         V%data(d)%mat(1:v%rows(d),1:v%cols(d),:)
       ENDDO
 
       deallocate(irf,icf)
@@ -1339,7 +1344,7 @@
 
       DO d=1,ndof
          DO i=1,rk
-            prod(i)=prod(i)*M%data(d,i)%mat(ir(d),ic(d))           
+            prod(i)=prod(i)*M%data(d)%mat(ir(d),ic(d),i)           
          ENDDO
       ENDDO
 
@@ -1385,13 +1390,11 @@
 
       u=New_CP8(rk,rows,cols)
       u%coef(:)=v%coef(:)*w%coef(:)
-      DO i=1,rk
-         DO j=1,ndofv
-            u%data(j,i)%mat(:,:)=v%data(j,i)%mat(:,:)
-         ENDDO
-         DO j=1,ndofw
-            u%data(ndofv+j,i)%mat(:,:)=w%data(j,i)%mat(:,:)
-         ENDDO
+      DO j=1,ndofv
+         u%data(j)%mat(:,:,:)=v%data(j)%mat(:,:,:)
+      ENDDO
+      DO j=1,ndofw
+         u%data(ndofv+j)%mat(:,:,:)=w%data(j)%mat(:,:,:)
       ENDDO
 
       DEALLOCATE(rows,cols)
@@ -1485,16 +1488,16 @@
       DO i=1,rk
          IF (nc.le.nr) THEN
             DO k=1,nc
-               fac=v%coef(i)*v%base(nr+k,i)
+               fac=v%coef(i)*v%data(2)%vec(k,i)
                DO j=1,nr
-                  M(j,k)=M(j,k)+fac*v%base(j,i)
+                  M(j,k)=M(j,k)+fac*v%data(1)%vec(j,i)
                ENDDO
             ENDDO
          ELSE
             DO j=1,nr
-               fac=v%coef(i)*v%base(j,i)
+               fac=v%coef(i)*v%data(1)%vec(j,i)
                DO k=1,nc
-                  M(j,k)=M(j,k)+fac*v%base(nr+k,i)
+                  M(j,k)=M(j,k)+fac*v%data(2)%vec(k,i)
                ENDDO
             ENDDO
          ENDIF
@@ -1528,8 +1531,8 @@
       rk=v%R()
 
       ALLOCATE(U(nu,rk),W(nw,rk))
-      U(:,:)=v%base(1:nu,:)
-      W(:,:)=v%base(nu+1:nu+nw,:)
+      U(:,:)=v%data(1)%vec(:,:)
+      W(:,:)=v%data(2)%vec(:,:)
 
 !     Multiply the coef by the base with fewer elements
       DO i=1,rk
@@ -1557,7 +1560,7 @@
       TYPE (CP8) :: v
       integer, intent(in)  :: irank
       integer, allocatable :: rows(:),cols(:)
-      integer :: rk,ndof
+      integer :: rk,ndof,d
 
       IF (mpirank.eq.irank) THEN
          rk=v%R()
@@ -1582,7 +1585,9 @@
          v=New_CP8(rk,rows,cols)
       ENDIF
 
-      call bcast(v%base,irank)
+      DO d=1,ndof
+         call bcast(v%data(d)%mat,irank)
+      ENDDO
       call bcast(v%coef,irank)
 
       DEALLOCATE(rows,cols)
@@ -1602,7 +1607,7 @@
       integer, allocatable :: mvecs(:),moffs(:),mstarts(:),mwidths(:)
       real*8, allocatable  :: cpblock(:)
       integer :: nbloc,ndofs,termlen
-      integer :: p,b,i,ierr,totlen,ist
+      integer :: p,b,i,j,ierr,totlen,ist,nbas
 
       nbloc=SIZE(Q)
 
@@ -1678,10 +1683,17 @@
       cpblock(:)=0.d0
       do p=1,mvecs(mpirank+1)
          b=moffs(mpirank+1)+p
-!        Copy base to big array
+!        Copy coefs to big array first
          ist=starts(b)
-         do i=1,ranks(b)
-            cpblock(ist:ist+termlen-1)=Q(b)%base(0:ist+termlen-1,i)
+         cpblock(ist+1:ist+ranks(b))=Q(b)%coef(1:ranks(b))
+         ist=ist+ranks(b)
+!        Copy factor matrices to big array
+         do j=1,ndofs
+            nbas=dims(j,1)*dims(j,2)
+            do i=1,ranks(b)
+               cpblock(ist+1:ist+nbas)=Q(b)%data(j)%vec(:,i)
+               ist=ist+nbas
+            enddo
          enddo
       enddo
 
@@ -1693,10 +1705,17 @@
       do b=1,nbloc
          call Flush_CP8(Q(b))
          Q(b)=New_CP8(ranks(b),dims(:,1),dims(:,2))
-!        Copy base to big array
+!        Copy coefs from big array
          ist=starts(b)
-         do i=1,ranks(b)
-            Q(b)%base(0:ist+termlen-1,i)=cpblock(ist:ist+termlen-1)
+         Q(b)%coef(1:ranks(b))=cpblock(ist+1:ist+ranks(b))
+         ist=ist+ranks(b)
+!        Copy factor matrices from big array
+         do j=1,ndofs
+            nbas=dims(j,1)*dims(j,2)
+            do i=1,ranks(b)
+               Q(b)%data(j)%vec(:,i)=cpblock(ist+1:ist+nbas)
+               ist=ist+nbas
+            enddo
          enddo
       enddo
 
