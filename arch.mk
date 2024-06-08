@@ -7,7 +7,7 @@ FOPTS = -Mr8
 OPTFLG = -O3
 
 # Debug flags
-DEBUG = no
+DEBUG = yes
 DEBUGFLG = -O0 -traceback
 
 # Flag to specify the position of mod files

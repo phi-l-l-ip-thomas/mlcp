@@ -1097,7 +1097,7 @@
 
       IF (nok.lt.rk) THEN
          IF (nok.gt.0) THEN
-            w=NewCP(rk,v%rows,v%cols,v%sym)
+            w=NewCP(nok,v%rows,v%cols,v%sym)
             DO i=1,nok
                call GenCopyWtoV(w,v,i,i,iok(i),iok(i))
             ENDDO

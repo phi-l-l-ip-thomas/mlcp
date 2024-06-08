@@ -3,7 +3,7 @@
       MODULE CPr8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Contains structures needed for CP representation, real*8
+! Contains structures needed for CP representation, real(kind=8)
 
       USE ERRORTRAP
       USE UTILS
@@ -12,163 +12,217 @@
 
       IMPLICIT NONE
 
-      TYPE POINTERMAT8(prec)
-         INTEGER, KIND :: prec
-         REAL(kind=prec), ALLOCATABLE :: mat(:,:,:)
-         REAL(kind=prec), POINTER :: vec(:,:) => null()
-      END TYPE POINTERMAT8
-
       TYPE CP8
-         TYPE (POINTERMAT8(8)), ALLOCATABLE :: data(:)
-         REAL*8 , ALLOCATABLE :: coef(:)
-         INTEGER, ALLOCATABLE :: dims(:,:)
-         INTEGER, POINTER :: nbas(:) => null()
-         INTEGER, POINTER :: ibas(:) => null(), fbas(:) => null()
-         INTEGER, POINTER :: rows(:) => null(), cols(:) => null()
+         INTEGER, ALLOCATABLE :: look(:,:)
+         INTEGER, ALLOCATABLE :: nbas(:)
+         INTEGER, ALLOCATABLE :: rows(:)
+         INTEGER, ALLOCATABLE :: cols(:)
+         REAL(KIND=8), ALLOCATABLE :: base(:),coef(:)
          CONTAINS
-            PROCEDURE :: R => GetRank_CP8
-            PROCEDURE :: D => GetNdof_CP8
-            PROCEDURE :: M => GetRows_CP8
-            PROCEDURE :: N => GetCols_CP8
+            PROCEDURE :: new => NewGen_CP8
+            PROCEDURE :: new0 => ZeroGen_CP8 
+            PROCEDURE :: clone => NewRef_CP8
+            PROCEDURE :: clone0 => ZeroRef_CP8
+            PROCEDURE :: flush => Flush_CP8
+            PROCEDURE :: zero => SetZero_CP8
             PROCEDURE :: show => ShowStats_CP8
             PROCEDURE :: printvec => PrintVec_CP8
-            PROCEDURE :: ok => checkcoefs_CP8
+            PROCEDURE :: printmat => PrintMat_CP8
+            PROCEDURE :: C => GetCoef_CP8
+            PROCEDURE :: R => GetRank_CP8
+            PROCEDURE :: D => GetNdof_CP8
+            PROCEDURE :: MN => GetNbas_CP8
+            PROCEDURE :: M => GetRows_CP8
+            PROCEDURE :: N => GetCols_CP8
+            PROCEDURE :: BS => GetBasisStart_CP8
+            PROCEDURE :: BF => GetBasisFinish_CP8
+            PROCEDURE :: MS => GetModeStart_CP8
+            PROCEDURE :: MF => GetModeFinish_CP8
+            PROCEDURE :: Get => GetEntry_CP8
+            PROCEDURE :: Put => PutEntry_CP8
+            PROCEDURE :: ok => CheckCoefs_CP8
+            PROCEDURE :: same => CheckNbas_CP8
+            PROCEDURE :: copy_terms => GenCopyWtoV_CP8
+            PROCEDURE :: copyto => Copy_all_CP8
+            PROCEDURE :: replace => ReplaceVwithW_CP8
+            PROCEDURE :: resize => Resize_CP8
+            PROCEDURE :: submatrix => ExtractSubmatrix_CP8
+            PROCEDURE :: changesign => VecSignChange_CP8
+            PROCEDURE :: mult => VecScalarMult_all_CP8
+            PROCEDURE :: mult_terms => VecScalarMult_gen_CP8
+            PROCEDURE :: sumcp => Sum_CP8
+            PROCEDURE :: diag => VectoDiagMatrix_CP8
+            PROCEDURE :: transpose => MatrixTranspose_CP8
+            PROCEDURE :: trim => TrimZeros_CP8
       END TYPE CP8
 
-      INTERFACE New_CP8
-         MODULE PROCEDURE NewGen_CP8,NewRef_CP8,NewVec_CP8,NewSqmat_CP8
-      END INTERFACE New_CP8
+      INTERFACE New_CP
+         MODULE PROCEDURE NewVec_CP8,NewSqmat_CP8
+!         MODULE PROCEDURE NewVec_CP4,NewSqmat_CP4
+      END INTERFACE New_CP
 
-      INTERFACE Zero_CP8
-         MODULE PROCEDURE ZeroGen_CP8,ZeroRef_CP8
-      END INTERFACE Zero_CP8
-
-      INTERFACE Random_CP8
+      INTERFACE Random_CP
          MODULE PROCEDURE RandomGen_CP8,RandomRef_CP8
-      END INTERFACE Random_CP8
+!         MODULE PROCEDURE RandomGen_CP4,RandomRef_CP4
+      END INTERFACE Random_CP
 
-      INTERFACE PrintMat_CP8
-         MODULE PROCEDURE PrintMat_all_CP8,PrintMat_gen_CP8
-      END INTERFACE PrintMat_CP8
+      INTERFACE IdentityMatrix
+         MODULE PROCEDURE IdentityMatrix_CP8
+!         MODULE PROCEDURE IdentityMatrix_CP4
+      END INTERFACE IdentityMatrix
 
-      INTERFACE Copy_CP8
-         MODULE PROCEDURE Copy_all_CP8, ExtractSubmatrix_CP8
-      END INTERFACE Copy_CP8
-
-      INTERFACE MatrixZeroOffDiag_CP8
+      INTERFACE MatrixZeroOffDiag
          MODULE PROCEDURE MatrixZeroOffDiag_all_CP8
          MODULE PROCEDURE MatrixZeroOffDiag_one_CP8
          MODULE PROCEDURE MatrixZeroOffDiag_gen_CP8
-      END INTERFACE MatrixZeroOffDiag_CP8
+!         MODULE PROCEDURE MatrixZeroOffDiag_all_CP4
+!         MODULE PROCEDURE MatrixZeroOffDiag_one_CP4
+!         MODULE PROCEDURE MatrixZeroOffDiag_gen_CP4
+      END INTERFACE MatrixZeroOffDiag
 
-      INTERFACE MultOutCoef_CP8
+      INTERFACE MultOutCoef
          MODULE PROCEDURE MultOutCoefSmallest_CP8,MultOutCoefbyMode_CP8
-      END INTERFACE MultOutCoef_CP8
+!         MODULE PROCEDURE MultOutCoefSmallest_CP4,MultOutCoefbyMode_CP4
+      END INTERFACE MultOutCoef
 
-      INTERFACE GetRank1DominantEntry_CP8
+      INTERFACE DistributeCoef
+         MODULE PROCEDURE DistributeCoef_CP8
+!         MODULE PROCEDURE DistributeCoef_CP4
+      END INTERFACE DistributeCoef
+
+      INTERFACE GetRank1DominantEntry
          MODULE PROCEDURE GetRank1DominantEntry_gen_CP8
          MODULE PROCEDURE GetRank1DominantEntry_1_CP8
-      END INTERFACE GetRank1DominantEntry_CP8
+!         MODULE PROCEDURE GetRank1DominantEntry_gen_CP4
+!         MODULE PROCEDURE GetRank1DominantEntry_1_CP4
+      END INTERFACE GetRank1DominantEntry
+
+      INTERFACE ExtractVec
+         MODULE PROCEDURE ExtractVec_CP8
+!         MODULE PROCEDURE ExtractVec_CP4
+      END INTERFACE ExtractVec
+
+      INTERFACE ExtractDiagfromMatrix
+        MODULE PROCEDURE ExtractDiagfromMatrix_CP8
+!        MODULE PROCEDURE ExtractDiagfromMatrix_CP4
+      END INTERFACE ExtractDiagfromMatrix
+
+      INTERFACE PutSubmatrix
+        MODULE PROCEDURE PutSubmatrix_CP8
+!        MODULE PROCEDURE PutSubmatrix_CP4
+      END INTERFACE PutSubmatrix
+
+      INTERFACE ExtractMatrixElement
+        MODULE PROCEDURE ExtractMatrixElement_CP8
+!        MODULE PROCEDURE ExtractMatrixElement_CP4
+      END INTERFACE ExtractMatrixElement
+
+      INTERFACE ModeJoin
+        MODULE PROCEDURE ModeJoin_CP8
+!        MODULE PROCEDURE ModeJoin_CP4
+      END INTERFACE ModeJoin
+
+      INTERFACE EntrywiseCompare
+        MODULE PROCEDURE EntrywiseCompare_CP8
+!        MODULE PROCEDURE EntrywiseCompare_CP4
+      END INTERFACE EntrywiseCompare
+
+!!!   MOVE to Reduction or SVD modules
+      INTERFACE CP2DtoMat
+        MODULE PROCEDURE CP2DtoMat_CP8
+        MODULE PROCEDURE CP2DtoMat_CP4
+      END INTERFACE CP2DtoMat
+
+!!!   MOVE to Reduction or SVD modules
+      INTERFACE CP2DtoUW
+        MODULE PROCEDURE CP2DtoUW_CP8
+!        MODULE PROCEDURE CP2DtoUW_CP4
+      END INTERFACE CP2DtoUW
+
+      INTERFACE Bcast_CP
+        MODULE PROCEDURE Bcast_CP8
+!        MODULE PROCEDURE Bcast_CP4
+      END INTERFACE Bcast_CP
+
+      INTERFACE MPI_Sync_block_CP
+        MODULE PROCEDURE MPI_Sync_block_CP8
+!        MODULE PROCEDURE MPI_Sync_block_CP4
+      END INTERFACE MPI_Sync_block_CP
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function NewPointerMat8(rk,row,col) result(P)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Create a 2D array pointing to data in M
-
-      implicit none
-      TYPE (POINTERMAT8(8)), TARGET :: P
-      integer, intent(in) :: rk,row,col
-      integer :: i
-
-      ALLOCATE(P%mat(row,col,rk))
-!     'vec' points to each row x col portion as a 1D array
-      do i=1,rk
-         P%vec(1:row*col,1:rk) => P%mat(:,:,:)
-      enddo
-
-      end function NewPointerMat8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine FlushPointerMat8(P)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Deallocate a 2D array
-
-      implicit none
-      TYPE (POINTERMAT8(8)) :: P
-
-      DEALLOCATE(P%mat)
-      P%vec=>null()
-
-      end subroutine FlushPointerMat8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function NewGen_CP8(rk,rows,cols) result(v)
+      subroutine NewGen_CP8(v,rk,rows,cols)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! General subroutine for initializing outer product of CP-vectors or
 ! matrices. Symmetric storage is possible for square matrix factors
 
       implicit none
-      TYPE (CP8), TARGET  :: v
+      CLASS (CP8) :: v
       INTEGER, INTENT(IN) :: rows(:), cols(:)
       INTEGER, INTENT(IN) :: rk
-      INTEGER :: ndof,nrdim,i,j
+      INTEGER :: d,r,ndof,i,ndim
 
       ndof=SIZE(rows)
 
 !     Check for correct sizes and consistency in dimensions
       IF (ndof.lt.1) THEN
          write(*,*) 'Error: no degrees of freedom!'
-         call AbortWithError('Error in NewCP()')
+         call AbortWithError('Error in NewGen_CP8()')
       ENDIF
 
       IF (rk.lt.1) THEN
          write(*,*) 'Error: rk must be at least 1!'
-         call AbortWithError('Error in NewCP()')
+         call AbortWithError('Error in NewGen_CP8()')
       ENDIF
 
       IF (SIZE(cols).ne.ndof) THEN
          write(*,*) 'Error: size of "cols" array differs from ndof!'
-         call AbortWithError('Error in NewCP()')
+         call AbortWithError('Error in NewGen_CP8()')
       ENDIF
 
       DO i=1,ndof
          IF (rows(i).lt.1) THEN
             write(*,*) 'Error: number of rows must be at least 1!'
-            call AbortWithError('Error in NewCP()')
+            call AbortWithError('Error in NewGen_CP8()')
          ENDIF
 
          IF (cols(i).lt.1) THEN
             write(*,*) 'Error: number of cols must be at least 1!'
-            call AbortWithError('Error in NewCP()')
+            call AbortWithError('Error in NewGen_CP8()')
          ENDIF
       ENDDO
 
-!     Set arrays containing dimensions
-      ALLOCATE(v%dims(ndof,0:2))
-      v%dims(:,0)=rows(:)*cols(:)
-      v%dims(:,1)=rows(:)
-      v%dims(:,2)=cols(:)
+!     Error if already allocated
+      IF (ALLOCATED(v%nbas) .or. ALLOCATED(v%rows) &
+      .or. ALLOCATED(v%cols) .or. ALLOCATED(v%look) &
+      .or. ALLOCATED(v%base) .or. ALLOCATED(v%coef)) THEN
+         write(*,*) 'Attempt to reallocate existing CP vector'
+         call AbortWithError('Error in New_CP()')
+      ENDIF
 
-!     Assign pointers
-      v%nbas(1:ndof) => v%dims(1:ndof,0)
-      v%rows(1:ndof) => v%dims(1:ndof,1)
-      v%cols(1:ndof) => v%dims(1:ndof,2)
-
-!     Allocate the factor matrices
-      ALLOCATE(v%data(ndof),v%coef(rk))
-      DO i=1,ndof
-         v%data(i)=NewPointerMat8(rk,v%rows(i),v%cols(i))
+!     Construct lookup table for terms in base; count base entries
+      ALLOCATE(v%look(rk,ndof))
+      i=0
+      DO d=1,ndof
+         ndim=rows(d)*cols(d)
+         DO r=1,rk
+            v%look(r,d)=i
+            i=i+ndim
+         ENDDO
       ENDDO
 
-      end function NewGen_CP8
+      ALLOCATE(v%base(i),v%coef(rk))
+
+!     Set arrays containing dimensions
+      ALLOCATE(v%nbas(ndof),v%rows(ndof),v%cols(ndof))
+      v%nbas(:)=rows(:)*cols(:)
+      v%rows(:)=rows(:)
+      v%cols(:)=cols(:)
+
+      end subroutine NewGen_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -179,63 +233,17 @@
 ! passed as an optional argument)
 
       implicit none
-      TYPE (CP8) :: v
-      TYPE (CP8), INTENT(IN) :: w
+      TYPE (CP8)  :: v
+      CLASS (CP8), INTENT(IN) :: w
       INTEGER, INTENT(IN), OPTIONAL :: rk
 
       IF (present(rk)) THEN
-         v=New_CP8(rk,w%rows,w%cols)
+         call v%new(rk,w%rows,w%cols)
       ELSE
-         v=New_CP8(w%R(),w%rows,w%cols)
+         call v%new(w%R(),w%rows,w%cols)
       ENDIF
 
       end function NewRef_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function NewVec_CP8(rk,rows,trans) result(v)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Initializes a new vector in CP-format
-
-      implicit none
-      TYPE (CP8) :: v
-      LOGICAL, INTENT(IN)  :: trans
-      INTEGER, INTENT(IN)  :: rows(:)
-      INTEGER, INTENT(IN)  :: rk
-      INTEGER, ALLOCATABLE :: cols(:)
-      INTEGER :: ndof
-
-      ndof=SIZE(rows)
-      ALLOCATE(cols(ndof))
-      cols(:)=1
-
-      IF (trans) then ! Column vector
-         v=New_CP8(rk,cols,rows)
-      ELSE ! Row vector
-         v=New_CP8(rk,rows,cols)
-      ENDIF
-
-      DEALLOCATE(cols)
-
-      end function NewVec_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function NewSqmat_CP8(rk,rows) result(v)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Initializes a CP-format outer product of square matrices
-
-      implicit none
-      TYPE (CP8) :: v
-      INTEGER, INTENT(IN) :: rows(:)
-      INTEGER, INTENT(IN) :: rk
-      INTEGER   :: ndof
-
-      v=New_CP8(rk,rows,rows)
-
-      end function NewSqmat_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -245,23 +253,36 @@
 ! Disposes CP-format type
 
       implicit none
-      TYPE (CP8) :: v
-      integer :: i,j,rk,ndof
-
-      rk=v%R()
-      ndof=v%D()
-
-!     Dereference pointers
-      DO i=1,ndof
-         call FlushPointerMat8(v%data(i))
-      ENDDO
+      CLASS (CP8) :: v
 
 !     Deallocate arrays
-      IF (ALLOCATED(v%data)) DEALLOCATE(v%data)
-      IF (ALLOCATED(v%dims)) DEALLOCATE(v%dims)
+      IF (ALLOCATED(v%look)) DEALLOCATE(v%look)
+      IF (ALLOCATED(v%nbas)) DEALLOCATE(v%nbas)
+      IF (ALLOCATED(v%rows)) DEALLOCATE(v%rows)
+      IF (ALLOCATED(v%cols)) DEALLOCATE(v%cols)
+      IF (ALLOCATED(v%base)) DEALLOCATE(v%base)
       IF (ALLOCATED(v%coef)) DEALLOCATE(v%coef)
 
       end subroutine Flush_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SetZero_CP8(v)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Zeros CP-vector
+
+      implicit none
+      CLASS (CP8) :: v
+      integer :: j,ndof
+
+      IF (.not.ALLOCATED(v%base)) THEN
+         call AbortWithError("SetZero_CP8(): v not allocated")
+      ENDIF
+      v%base=0.d0
+      v%coef=0.d0
+
+      end subroutine SetZero_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -278,7 +299,7 @@
       frmt='(X,I4,X,I5,X,X,I5,2X,L3)'
       write(*,*) '------- CP stats -------'
       write(*,'(X,A,I4,A,I0)') 'ndof = ',v%D(),'; rank = ',v%R()
-      write(*,*) 'mode [rows x cols] sym'
+      write(*,*) 'mode [rows x cols]'
       do d=1,v%D()
          write(*,frmt) d,v%M(d),v%N(d)
       enddo
@@ -295,19 +316,22 @@
 
       implicit none
       CLASS (CP8), INTENT(IN) :: v
-      integer :: r,rk,j,d,i,n
+      integer :: r,rk,d,ndof,i,k,n,m
       character*64 :: frmt
 
       rk=v%R()
-      d=v%D()
+      ndof=v%D()
 
       write(frmt,'(A,I0,A)') '(A,2X,',rk,'(ES17.10,X))'
       write(*,frmt) ' Vcoef =',(v%coef(r),r=1,rk)
       write(frmt,'(A,I0,A)') '(2(I4),X,',rk,'f18.10)'
-      do j=1,d
-         n=v%nbas(j)
-         do i=1,n
-            write(*,frmt) j,i,(v%data(j)%vec(i,r),r=1,rk)
+      do d=1,ndof
+         m=v%M(d)
+         n=v%N(d)
+         do k=1,n
+            do i=1,m
+               write(*,frmt) d,(k-1)*m+i,(v%base(v%look(r,d)+(k-1)*m+i),r=1,rk)
+            enddo
          enddo
       enddo
       write(*,*)
@@ -316,67 +340,75 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine PrintMat_all_CP8(v)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Prints CP-matrix in neat format, wrapper for usual case
-
-      implicit none
-      CLASS (CP8), INTENT(IN) :: v
-
-      call PrintMat_gen_CP8(v,.TRUE.)
-
-      end subroutine PrintMat_all_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine PrintMat_gen_CP8(v,showbase)
+      subroutine PrintMat_CP8(v)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Prints CP-matrix in neat format, general routine
 
       implicit none
-      CLASS (CP8), INTENT(IN) :: v
-      logical, intent(in) :: showbase
-      integer :: r,rk,j,d,i,n,k,m
+      CLASS (CP8), INTENT(IN), TARGET :: v
+      integer :: r,rk,d,ndof,i,n,k,m
       character*64 :: frmt
 
       rk=v%R()
-      d=v%D()
+      ndof=v%D()
 
       write(*,*)
       DO r=1,rk
          write(*,'(A,I0,A,ES23.16)') 'RANK: ',r,'; coef = ',v%coef(r)
-         IF (showbase) THEN
-            DO j=1,d
-               write(*,'(/A,I0)') 'dof : ',j
-               m=v%M(j)
-               n=v%N(j)
+            DO d=1,ndof
+               write(*,'(/A,I0)') 'dof : ',d
+               m=v%M(d)
+               n=v%N(d)
                write(frmt,'(A,I0,A)') '(',n,'(X,f14.6))'
                DO i=1,m
-                  write(*,frmt) (v%data(j)%mat(i,k,r),k=1,n)
+                  write(*,frmt) (v%base(v%look(r,d)+(k-1)*m+i),k=1,n)
                ENDDO
             ENDDO
             write(*,*)
-         ENDIF
       ENDDO
       write(*,*)
 
-      end subroutine PrintMat_gen_CP8
+      end subroutine PrintMat_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function GetCoef_CP8(v,r) result(coef)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns coefficient of term 'r' of vector 'v'
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: v
+      integer :: r
+      real(kind=8) :: coef
+
+      IF (r.lt.1 .or. r.gt.v%R()) THEN
+         write(*,*) 'GetCoef(): r (',r,') out of range: [1,',v%R(),']'
+      ENDIF
+
+      IF (ALLOCATED(v%base)) THEN
+         coef=v%coef(r)
+      ELSE
+         write(*,*) 'Error: rk must be at least 1!'
+         call AbortWithError('Error in GetCoef_CP8()')
+      ENDIF
+
+      end function GetCoef_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       function GetRank_CP8(v) result(rk)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Returns number of modes of v
+! Returns rank of vector 'v'
 
       implicit none
       CLASS (CP8), INTENT(IN) :: v
       integer :: rk
 
-      IF (ALLOCATED(v%coef)) THEN
-         rk=SIZE(v%coef)
+      IF (ALLOCATED(v%look)) THEN
+         rk=SIZE(v%look,1)
       ELSE
          rk=0
       ENDIF
@@ -388,14 +420,14 @@
       function GetNdof_CP8(v) result(ndof)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Returns number of modes of v
+! Returns number of modes of vector 'v'
 
       implicit none
       CLASS (CP8), INTENT(IN) :: v
       integer :: ndof
 
-      IF (ALLOCATED(v%data)) THEN
-         ndof=SIZE(v%data,1)
+      IF (ALLOCATED(v%look)) THEN
+         ndof=SIZE(v%look,2)
       ELSE
          ndof=0
       ENDIF
@@ -404,10 +436,34 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      function GetNbas_CP8(v,d) result(nbas)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns number of basis components in mode 'd' of vector 'v'
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: v
+      integer, intent(in) :: d
+      integer :: nbas
+
+      IF (d.lt.1 .or. d.gt.v%D()) THEN
+         write(*,*) 'Getnbas(): d (',d,') out of range: [1,',v%D(),']'
+      ENDIF
+
+      IF (ALLOCATED(v%nbas)) THEN
+         nbas=v%nbas(d)
+      ELSE
+         nbas=0
+      ENDIF
+
+      end function GetNbas_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       function GetRows_CP8(v,d) result(rows)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Returns number of modes of v
+! Returns number of basis rows in mode 'd' of vector 'v'
 
       implicit none
       CLASS (CP8), INTENT(IN) :: v
@@ -431,7 +487,7 @@
       function GetCols_CP8(v,d) result(cols)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Returns number of modes of v
+! Returns number of basis columns in mode 'd' of vector 'v'
 
       implicit none
       CLASS (CP8), INTENT(IN) :: v
@@ -452,54 +508,532 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function CHECKNBAS_CP8(v1,v2)
+      function GetBasisStart_CP8(v,r,d) result(res)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Checks nbas of 2 CP-format vectors to make sure they are the same
+! Returns starting index of basis of term 'r', mode 'd' in vector 'v'
 
       implicit none
-      TYPE (CP8), INTENT(IN) :: v1,v2
-      LOGICAL :: CHECKNBAS_CP8
-      INTEGER :: i
+      CLASS (CP8), INTENT(IN) :: v
+      integer, intent(in) :: r,d
+      integer :: res
 
-      CHECKNBAS_CP8=.TRUE.
-
-      IF (v1%D().ne.v2%D()) THEN
-         CHECKNBAS_CP8=.FALSE.
-      ELSE
-         DO i=1,v1%D()
-            IF ((v1%rows(i).ne.v2%rows(i)) .or. &
-                (v1%cols(i).ne.v2%cols(i))) THEN
-               CHECKNBAS_CP8=.FALSE.
-               EXIT
-            ENDIF
-         ENDDO
+      IF (r.lt.1 .or. r.gt.v%R()) THEN
+         write(*,*) 'GetBaseStart(): r (',r,') out of range: [1,',v%R(),']'
+      ENDIF
+      IF (d.lt.1 .or. d.gt.v%D()) THEN
+         write(*,*) 'GetBaseStart(): d (',d,') out of range: [1,',v%D(),']'
       ENDIF
 
-      end function CHECKNBAS_CP8
+      IF (ALLOCATED(v%look)) THEN
+         res=v%look(r,d)+1
+      ELSE
+         res=0
+      ENDIF
+
+      end function GetBasisStart_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function CHECKCOEFS_CP8(v)
+      function GetBasisFinish_CP8(v,r,d) result(res)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns finishing index of basis of term 'r', mode 'd' in vector 'v'
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: v
+      integer, intent(in) :: r,d
+      integer :: res
+
+      IF (r.lt.1 .or. r.gt.v%R()) THEN
+         write(*,*) 'GetBaseFinish(): r (',r,') out of range: [1,',v%R(),']'
+      ENDIF
+      IF (d.lt.1 .or. d.gt.v%D()) THEN
+         write(*,*) 'GetBaseFinish(): d (',d,') out of range: [1,',v%D(),']'
+      ENDIF
+
+      IF (ALLOCATED(v%look)) THEN
+         res=v%look(r,d)+v%MN(d)
+      ELSE
+         res=0
+      ENDIF
+
+      end function GetBasisFinish_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function GetModeStart_CP8(v,d) result(res)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns starting index of basis of first term, mode 'd' in vector 'v'
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: v
+      integer, intent(in) :: d
+      integer :: res
+
+      IF (d.lt.1 .or. d.gt.v%D()) THEN
+         write(*,*) 'GetBaseStart(): d (',d,') out of range: [1,',v%D(),']'
+      ENDIF
+
+      IF (ALLOCATED(v%look)) THEN
+         res=v%look(1,d)+1
+      ELSE
+         res=0
+      ENDIF
+
+      end function GetModeStart_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function GetModeFinish_CP8(v,d) result(res)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns finishing index of basis of last term, mode 'd' in vector 'v'
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: v
+      integer, intent(in) :: d
+      integer :: rk,res
+
+      IF (d.lt.1 .or. d.gt.v%D()) THEN
+         write(*,*) 'GetBaseFinish(): d (',d,') out of range: [1,',v%D(),']'
+      ENDIF
+
+      IF (ALLOCATED(v%look)) THEN
+         res=v%look(v%R(),d)+v%MN(d)
+      ELSE
+         res=0
+      ENDIF
+
+      end function GetModeFinish_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function GetEntry_CP8(v,i,k,r,d) result(res)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Gets (i,k)-th matrix entry for rank 'r', mode 'd' in vector 'v'
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: v
+      integer, intent(in) :: i,k,r,d
+      integer :: m
+      real(kind=8) :: res
+
+      IF (r.lt.1 .or. r.gt.v%R()) THEN
+         write(*,*) 'GetEntry(): r (',r,') out of range: [1,',v%R(),']'
+      ENDIF
+      IF (d.lt.1 .or. d.gt.v%D()) THEN
+         write(*,*) 'GetEntry(): d (',d,') out of range: [1,',v%D(),']'
+      ENDIF
+
+      m=v%M(d)
+
+      IF (i.lt.1 .or. i.gt.m) THEN
+         write(*,*) 'GetEntry(): i (',i,') out of range: [1,',m,']'
+      ENDIF
+      IF (k.lt.1 .or. k.gt.v%N(d)) THEN
+         write(*,*) 'GetEntry(): k (',k,') out of range: [1,',v%N(d),']'
+      ENDIF
+
+      res=v%base(v%look(r,d)+(k-1)*m+i)
+
+      end function GetEntry_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine PutEntry_CP8(v,i,k,r,d,val)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Gets (i,k)-th matrix entry for rank 'r', mode 'd' in vector 'v'
+
+      implicit none
+      CLASS (CP8), INTENT(INOUT) :: v
+      integer, intent(in) :: i,k,r,d
+      integer :: m
+      real(kind=8) :: val
+
+      IF (r.lt.1 .or. r.gt.v%R()) THEN
+         write(*,*) 'PutEntry(): r (',r,') out of range: [1,',v%R(),']'
+      ENDIF
+      IF (d.lt.1 .or. d.gt.v%D()) THEN
+         write(*,*) 'PutEntry(): d (',d,') out of range: [1,',v%D(),']'
+      ENDIF
+
+      m=v%M(d)
+
+      IF (i.lt.1 .or. i.gt.m) THEN
+         write(*,*) 'PutEntry(): i (',i,') out of range: [1,',m,']'
+      ENDIF
+      IF (k.lt.1 .or. k.gt.v%N(d)) THEN
+         write(*,*) 'PutEntry(): k (',k,') out of range: [1,',v%N(d),']'
+      ENDIF
+
+      v%base(v%look(r,d)+(k-1)*m+i)=val
+
+      end subroutine PutEntry_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function CheckCoefs_CP8(v) result(res)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Checks coefficients for good (non-NaN) values
 
       implicit none
       CLASS (CP8), INTENT(IN) :: v
-      LOGICAL :: CHECKCOEFS_CP8
+      LOGICAL :: res
       INTEGER :: i
 
-      CHECKCOEFS_CP8=.TRUE.
+      res=.TRUE.
 
       DO i=1,v%R()
          IF (v%coef(i).ne.v%coef(i)) THEN
-            CHECKCOEFS_CP8=.FALSE.
+            res=.FALSE.
             EXIT
          ENDIF
       ENDDO
 
-      end function CHECKCOEFS_CP8
+      end function CheckCoefs_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function CheckNbas_CP8(v1,v2) result(res)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Checks nbas of 2 CP-format vectors to make sure they are the same
+
+      implicit none
+      CLASS (CP8) :: v1
+      TYPE (CP8), INTENT(IN) :: v2
+      LOGICAL :: res
+      INTEGER :: i
+
+      res=.TRUE.
+
+      IF (v1%D().ne.v2%D()) THEN
+         res=.FALSE.
+      ELSE
+         DO i=1,v1%D()
+            IF ((v1%rows(i).ne.v2%rows(i)) .or. &
+                (v1%cols(i).ne.v2%cols(i))) THEN
+               res=.FALSE.
+               EXIT
+            ENDIF
+         ENDDO
+      ENDIF
+
+      end function CheckNbas_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GenCopyWtoV_CP8(v,w,vi,ve,wi,we)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Copies a group of consecutive terms in W to consecutive slots in V
+! leaving W intact. v must be allocated beforehand.
+
+      implicit none
+      CLASS(CP8) :: v
+      TYPE (CP8), INTENT(IN) :: w
+      INTEGER, INTENT(IN) :: vi,ve,wi,we
+      INTEGER :: rkv,rkw,d,ndof,bsv,bsw,bfv,bfw
+
+      rkv=v%R()
+      rkw=w%R()
+      ndof=w%D()
+
+      IF (.not.v%same(w)) THEN
+         write(*,*) 'v,w dimension mismatch'
+         CALL AbortWithError('Error in GenCopyWtoV()')
+      ENDIF
+
+      IF (vi.lt.1 .or. ve.gt.rkv .or. vi.gt.ve .or. &
+          wi.lt.1 .or. we.gt.rkw .or. wi.gt.we .or. &
+          we-wi.ne.ve-vi) THEN
+          write(*,'(2A,6(X,I0))') 'Bad rank indices: ',&
+          'vi,ve,rkv,wi,we,rkw =',vi,ve,rkv,wi,we,rkw
+          CALL AbortWithError('Error in GenCopyWtoV()')
+      ENDIF
+
+      do d=1,ndof
+         bsv=v%BS(vi,d)
+         bsw=w%BS(wi,d)
+         bfv=v%BF(ve,d)
+         bfw=w%BF(we,d)
+         v%base(bsv:bfv)=w%base(bsw:bfw)
+      enddo
+      v%coef(vi:ve)=w%coef(wi:we)
+
+      end subroutine GenCopyWtoV_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Copy_all_CP8(w,v)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Copies W into V, leaving W intact.
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: w
+      TYPE (CP8) :: v
+      INTEGER   :: rk
+
+      rk=w%R()
+      v=w%clone(rk)
+      call v%copy_terms(w,1,rk,1,rk)
+
+      end subroutine Copy_all_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine ReplaceVwithW_CP8(v,w)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Copies W into V, disposing W afterwards
+
+      implicit none
+      CLASS (CP8) :: v
+      TYPE (CP8)  :: w
+
+      call v%flush
+      call w%copyto(v)
+      call w%flush
+
+      end subroutine ReplaceVwithW_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Resize_CP8(v,rk)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Resizes vector v, either by truncating at a smaller rank or by
+! adding space for extra terms.
+
+      implicit none
+      CLASS (CP8), INTENT(INOUT) :: v
+      TYPE (CP8) :: w
+      INTEGER, INTENT(IN) :: rk
+      INTEGER :: rkv
+
+      rkv=v%R()
+
+      IF (rk.lt.1) &
+         call AbortWithError('Error in ResizeV(): rk < 1')
+
+      IF (rk.ne.rkv) THEN
+         w=v%clone(rk)
+         call w%copy_terms(v,1,MIN(rkv,rk),1,MIN(rkv,rk))
+         call v%replace(w)
+      ENDIF
+
+      end subroutine Resize_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function ExtractSubmatrix_CP8(W,irs,irf,ics,icf) result(V)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Gets CP-submatrix W from list of row, col starting and ending indices
+
+      implicit none
+      CLASS (CP8), INTENT(IN) :: W
+      TYPE (CP8) :: V
+      integer, intent(in)  :: irs(:),irf(:),ics(:),icf(:)
+      integer, allocatable :: rows(:),cols(:)
+      integer :: d,ndof,r,rk,i,k,m,n
+
+      ndof=W%D()
+      rk=W%R()
+
+!     Loads of error checking
+      IF (SIZE(irs).ne.ndof .or. SIZE(irf).ne.ndof .or. &
+          SIZE(ics).ne.ndof .or. SIZE(icf).ne.ndof) THEN
+          write(*,*) 'ndof of M = ',ndof,'; must equal ndof of ALL of',&
+          ' irs,irf,ics,icf, which = ',&
+          SIZE(irs),SIZE(irf),SIZE(ics),SIZE(icf)
+          call AbortWithError('ExtractCPsubmatrix(): bad ranges ndof')
+      ENDIF
+      DO d=1,ndof
+         IF (irs(d).lt.1 .or. irf(d).gt.W%M(d) .or. &
+             irs(d).gt.irf(d)) THEN
+            write(*,*) 'Row ranges: [irs(',d,'),irf(',d,')] = [',&
+            irs(d),',',irf(d),'] must be in range [1,',W%M(d),']'
+            call AbortWithError('ExtractCPsubmatrix(): bad rows ranges')
+         ENDIF
+         IF (ics(d).lt.1 .or. icf(d).gt.W%N(d) .or. &
+             ics(d).gt.icf(d)) THEN
+            write(*,*) 'Col ranges: [ics(',d,'),icf(',d,')] = [',&
+            ics(d),',',icf(d),'] must be in range [1,',W%N(d),']'
+            call AbortWithError('ExtractCPsubmatrix(): bad cols ranges')
+         ENDIF
+      ENDDO
+
+      allocate(rows(ndof),cols(ndof))
+      rows(:)=irf(:)-irs(:)+1
+      cols(:)=icf(:)-ics(:)+1
+      call V%new(rk,rows,cols)
+      deallocate(rows,cols)
+
+!     Copy the selected portion v <- w
+      V%coef(:)=W%coef(:)
+      DO d=1,ndof
+         m=V%M(d)
+         n=V%N(d)
+         DO r=1,rk
+            DO k=1,n
+               DO i=1,m
+                  call V%put(i,k,r,d,W%get(irs(d)+i-1,ics(d)+k-1,r,d))
+               ENDDO
+            ENDDO
+         ENDDO
+      ENDDO
+
+      end function ExtractSubmatrix_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine VecSignChange_CP8(v,ri,re)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Changes sign of CP-vec by negating the base for the first DOF. ri and 
+! re are the rank indices over which over which to change the sign
+
+      implicit none
+      CLASS (CP8), INTENT(INOUT) :: v
+      integer, intent(in) :: ri,re
+      integer :: bs,bf
+
+      bs=v%BS(ri,1)
+      bf=v%BF(re,1)
+      v%base(bs:bf)=-v%base(bs:bf)
+
+      end subroutine VecSignChange_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine VecScalarMult_all_CP8(v,fac)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Multiplies CP object by scalar factor
+
+      implicit none
+      CLASS (CP8), INTENT(INOUT) :: v
+      real(kind=8), intent(in)  :: fac
+
+      call v%mult_terms(fac,1,v%R())
+
+      end subroutine VecScalarMult_all_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine VecScalarMult_gen_CP8(v,fac,ri,re)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Multiplies CP coefs of terms 'ri' through 're' by scalar factor.
+! If the factor is negative then the sign is also changed.
+
+      implicit none
+      CLASS (CP8), INTENT(INOUT) :: v
+      integer, intent(in) :: ri,re
+      real(kind=8), intent(in)  :: fac
+
+      v%coef(ri:re)=abs(fac)*v%coef(ri:re)
+      IF (fac.lt.0.d0) call v%changesign(ri,re)
+
+      end subroutine VecScalarMult_gen_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Sum_CP8(v,vfac,w,wfac)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sums vfac*v and wfac*w in CP-format. The summed vector replaces v;
+! w is unchanged.
+
+      implicit none
+      CLASS (CP8), INTENT(INOUT) :: v
+      TYPE (CP8), INTENT(IN)     :: w
+      real(kind=8), intent(in)  :: vfac,wfac
+      integer :: rv,rw
+
+      IF (.NOT.v%same(w)) THEN
+         write(*,*) 'Dimensions or type of v and w do not match'
+         write(*,*) 'v:'
+         call v%show()
+         write(*,*) 'w:'
+         call w%show()
+         call AbortWithError('Error in sum_cp8()')
+      ENDIF
+
+      rv=v%R()
+      rw=w%R()
+
+!     If one of the two terms is zero, it is replaced by the other
+      IF (rv.eq.1 .and. v%coef(1).eq.0.d0) THEN
+         call v%flush
+         call w%copyto(v)
+         call v%mult(wfac)
+
+      ELSE IF (rw.eq.1 .and. w%coef(1).eq.0.d0) THEN
+         call v%mult(vfac)
+
+!     General case
+      ELSE
+         call v%resize(rv+rw)
+         call v%copy_terms(w,rv+1,rv+rw,1,rw)
+         call v%mult_terms(vfac,1,rv)
+         call v%mult_terms(wfac,rv+1,rv+rw)
+      ENDIF
+
+      end subroutine Sum_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function NewVec_CP8(rk,rows,trans) result(v)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Initializes a new vector in CP-format
+
+      implicit none
+      TYPE (CP8) :: v
+      LOGICAL, INTENT(IN)  :: trans
+      INTEGER, INTENT(IN)  :: rows(:)
+      INTEGER, INTENT(IN)  :: rk
+      INTEGER, ALLOCATABLE :: cols(:)
+      INTEGER :: ndof
+
+      ndof=SIZE(rows)
+      ALLOCATE(cols(ndof))
+      cols(:)=1
+
+      IF (trans) then ! Column vector
+         call v%new(rk,cols,rows)
+      ELSE ! Row vector
+         call v%new(rk,rows,cols)
+      ENDIF
+
+      DEALLOCATE(cols)
+
+      end function NewVec_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function NewSqmat_CP8(rk,rows) result(v)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Initializes a CP-format outer product of square matrices
+
+      implicit none
+      TYPE (CP8) :: v
+      INTEGER, INTENT(IN) :: rows(:)
+      INTEGER, INTENT(IN) :: rk
+      INTEGER   :: ndof
+
+      call v%new(rk,rows,rows)
+
+      end function NewSqmat_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -509,48 +1043,29 @@
 ! Builds a zero CP of rank 1 from reference CP
 
       implicit none
-      TYPE (CP8), intent(in) :: w
+      CLASS (CP8), intent(in) :: w
       TYPE (CP8) :: v
 
-      v=New_CP8(w,1)
+      v=w%clone(1)
       call SetZero_CP8(v)
 
       end function ZeroRef_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function ZeroGen_CP8(rows,cols) result(v)
+      subroutine ZeroGen_CP8(v,rows,cols)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Builds a zero CP of rank 1 from row/col dims
 
       implicit none
-      TYPE (CP8) :: v
+      CLASS (CP8) :: v
       INTEGER, INTENT(IN) :: rows(:), cols(:)
 
-      v=New_CP8(1,rows,cols)
+      call v%new(1,rows,cols)
       call SetZero_CP8(v)
 
-      end function ZeroGen_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine SetZero_CP8(v)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Zeros CP-vector
-
-      implicit none
-      TYPE (CP8), intent(inout) :: v
-      integer :: j,ndof
-
-      ndof=v%D()
-      v%coef=0.d0
-      do j=1,ndof
-         v%data(j)%mat=0.d0
-      enddo
-
-      end subroutine SetZero_CP8
+      end subroutine ZeroGen_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -563,8 +1078,8 @@
       TYPE (CP8) :: v
       TYPE (CP8), INTENT(IN) :: w
       INTEGER, INTENT(IN), OPTIONAL :: rk
-      INTEGER :: rv,d,ndof
-      REAL*8  :: fac
+      INTEGER :: rv,d,ndof,ib,fb
+      REAL(kind=8)  :: fac
 
       IF (present(rk)) THEN
          rv=rk
@@ -575,14 +1090,16 @@
       ndof=v%D()
 
 !     Generate v with random entries and equal coefs for all terms
-      v=New_CP8(w,rv)
+      v=w%clone(rv)
       v%coef(:)=1.d0/sqrt(REAL(rv))
 
 !     Shift, scale entries for each mode to make rms norm ~ unity
       DO d=1,ndof
-         call random_number(v%data(d)%vec(:,:))
+         ib=v%look(1,d)+1
+         fb=v%look(1,d)+v%nbas(d)
+         call random_number(v%base(ib:fb))
          fac=sqrt(12.d0/REAL(v%nbas(d)))
-         v%data(d)%vec=fac*v%data(d)%vec-0.5d0
+         v%base(ib:fb)=fac*v%base(ib:fb)-0.5d0
       ENDDO
 
       end function RandomRef_CP8
@@ -598,17 +1115,11 @@
       TYPE (CP8) :: v
       INTEGER, INTENT(IN) :: rows(:),cols(:)
       INTEGER, INTENT(IN) :: rk
-      INTEGER :: d,ndof
 
-      ndof=v%D()
-
-      v=New_CP8(rk,rows,cols)
+      call v%new(rk,rows,cols)
+      call random_number(v%base)
+      v%base=v%base-0.5d0
       v%coef(:)=1.d0
-
-      DO d=1,ndof
-         call random_number(v%data(d)%vec(:,:))
-         v%data(d)%vec=v%data(d)%vec-0.5d0
-      ENDDO
 
       end function RandomGen_CP8
 
@@ -622,18 +1133,20 @@
       implicit none
       TYPE (CP8) :: v
       integer, intent(in) :: rows(:)
-      integer :: i,j
+      integer :: d,i,l,ndof,m
 
-      v=New_CP8(1,rows)
+      call v%new0(rows,rows)
+      ndof=v%D()
 
 !     Get an identity matrix for each DOF
-      DO j=1,v%D()
-         v%data(j)%mat=0.d0
-         DO i=1,v%M(j)
-            v%data(j)%mat(i,i,1)=1.d0
+      DO d=1,ndof
+         m=v%M(d)
+         l=v%look(1,d)
+         DO i=1,m
+            call v%put(i,i,1,d,1.d0)
          ENDDO
       ENDDO
-      v%coef=1.d0
+      v%coef(1)=1.d0
 
       end function IdentityMatrix_CP8
 
@@ -645,123 +1158,30 @@
 ! Generates square CP-matrix with elements of v on the diagonal
 
       implicit none
-      TYPE (CP8), INTENT(IN) :: v
+      CLASS (CP8), INTENT(IN) :: v
       TYPE (CP8) :: w
-      integer :: d,ndof,i,rk,j
+      integer :: d,ndof,r,rk,i,m,vl,wl
 
       ndof=v%D()
       rk=v%R()
 
-      w=New_CP8(rk,v%nbas,v%nbas)
-      w%coef(:)=v%coef(:)
+      call w%new(rk,v%nbas,v%nbas)
+      call w%zero
 
       DO d=1,ndof
-         DO i=1,rk
+         m=w%M(d)
+         DO r=1,rk
+            vl=v%look(r,d)
+            wl=w%look(r,d)
 !           Copy elements of v to diagonal of w
-            w%data(d)%mat(:,:,i)=0.d0
-            DO j=1,v%nbas(d)
-               w%data(d)%mat(j,j,i)=v%data(d)%vec(j,i)
+            DO i=1,v%nbas(d)
+               w%base(wl+(i-1)*m+i)=v%base(vl+i)
             ENDDO
          ENDDO
       ENDDO
+      w%coef(1:rk)=v%coef(1:rk)
 
       end function VectoDiagMatrix_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine ReplaceVwithW_CP8(v,w)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Copies W into V, disposing W afterwards
-
-      implicit none
-      TYPE (CP8) :: v,w
-
-      call Flush_CP8(v)
-      v=Copy_CP8(w)
-      call Flush_CP8(w)
-
-      end subroutine ReplaceVwithW_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function Copy_all_CP8(w) result(v)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Copies W into V, leaving W intact.
-
-      implicit none
-      TYPE (CP8), INTENT(IN) :: w
-      TYPE (CP8) :: v
-      INTEGER   :: rk
-
-      rk=w%R()
-      v=New_CP8(w,rk)
-      call GenCopyWtoV_CP8(v,w,1,rk,1,rk)
-
-      end function Copy_all_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine GenCopyWtoV_CP8(v,w,vi,ve,wi,we)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Copies a group of consecutive terms in W to consecutive slots in V
-! leaving W intact. v must be allocated beforehand.
-
-      implicit none
-      TYPE (CP8) :: v,w
-      INTEGER, INTENT(IN) :: vi,ve,wi,we
-      INTEGER :: rkv,rkw,d,ndof
-
-      rkv=v%R()
-      rkw=w%R()
-      ndof=w%D()
-
-      IF (.not.CHECKNBAS_CP8(v,w)) THEN
-         write(*,*) 'v,w dimension mismatch'
-         CALL AbortWithError('Error in GenCopyWtoV()')
-      ENDIF
-
-      IF (vi.lt.1 .or. ve.gt.rkv .or. vi.gt.ve .or. &
-          wi.lt.1 .or. we.gt.rkw .or. wi.gt.we .or. &
-          we-wi.ne.ve-vi) THEN
-          write(*,'(2A,6(X,I0))') 'Bad rank indices: ',&
-          'vi,ve,rkv,wi,we,rkw =',vi,ve,rkv,wi,we,rkw
-          CALL AbortWithError('Error in GenCopyWtoV()')
-      ENDIF
-
-      do d=1,ndof
-         v%data(d)%vec(:,vi:ve)=w%data(d)%vec(:,wi:we)
-      enddo
-
-      end subroutine GenCopyWtoV_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine Resize_CP8(v,rk)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Resizes vector v, either by truncating at a smaller rank or by
-! adding space for extra terms.
-
-      implicit none
-      TYPE (CP8), INTENT(INOUT) :: v
-      TYPE (CP8) :: w
-      INTEGER, INTENT(IN) :: rk
-      INTEGER :: rkv
-
-      rkv=v%R()
-
-      IF (rk.lt.1) &
-         call AbortWithError('Error in ResizeV(): rk < 1')
-
-      call ReplaceVwithW_CP8(w,v)
-      v=New_CP8(w,rk)
-      call GenCopyWtoV_CP8(v,w,1,MIN(rkv,rk),1,MIN(rkv,rk))
-      call Flush_CP8(w)
-
-      end subroutine Resize_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -771,9 +1191,9 @@
 ! Transposes CP-matrix by reordering base
 
       implicit none
-      TYPE (CP8), intent(inout) :: v
-      integer :: d,i,j,k,rk,ndof,tmp
-      real*8, allocatable :: btmp(:,:)
+      CLASS (CP8), intent(inout) :: v
+      integer :: d,ndof,r,rk,i,k,l,m,n,nbas,tmp
+      real(kind=8), allocatable :: btmp(:)
 
       rk=v%R()
       ndof=v%D()
@@ -781,15 +1201,17 @@
       DO d=1,ndof
 !        If either dimension is 1, just swap row and col numbers
          IF ((v%rows(d).gt.1) .and. (v%cols(d).gt.1)) THEN
-!           Reorder the elements in temporary array
-            allocate(btmp(v%rows(d),v%cols(d)))
-            DO i=1,rk
-               btmp(:,:)=v%data(d)%mat(1:v%rows(d),1:v%cols(d),i)
-               call FlushPointerMat8(v%data(d))
-               v%data(d)=NewPointerMat8(rk,v%cols(d),v%rows(d))
-               DO j=1,v%rows(d)
-                  DO k=1,v%cols(d)
-                     v%data(d)%mat(k,j,i)=btmp(j,k)
+!           Reorder the elements from the temporary array
+            nbas=v%nbas(d)
+            m=v%rows(d)
+            n=v%cols(d)
+            allocate(btmp(nbas))
+            DO r=1,rk
+               l=v%look(r,d)
+               btmp(1:nbas)=v%base(l+1:l+nbas)
+               DO i=1,m
+                  DO k=1,n
+                     v%base(l+(i-1)*n+k)=btmp((k-1)*m+i)
                   ENDDO
                ENDDO
             ENDDO
@@ -815,7 +1237,7 @@
 
       ALLOCATE(domode(v%D()))
       domode(:)=.TRUE.
-      call MatrixZeroOffDiag_CP8(v,domode)
+      call MatrixZeroOffDiag(v,domode)
       DEALLOCATE(domode)
 
       end subroutine MatrixZeroOffDiag_all_CP8
@@ -840,7 +1262,7 @@
       ALLOCATE(domode(v%D()))
       domode(:)=.FALSE.
       domode(d)=.TRUE.
-      call MatrixZeroOffDiag_CP8(v,domode)
+      call MatrixZeroOffDiag(v,domode)
       DEALLOCATE(domode)
 
       end subroutine MatrixZeroOffDiag_one_CP8
@@ -856,7 +1278,7 @@
       implicit none
       TYPE (CP8), intent(inout) :: v
       logical, intent(in) :: domode(:)
-      integer :: d,ndof,i,rk,j,k
+      integer :: d,ndof,r,rk,i,k,l,m,n
 
       ndof=v%D()
       rk=v%R()
@@ -869,10 +1291,13 @@
 
       DO d=1,ndof
          IF (domode(d)) THEN
-            DO i=1,rk           
-               DO k=1,v%cols(d)
-                  DO j=1,v%rows(d)
-                     IF (k.ne.j) v%data(d)%mat(j,k,i)=0.d0
+            m=v%rows(d)
+            n=v%cols(d)
+            DO r=1,rk
+               l=v%look(r,d)
+               DO k=1,n
+                  DO i=1,m
+                     IF (k.ne.i) v%base(l+(k-1)*m+i)=0.d0
                   ENDDO
                ENDDO
             ENDDO
@@ -890,9 +1315,9 @@
 ! If all columns are zero, then a rank-1 zero vector is returned
 
       implicit none
-      TYPE (CP8), INTENT(INOUT) :: v
+      CLASS (CP8), INTENT(INOUT) :: v
       TYPE (CP8) :: w
-      real*8, intent(in)   :: tol
+      real(kind=8), intent(in)   :: tol
       integer, allocatable :: iok(:)
       integer :: i,nok,rk
 
@@ -910,14 +1335,14 @@
 
       IF (nok.lt.rk) THEN
          IF (nok.gt.0) THEN
-            w=New_CP8(v,rk)
+            w=v%clone(nok)
             DO i=1,nok
-               call GenCopyWtoV_CP8(w,v,i,i,iok(i),iok(i))
+               call w%copy_terms(v,i,i,iok(i),iok(i))
             ENDDO
          ELSE
-            w=Zero_CP8(v)
+            w=v%clone0()
          ENDIF
-         call ReplaceVwithW_CP8(v,w)
+         call v%replace(w)
       ENDIF
 
       DEALLOCATE(iok)
@@ -952,7 +1377,7 @@
       implicit none
       TYPE (CP8), INTENT(INOUT) :: v
       integer, intent(in) :: d
-      integer :: i,ndof,rk
+      integer :: r,rk,ndof,bs,bf
 
       ndof=v%D()
       rk=v%R()
@@ -964,9 +1389,11 @@
       ENDIF
 
 !     Multiply out coefficients
-      DO i=1,rk
-         v%data(d)%mat(:,:,i)=v%coef(i)*v%data(d)%mat(:,:,i)
-         v%coef(i)=1.d0
+      DO r=1,rk
+         bs=v%BS(r,d)
+         bf=v%BF(r,d)
+         v%base(bs:bf)=v%coef(r)*v%base(bs:bf)
+         v%coef(r)=1.d0
       ENDDO
 
       end subroutine MultOutCoefbyMode_CP8
@@ -981,14 +1408,14 @@
 
       implicit none
       TYPE (CP8), INTENT(INOUT) :: v
-      REAL*8, ALLOCATABLE :: pows(:)
-      REAL*8  :: fac,div
-      INTEGER :: d,i,ndof,rk
+      REAL(kind=8), ALLOCATABLE :: pows(:)
+      REAL(kind=8) :: fac,div
+      INTEGER :: d,ndof,r,rk,bs,bf
 
       ndof=v%D()
       rk=v%R()
 
-!     Get the exponents for modes with different nbas values      
+!     Get the exponents for modes with different nbas values
       allocate(pows(ndof))
       div=0.d0
       DO d=1,ndof
@@ -998,12 +1425,14 @@
       pows(:)=pows(:)/div
 
 !     Multiply out coefficient
-      DO i=1,rk
+      DO r=1,rk
          DO d=1,ndof
-            fac=v%coef(i)**pows(d)
-            v%data(d)%mat(:,:,i)=fac*v%data(d)%mat(:,:,i)
+            bs=v%BS(r,d)
+            bf=v%BF(r,d)
+            fac=v%coef(r)**pows(d)
+            v%base(bs:bf)=fac*v%base(bs:bf)
          ENDDO
-         v%coef(i)=1.d0
+         v%coef(r)=1.d0
       ENDDO
 
       deallocate(pows)
@@ -1020,7 +1449,7 @@
       implicit none
       TYPE (CP8), INTENT(IN) :: v
       integer, allocatable, intent(out) :: rowi(:),coli(:)
-      real*8, intent(out) :: val
+      real(kind=8), intent(out) :: val
 
       IF (v%R().ne.1) THEN
          write(*,*) 'Rank of v (',v%R(),') must be 1'
@@ -1042,10 +1471,10 @@
       TYPE (CP8), INTENT(IN) :: v
       integer, intent(in) :: irk
       integer, allocatable, intent(out) :: rowi(:),coli(:)
-      real*8, intent(out) :: val
-      integer :: d,ndof
+      real(kind=8), intent(out) :: val
+      integer :: d,ndof,bs,bf
       integer :: imx(1)
-      real*8  :: vmx
+      real(kind=8) :: vmx
 
       IF (irk.lt.1 .or. irk.gt.v%R()) THEN
          write(*,*) 'irk (',irk,') out of range: [1,',v%R(),']'
@@ -1057,11 +1486,13 @@
 
       val=v%coef(irk)
       DO d=1,ndof
+         bs=v%BS(irk,d)
+         bf=v%BF(irk,d)
 !        Use imx (range [1:v%nbas(d)]) to extract row,col indices
-         imx=MAXLOC(ABS(v%data(d)%vec(:,irk)))
+         imx=MAXLOC(ABS(v%base(bs:bf)))
          rowi(d)=mod(imx(1)-1,v%M(d))+1
          coli(d)=(imx(1)-1)/v%M(d)+1
-         vmx=v%data(d)%mat(rowi(d),coli(d),irk)
+         vmx=v%base(imx(1)-1+bs)
          val=val*vmx
       ENDDO
 
@@ -1081,7 +1512,7 @@
       integer, intent(in)  :: indx(:)
       logical, intent(in)  :: getcol
       integer, allocatable :: one(:)
-      integer :: i,d,ndof,rk
+      integer :: r,d,ndof,rk,i,p
 
       ndof=M%D()
       rk=M%R()
@@ -1089,35 +1520,41 @@
       allocate(one(ndof))
       one(:)=1
       IF (getcol) THEN
-         v=New_CP8(rk,M%rows,one)
+         call v%new(rk,M%rows,one)
       ELSE
-         v=New_CP8(rk,one,M%cols)
+         call v%new(rk,one,M%cols)
       ENDIF
       deallocate(one)
 
-!     Extract base from M      
+!     Extract base from M
       DO d=1,ndof
 !        Error checking
          IF ((indx(d).lt.1) .or. &
-             (getcol.and.(indx(d).gt.M%cols(d))) .or. &
-             ((.not.getcol).and.(indx(d).gt.M%rows(d)))) THEN
+             (getcol.and.(indx(d).gt.M%N(d))) .or. &
+             ((.not.getcol).and.(indx(d).gt.M%M(d)))) THEN
              IF (getcol) THEN
                 write(*,*) 'indx(',d,') = ',indx(d),&
-                           ' must be in [1,',M%cols(d),']'
+                           ' must be in [1,',M%N(d),']'
              ELSE
                 write(*,*) 'indx(',d,') = ',indx(d),&
-                           ' must be in [1,',M%rows(d),']'
+                           ' must be in [1,',M%M(d),']'
              ENDIF
              call AbortWithError('ExtractCPvec(): index out of range')
          ENDIF
 
          IF (getcol) THEN
-            DO i=1,rk
-               v%data(d)%mat(:,1,i)=M%data(d)%mat(:,indx(d),i)
+            p=M%M(d)
+            DO r=1,rk
+               DO i=1,p
+                  call v%put(i,1,r,d,M%get(i,indx(d),r,d))
+               ENDDO
             ENDDO
          ELSE
-            DO i=1,rk
-               v%data(d)%mat(1,:,i)=M%data(d)%mat(indx(d),:,i)
+            p=M%N(d)
+            DO r=1,rk
+               DO i=1,p
+                  call v%put(1,i,r,d,M%get(indx(d),i,r,d))
+               ENDDO
             ENDDO
          ENDIF
       END DO
@@ -1140,7 +1577,7 @@
       TYPE (CP8) :: w
       logical, intent(in)  :: trans
       integer, allocatable :: one(:)
-      integer :: d,ndof,i,rk,j
+      integer :: d,ndof,r,rk,j
 
       rk=v%R()
       ndof=v%D()
@@ -1149,9 +1586,9 @@
       one(:)=1
 
       IF (trans) THEN
-         w=New_CP8(rk,one,v%cols)
+         call w%new(rk,one,v%cols)
       ELSE
-         w=New_CP8(rk,v%rows,one)
+         call w%new(rk,v%rows,one)
       ENDIF
 
 !     Base is taken from diagonal elements of square matrix
@@ -1161,14 +1598,14 @@
             v%cols(d),') but must be square'
             call AbortWithError('ExtractDiagfromCPMatrix: matrix dims')
          ENDIF
-         DO i=1,rk
+         DO r=1,rk
             IF (trans) THEN
                DO j=1,v%rows(d)
-                  w%data(d)%mat(1,j,i)=v%data(d)%mat(j,j,i)
+                  call w%put(1,j,r,d,v%get(j,j,r,d))
                ENDDO
             ELSE
                DO j=1,v%rows(d)
-                  w%data(d)%mat(j,1,i)=v%data(d)%mat(j,j,i)
+                  call w%put(j,1,r,d,v%get(j,j,r,d))
                ENDDO
             ENDIF
          ENDDO
@@ -1183,81 +1620,26 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function ExtractSubmatrix_CP8(M,irs,irf,ics,icf) result(V)
+      subroutine PutSubmatrix_CP8(V,irs,ics,W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Gets CP-submatrix M from list of row, col starting and ending indices
-
-      implicit none
-      TYPE (CP8), INTENT(IN) :: M
-      TYPE (CP8) :: V
-      integer, intent(in)  :: irs(:),irf(:),ics(:),icf(:)
-      integer, allocatable :: rows(:),cols(:)
-      integer :: d,ndof,i,rk
-
-      ndof=M%D()
-      rk=M%R()
-
-!     Loads of error checking
-      IF (SIZE(irs).ne.ndof .or. SIZE(irf).ne.ndof .or. &
-          SIZE(ics).ne.ndof .or. SIZE(icf).ne.ndof) THEN
-          write(*,*) 'ndof of M = ',ndof,'; must equal ndof of ALL of',&
-          ' irs,irf,ics,icf, which = ',&
-          SIZE(irs),SIZE(irf),SIZE(ics),SIZE(icf)
-          call AbortWithError('ExtractCPsubmatrix(): bad ranges ndof')
-      ENDIF
-      DO d=1,ndof
-         IF (irs(d).lt.1 .or. irf(d).gt.M%rows(d) .or. &
-             irs(d).gt.irf(d)) THEN
-            write(*,*) 'Row ranges: [irs(',d,'),irf(',d,')] = [',&
-            irs(d),',',irf(d),'] must be in range [1,',M%rows(d),']'
-            call AbortWithError('ExtractCPsubmatrix(): bad rows ranges')
-         ENDIF
-         IF (ics(d).lt.1 .or. icf(d).gt.M%cols(d) .or. &
-             ics(d).gt.icf(d)) THEN
-            write(*,*) 'Col ranges: [ics(',d,'),icf(',d,')] = [',&
-            ics(d),',',icf(d),'] must be in range [1,',M%cols(d),']'
-            call AbortWithError('ExtractCPsubmatrix(): bad cols ranges')
-         ENDIF
-      ENDDO
-
-      allocate(rows(ndof),cols(ndof))
-      rows(:)=irf(:)-irs(:)+1
-      cols(:)=icf(:)-ics(:)+1
-      V=New_CP8(rk,rows,cols)
-      deallocate(rows,cols)
-
-!     Copy the selected portion v <- M
-      V%coef(:)=M%coef(:)
-      DO d=1,ndof
-         V%data(d)%mat(1:v%rows(d),1:v%cols(d),:)=&
-         M%data(d)%mat(irs(d):irf(d),ics(d):icf(d),:)
-      ENDDO
-
-      end function ExtractSubmatrix_CP8
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine PutSubmatrix_CP8(V,irs,ics,M)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Puts CP-submatrix V into M, overwriting that portion of M, from the 
+! Puts CP-submatrix V into W, overwriting that portion of W, from the
 ! row, col starting indices provided
 
       implicit none
       TYPE (CP8), INTENT(IN) :: V
-      TYPE (CP8), INTENT(INOUT) :: M
+      TYPE (CP8), INTENT(INOUT) :: W
       integer, intent(in)  :: irs(:),ics(:)
       integer, allocatable :: irf(:),icf(:)
-      integer :: d,ndof,i,rk
+      integer :: d,ndof,r,rk,i,m,k,n
 
-      ndof=SIZE(V%nbas)
-      rk=SIZE(V%coef)
+      ndof=V%D()
+      rk=V%R()
 
 !     Error checking extravaganza!
-      IF (M%D().ne.ndof) &
+      IF (W%D().ne.ndof) &
          call AbortWithError('PutCPsubmatrix(): M,V must have = ndof')
-      IF (M%R().ne.rk) &
+      IF (W%R().ne.rk) &
          call AbortWithError('PutCPsubmatrix(): M,V must have = rank')
 
       IF (SIZE(irs).ne.ndof .or. SIZE(ics).ne.ndof ) THEN
@@ -1271,25 +1653,32 @@
       icf(:)=ics(:)+V%cols(:)-1
 
       DO d=1,ndof
-         IF (irs(d).lt.1 .or. irf(d).gt.M%rows(d) .or. &
+         IF (irs(d).lt.1 .or. irf(d).gt.W%M(d) .or. &
              irs(d).gt.irf(d)) THEN
             write(*,*) 'Row ranges: [irs(',d,'),irf(',d,')] = [',&
-            irs(d),',',irf(d),'] must be in range [1,',M%rows(d),']'
+            irs(d),',',irf(d),'] must be in range [1,',W%M(d),']'
             call AbortWithError('PutCPsubmatrix(): bad rows ranges')
          ENDIF
-         IF (ics(d).lt.1 .or. icf(d).gt.M%cols(d) .or. &
+         IF (ics(d).lt.1 .or. icf(d).gt.W%N(d) .or. &
              ics(d).gt.icf(d)) THEN
             write(*,*) 'Col ranges: [ics(',d,'),icf(',d,')] = [',&
-            ics(d),',',icf(d),'] must be in range [1,',M%cols(d),']'
+            ics(d),',',icf(d),'] must be in range [1,',W%N(d),']'
             call AbortWithError('PutCPsubmatrix(): bad cols ranges')
          ENDIF
       ENDDO
 
-!     Copy coefs of V -> M directly, base by reshaping
-      M%coef(:)=V%coef(:)
+!     Overwrite the selected portion of M
+      W%coef(:)=V%coef(:)
       DO d=1,ndof
-         M%data(d)%mat(irs(d):irf(d),ics(d):icf(d),:)=&
-         V%data(d)%mat(1:v%rows(d),1:v%cols(d),:)
+         m=V%M(d)
+         n=V%N(d)
+         DO r=1,rk
+            DO k=1,n
+               DO i=1,m
+                  call W%put(irs(d)+i-1,ics(d)+k-1,r,d,V%get(i,k,r,d))
+               ENDDO
+            ENDDO
+         ENDDO
       ENDDO
 
       deallocate(irf,icf)
@@ -1298,58 +1687,58 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function ExtractMatrixElement_CP8(M,ir,ic)
+      function ExtractMatrixElement_CP8(W,ir,ic) result(res)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Gets element of CP-matrix M from list of row, col indices
+! Gets element of CP-matrix W from list of row, col indices
 
       implicit none
-      TYPE (CP8), INTENT(IN) :: M
+      TYPE (CP8), INTENT(IN) :: W
       integer, intent(in) :: ir(:),ic(:)
-      integer :: d,ndof,i,rk
-      real*8 :: ExtractMatrixElement_CP8
-      real*8, allocatable :: prod(:)
-      real*8, parameter   :: s=1/sqrt(2.d0)
+      integer :: d,ndof,r,rk
+      real(kind=8) :: res
+      real(kind=8), allocatable :: prod(:)
+      real(kind=8), parameter   :: s=1/sqrt(2.d0)
 
-      ndof=M%D()
-      rk=M%R()
+      ndof=W%D()
+      rk=W%R()
 
 !     Error checking: index list sizes, indices in range
       IF (SIZE(ir).ne.ndof) THEN
          write(*,*) 'M has ',ndof,' modes, but "ir" array contains ',&
                     SIZE(ir),' indices'
-         call AbortWithError('GetCPmatrixelement(): wrong # indices')
+         call AbortWithError('ExtractCPmatrixelement(): wrong # indices')
       ENDIF
       IF (SIZE(ic).ne.ndof) THEN
          write(*,*) 'M has ',ndof,' modes, but "ic" array contains ',&
                     SIZE(ic),' indices'
-         call AbortWithError('GetCPmatrixelement(): wrong # indices')
+         call AbortWithError('ExtractCPmatrixelement(): wrong # indices')
       ENDIF
       DO d=1,ndof
-         IF (ir(d).lt.1 .or. ir(d).gt.M%rows(d)) THEN
+         IF (ir(d).lt.1 .or. ir(d).gt.W%M(d)) THEN
             write(*,*) 'row index ir(',d,') = ',ir(d),&
-                       ' is outside of range 1:',M%rows(d)
+                       ' is outside of range 1:',W%M(d)
             call AbortWithError('GetCPmatrixelement(): bad row index')
          ENDIF
-         IF (ic(d).lt.1 .or. ic(d).gt.M%cols(d)) THEN
+         IF (ic(d).lt.1 .or. ic(d).gt.W%N(d)) THEN
             write(*,*) 'col index ic(',d,') = ',ic(d),&
-                       ' is outside of range 1:',M%cols(d)
+                       ' is outside of range 1:',W%N(d)
             call AbortWithError('GetCPmatrixelement(): bad col index')
          ENDIF
       ENDDO
 
 !     Compute the products for each term
       ALLOCATE(prod(rk))
-      prod(:)=M%coef(:)
+      prod(:)=W%coef(:)
 
       DO d=1,ndof
-         DO i=1,rk
-            prod(i)=prod(i)*M%data(d)%mat(ir(d),ic(d),i)           
+         DO r=1,rk
+            prod(r)=prod(r)*W%get(ir(d),ic(d),r,d)
          ENDDO
       ENDDO
 
 !     Now accumulate the sum-over-term-products
-      ExtractMatrixElement_CP8=SUM(prod)
+      res=SUM(prod)
 
       DEALLOCATE(prod)
 
@@ -1388,13 +1777,13 @@
       cols(1:ndofv)=v%cols(:)
       cols(ndofv+1:ndofv+ndofw)=w%cols(:)
 
-      u=New_CP8(rk,rows,cols)
+      call u%new(rk,rows,cols)
       u%coef(:)=v%coef(:)*w%coef(:)
       DO j=1,ndofv
-         u%data(j)%mat(:,:,:)=v%data(j)%mat(:,:,:)
+         u%base(1:SIZE(v%base))=v%base(:)
       ENDDO
       DO j=1,ndofw
-         u%data(ndofv+j)%mat(:,:,:)=w%data(j)%mat(:,:,:)
+         u%base(SIZE(v%base)+1:)=w%base(:)
       ENDDO
 
       DEALLOCATE(rows,cols)
@@ -1412,7 +1801,7 @@
       implicit none
       TYPE (CP8), INTENT(IN) :: F,G
       integer, allocatable  :: indx(:),inmx(:),ir(:),ic(:)
-      real*8  :: valf,valg,vdif,mdif,norm,div
+      real(kind=8)  :: valf,valg,vdif,mdif,norm,div
       integer :: d,ndof
       character(len=64) :: frmt
 
@@ -1422,9 +1811,9 @@
       allocate(indx(2*ndof),inmx(2*ndof),ir(ndof),ic(ndof))
       div=1.d0
       DO d=1,ndof
-         inmx(2*d-1)=F%rows(d)
-         inmx(2*d)=F%cols(d)
-         div=div*REAL(F%rows(d))*REAL(F%cols(d))
+         inmx(2*d-1)=F%M(d)
+         inmx(2*d)=F%N(d)
+         div=div*REAL(F%M(d))*REAL(F%N(d))
       ENDDO
 
       write(*,*)
@@ -1439,8 +1828,8 @@
             ir(d)=indx(2*d-1)
             ic(d)=indx(2*d)
          ENDDO
-         valf=ExtractMatrixElement_CP8(F,ir,ic)
-         valg=ExtractMatrixElement_CP8(G,ir,ic)
+         valf=ExtractMatrixElement(F,ir,ic)
+         valg=ExtractMatrixElement(G,ir,ic)
          vdif=valf-valg
          IF (abs(vdif).gt.abs(mdif)) mdif=vdif
          norm=norm+vdif**2
@@ -1470,34 +1859,38 @@
 
       implicit none
       TYPE (CP8), INTENT(IN) :: v
-      REAL*8, ALLOCATABLE :: M(:,:)
-      INTEGER :: i,j,k,nr,nc,rk
-      REAL*8  :: fac
+      REAL(kind=8), ALLOCATABLE :: M(:,:)
+      INTEGER :: r,rk,j,k,nr,nc
+      REAL(kind=8) :: fac
 
       IF (v%D().ne.2) THEN
          write(*,*) 'Error: must have 2 DOFs in CP-to-matrix transform'
          call AbortWithError('Error in CP2DtoMat()')
       ENDIF
 
-      nr=v%nbas(1)
-      nc=v%nbas(2)
+      nr=v%MN(1)
+      nc=v%MN(2)
       rk=v%R()
 
       ALLOCATE(M(nr,nc))
       M=0.d0
-      DO i=1,rk
+      DO r=1,rk
          IF (nc.le.nr) THEN
             DO k=1,nc
-               fac=v%coef(i)*v%data(2)%vec(k,i)
+!               fac=v%coef(i)*v%data(2)%vec(k,i)
+               fac=v%coef(r)*v%base(v%look(r,2)+k)
                DO j=1,nr
-                  M(j,k)=M(j,k)+fac*v%data(1)%vec(j,i)
+!                  M(j,k)=M(j,k)+fac*v%data(1)%vec(j,i)
+                  M(j,k)=M(j,k)+fac*v%base(v%look(r,1)+j)
                ENDDO
             ENDDO
          ELSE
             DO j=1,nr
-               fac=v%coef(i)*v%data(1)%vec(j,i)
+!               fac=v%coef(i)*v%data(1)%vec(j,i)
+               fac=v%coef(r)*v%base(v%look(r,1)+j)
                DO k=1,nc
-                  M(j,k)=M(j,k)+fac*v%data(2)%vec(k,i)
+!                  M(j,k)=M(j,k)+fac*v%data(2)%vec(k,i)
+                  M(j,k)=M(j,k)+fac*v%base(v%look(r,2)+k)
                ENDDO
             ENDDO
          ENDIF
@@ -1510,7 +1903,7 @@
       subroutine CP2DtoUW_CP8(v,U,W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Extracts directional component matrices U and W from 2D CP-format 
+! Extracts directional component matrices U and W from 2D CP-format
 ! vector 'v'
 ! Arrays for modes 1, 2 are each flattened to give resultant arrays
 ! U(nr1,nc1 x rk), W(nr2,nc2 x rk)
@@ -1518,31 +1911,35 @@
 
       implicit none
       TYPE (CP8), INTENT(IN) :: v
-      REAL*8, ALLOCATABLE, INTENT(OUT) :: U(:,:),W(:,:)
-      INTEGER :: i,j,nu,nw,rk
+      REAL(kind=8), ALLOCATABLE, INTENT(OUT) :: U(:,:),W(:,:)
+      INTEGER :: r,rk,j,nu,nw,us,uf,ws,wf
 
       IF (v%D().ne.2) THEN
          write(*,*) 'Error: must have 2 DOFs in CP-to-matrix transform'
          call AbortWithError('Error in CP2DtoUW()')
       ENDIF
 
-      nu=v%nbas(1)
-      nw=v%nbas(2)
+      nu=v%MN(1)
+      nw=v%MN(2)
       rk=v%R()
 
       ALLOCATE(U(nu,rk),W(nw,rk))
-      U(:,:)=v%data(1)%vec(:,:)
-      W(:,:)=v%data(2)%vec(:,:)
 
 !     Multiply the coef by the base with fewer elements
-      DO i=1,rk
+      DO r=1,rk
+        us=v%BS(r,1)
+        uf=v%BF(r,1)
+        ws=v%BS(r,2)
+        wf=v%BF(r,2)
+        U(:,r)=v%base(us:uf)
+        W(:,r)=v%base(ws:wf) 
         IF (nu.le.nw) THEN
            DO j=1,nu
-              U(j,i)=U(j,i)*v%coef(i)
+              U(j,r)=U(j,r)*v%coef(r)
            ENDDO
         ELSE
            DO j=1,nw
-              W(j,i)=W(j,i)*v%coef(i)
+              W(j,r)=W(j,r)*v%coef(r)
            ENDDO
         ENDIF
       ENDDO
@@ -1581,13 +1978,11 @@
       call bcast(cols,irank)
 
       IF (mpirank.ne.irank) THEN
-         call Flush_CP8(v)
-         v=New_CP8(rk,rows,cols)
+         call v%flush
+         call v%new(rk,rows,cols)
       ENDIF
 
-      DO d=1,ndof
-         call bcast(v%data(d)%mat,irank)
-      ENDDO
+      call bcast(v%base,irank)
       call bcast(v%coef,irank)
 
       DEALLOCATE(rows,cols)
@@ -1596,7 +1991,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      SUBROUTINE MPI_Sync_block_CP8(Q)
+      subroutine MPI_Sync_block_CP8(Q)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 !     MPI CP-format block of vectors
@@ -1607,7 +2002,7 @@
       integer, allocatable :: mvecs(:),moffs(:),mstarts(:),mwidths(:)
       real*8, allocatable  :: cpblock(:)
       integer :: nbloc,ndofs,termlen
-      integer :: p,b,i,j,ierr,totlen,ist,nbas
+      integer :: p,b,i,j,ierr,totlen,ist,nbas,bs,bf
 
       nbloc=SIZE(Q)
 
@@ -1642,7 +2037,7 @@
       endif
       call bcast(ndofs)
 
-!     Arrays of rows, cols, are same for all vectors in the block 
+!     Arrays of rows, cols, are same for all vectors in the block
       ALLOCATE(dims(ndofs,2))
       if (mpirank.eq.0) then
          dims(:,1)=Q(1)%rows(:)
@@ -1679,7 +2074,7 @@
       enddo
 
 !     Pack the base and coefs into the big array
-      ALLOCATE(cpblock(0:totlen-1))
+      ALLOCATE(cpblock(totlen))
       cpblock(:)=0.d0
       do p=1,mvecs(mpirank+1)
          b=moffs(mpirank+1)+p
@@ -1689,11 +2084,11 @@
          ist=ist+ranks(b)
 !        Copy factor matrices to big array
          do j=1,ndofs
-            nbas=dims(j,1)*dims(j,2)
-            do i=1,ranks(b)
-               cpblock(ist+1:ist+nbas)=Q(b)%data(j)%vec(:,i)
-               ist=ist+nbas
-            enddo
+            nbas=dims(j,1)*dims(j,2)*ranks(b)
+            bs=Q(b)%BS(1,j)
+            bf=Q(b)%BF(ranks(b),j)
+            cpblock(ist+1:ist+nbas)=Q(b)%base(bs:bf)
+            ist=ist+nbas
          enddo
       enddo
 
@@ -1703,19 +2098,19 @@
 
 !     Reconstruct the block of CP vectors on all MPI ranks
       do b=1,nbloc
-         call Flush_CP8(Q(b))
-         Q(b)=New_CP8(ranks(b),dims(:,1),dims(:,2))
+         call Q(b)%flush
+         call Q(b)%new(ranks(b),dims(:,1),dims(:,2))
 !        Copy coefs from big array
          ist=starts(b)
          Q(b)%coef(1:ranks(b))=cpblock(ist+1:ist+ranks(b))
          ist=ist+ranks(b)
 !        Copy factor matrices from big array
          do j=1,ndofs
-            nbas=dims(j,1)*dims(j,2)
-            do i=1,ranks(b)
-               Q(b)%data(j)%vec(:,i)=cpblock(ist+1:ist+nbas)
-               ist=ist+nbas
-            enddo
+            nbas=dims(j,1)*dims(j,2)*ranks(b)
+            bs=Q(b)%BS(1,j)
+            bf=Q(b)%BF(ranks(b),j)
+            Q(b)%base(bs:bf)=cpblock(ist+1:ist+nbas)
+            ist=ist+nbas
          enddo
       enddo
 

@@ -69,6 +69,7 @@ COBJS = \
 	${OBJDIR}/ModeComb.o \
 	${OBJDIR}/SepdRepn.o \
 	${OBJDIR}/CPr8.o \
+	${OBJDIR}/TestCPr8.o \
 	${OBJDIR}/CPConfig.o \
 	${OBJDIR}/FFPES.o \
 	${OBJDIR}/MODVECVECML.o \
@@ -93,27 +94,8 @@ MOBJS = \
 	${OBJDIR}/ModeH.o \
 	${OBJDIR}/BlockPower.o \
 	${OBJDIR}/LinSolver.o \
-	${OBJDIR}/CPMath.o \
-	${OBJDIR}/HGOrtho.o \
-	${OBJDIR}/HG.o \
-	${OBJDIR}/CPR.o \
-	${OBJDIR}/TestCPR.o \
-	${OBJDIR}/toy.o \
-	${OBJDIR}/MSBII.o \
-	${OBJDIR}/InvItn.o \
 	${OBJDIR}/Solver.o \
 	${OBJDIR}/MLmain.o
-
-# CS-PES objects
-CSOBJ = \
-	${OBJDIR}/GenConfig.o \
-	${OBJDIR}/CStools.o \
-	${OBJDIR}/ModeGrid.o \
-	${OBJDIR}/SAMPLEPES.o \
-	${OBJDIR}/RestartCSPES.o \
-	${OBJDIR}/BPsimpleCF.o \
-	${OBJDIR}/BPsimpleCP.o \
-	${OBJDIR}/CSPES.o
 
 #-----------------------------------------------------------------------
 #       Construct the compile and link variables
@@ -129,21 +111,14 @@ COMPILE                 = ${FC} ${COMPILEFLG} ${MODULEFLG} ${OBJDIR}
 .SUFFIXES: .f90 .o .x
 
 MLEXEFILE = mlcp.x
-CSEXEFILE = cspes.x
 
 # Make target to build all the object files and assemble them
-all : ${MLEXEFILE} ${CSEXEFILE}
+all : ${MLEXEFILE} 
 
 mlcp : ${MLEXEFILE}
 
-cspes : ${CSEXEFILE}
-
 ${MLEXEFILE}: ${COBJS} ${MOBJS}
 	${COMPILE} -o ${MLEXEFILE} ${COBJS} ${MOBJS} ${LIBFLG}
-	mv *.mod ${OBJDIR}
-
-${CSEXEFILE}: ${COBJS} ${CSOBJ}
-	${COMPILE} -o ${CSEXEFILE} ${COBJS} ${CSOBJ} ${LIBFLG}
 	mv *.mod ${OBJDIR}
 
 # Make a target object file by compiling the fortran code
@@ -219,6 +194,9 @@ ${OBJDIR}/SepdRepn.o     : ${SRCDIR}/SepdRepn.f90 ${COMMONDEP1}
 
 # CP-format types
 ${OBJDIR}/CPr8.o         : ${SRCDIR}/CPr8.f90 ${COMMONDEP1}
+
+# Test CP-format types
+${OBJDIR}/TestCPr8.o     : ${SRCDIR}/TestCPr8.f90 ${OBJDIR}/CPr8.o ${COMMONDEP1}
 
 # CP configuration module
 ${OBJDIR}/CPConfig.o     : ${SRCDIR}/CPConfig.f90 ${OBJDIR}/SepdRepn.o ${COMMONDEP1}
@@ -298,50 +276,11 @@ ${OBJDIR}/BlockPower.o   : ${SRCDIR}/BlockPower.f90 ${OBJDIR}/CPMM.o \
 ${OBJDIR}/LinSolver.o    : ${SRCDIR}/LinSolver.f90 ${OBJDIR}/ALSPow.o \
 	                   ${OBJDIR}/CPMM.o ${COMMONDEP2}
 
-# CP math operations
-${OBJDIR}/CPMath.o       : ${SRCDIR}/CPMath.f90 ${OBJDIR}/LinSolver.o \
-	                   ${OBJDIR}/CPMM.o ${OBJDIR}/ALS.o ${COMMONDEP2}
-
-# CP orthogonalization
-${OBJDIR}/HGOrtho.o      : ${SRCDIR}/HGOrtho.f90 ${OBJDIR}/CPMM.o \
-                           ${OBJDIR}/CPMath.o ${OBJDIR}/ALS.o ${COMMONDEP2}
-
-# CP diagonalization
-${OBJDIR}/HG.o           : ${SRCDIR}/HG.f90 ${OBJDIR}/CPMath.o \
-	                   ${OBJDIR}/LinSolver.o ${OBJDIR}/HGOrtho.o \
-	                   ${OBJDIR}/CPMM.o \
-	                   ${OBJDIR}/ALS.o ${COMMONDEP2}
-
-# CP-in-rank format
-${OBJDIR}/CPR.o          : ${SRCDIR}/CPR.f90 ${OBJDIR}/CPMath.o \
-                           ${OBJDIR}/LinSolver.o ${OBJDIR}/HGOrtho.o \
-                           ${OBJDIR}/CPMM.o \
-                           ${OBJDIR}/ALS.o ${COMMONDEP2}
-
-# CP-in-rank format
-${OBJDIR}/TestCPR.o      : ${SRCDIR}/TestCPR.f90 ${OBJDIR}/CPMath.o \
-                           ${OBJDIR}/LinSolver.o ${OBJDIR}/HGOrtho.o \
-                           ${OBJDIR}/CPMM.o ${OBJDIR}/CPR.o \
-                           ${OBJDIR}/ALS.o ${COMMONDEP2}
-
-# CP diagonalization toy problem
-${OBJDIR}/toy.o          : ${SRCDIR}/toy.f90 ${OBJDIR}/CPMath.o \
-                           ${OBJDIR}/LinSolver.o ${OBJDIR}/HGOrtho.o \
-                           ${OBJDIR}/CPMM.o ${OBJDIR}/ALS.o ${COMMONDEP2}
-
-# MSBII solver
-${OBJDIR}/MSBII.o        : ${SRCDIR}/MSBII.f90 ${OBJDIR}/LinSolver.o \
-                           ${OBJDIR}/ALS.o ${OBJDIR}/BlockUtils.o ${COMMONDEP2}
-${OBJDIR}/InvItn.o       : ${SRCDIR}/InvItn.f90 ${OBJDIR}/LinSolver.o \
-                           ${OBJDIR}/ALS.o ${COMMONDEP2}
-
 # Eigensolver
 ${OBJDIR}/Solver.o       : ${SRCDIR}/Solver.f90 ${OBJDIR}/BlockPower.o \
                            ${OBJDIR}/ALSPow.o ${OBJDIR}/Restart.o \
                            ${OBJDIR}/ALSUtils.o ${OBJDIR}/LinSolver.o \
-			   ${OBJDIR}/CPMath.o ${OBJDIR}/HG.o \
-			   ${OBJDIR}/toy.o ${OBJDIR}/MSBII.o \
-			   ${OBJDIR}/InvItn.o ${COMMONDEP2} 
+			   ${COMMONDEP2} 
 
 # Main MLCP program
 ${OBJDIR}/MLmain.o       : ${SRCDIR}/MLmain.f90 ${OBJDIR}/HamilSetup.o \
@@ -349,37 +288,5 @@ ${OBJDIR}/MLmain.o       : ${SRCDIR}/MLmain.f90 ${OBJDIR}/HamilSetup.o \
                            ${OBJDIR}/Guess.o ${OBJDIR}/Solver.o \
                            ${OBJDIR}/Updater.o ${OBJDIR}/Analyzer.o \
                            ${OBJDIR}/ALSPow.o ${OBJDIR}/LinSolver.o \
-			   ${OBJDIR}/TestCPR.o ${COMMONDEP2}
-
-# Generating config lists
-${OBJDIR}/GenConfig.o    : ${SRCDIR}/GenConfig.f90 ${COMMONDEP1}
-
-# Tools for CS
-${OBJDIR}/CStools.o      : ${SRCDIR}/CStools.f90 ${OBJDIR}/GenConfig.o \
-                           ${COMMONDEP2}
-
-# Reading grid input file
-${OBJDIR}/ModeGrid.o     : ${SRCDIR}/ModeGrid.f90 ${COMMONDEP2}
-
-# PES sampling
-${OBJDIR}/SAMPLEPES.o    : ${SRCDIR}/SAMPLEPES.f90 ${COMMONDEP2}
-
-# CSPES restarts
-${OBJDIR}/RestartCSPES.o : ${SRCDIR}/RestartCSPES.f90 ${OBJDIR}/ModeGrid.o \
-                           ${OBJDIR}/SAMPLEPES.o ${COMMONDEP2}
-
-# Basis pursuit (CP)
-${OBJDIR}/BPsimpleCP.o   : ${SRCDIR}/BPsimpleCP.f90 ${OBJDIR}/ModeGrid.o \
-                           ${OBJDIR}/CStools.o ${OBJDIR}/RestartCSPES.o \
-                           ${COMMONDEP2}
-
-# Basis pursuit (configs)
-${OBJDIR}/BPsimpleCF.o   : ${SRCDIR}/BPsimpleCF.f90 ${OBJDIR}/ModeGrid.o \
-                           ${OBJDIR}/CStools.o ${OBJDIR}/RestartCSPES.o \
-                           ${COMMONDEP2}
-
-# Main CSPES program
-${OBJDIR}/CSPES.o        : ${SRCDIR}/CSPES.f90 ${OBJDIR}/SAMPLEPES.o \
-                           ${OBJDIR}/BPsimpleCP.o ${OBJDIR}/BPsimpleCF.o \
-                           ${OBJDIR}/RestartCSPES.o ${COMMONDEP2}
+			   ${OBJDIR}/TestCPr8.o ${COMMONDEP2}
 

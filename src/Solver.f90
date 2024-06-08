@@ -15,14 +15,7 @@
       USE ALSPOW
       USE ALSUTILS
       USE ALSDRVR
-!!!
-!      USE LINSOLVER
-!      USE CPMATH
-!      USE HG
-!      USE TOY
-!      USE MSBII
-!      USE INVITN
-!!!
+
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -278,11 +271,10 @@
       implicit none
       TYPE (CPpar), INTENT(INOUT) :: cpp
       TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
-      TYPE (CP), ALLOCATABLE :: Qg(:)
       TYPE (CP), INTENT(IN)  :: H,W
       real*8, allocatable, intent(inout) :: eigv(:)
       real*8, allocatable, intent(inout) :: delta(:)
-      real*8, allocatable  :: eigg(:),eigtmp(:),ccoef(:)
+      real*8, allocatable  :: eigtmp(:),ccoef(:)
       real*8  :: bounds(2)
       integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp
       logical :: conv,showFmG,diag,readsuccess
@@ -296,15 +288,6 @@
       oldrms=1.d99
       bounds=0.d0
       styp=GetSolverType(cpp,Q)
-
-!     For Davidson alg, save guess eigenvalues and vectors
-!      IF (styp.eq.-2) THEN
-!         ALLOCATE(Qg(nev),eigg(nev))
-!         eigg(:)=eigv(:)
-!         DO j=1,nev
-!            Qg(j)=CopyCP(Q(j))
-!         ENDDO
-!      ENDIF
 
       call DetermineDiag(Q,diag)
       call ShowPsiMem(eigv,cpp,Q,H,styp)
@@ -366,7 +349,7 @@
          eigtmp=eigv
 
 !        Run iterations using the solver of choice
-         call Iterate(Qg,Q,H,W,eigg,eigtmp,eigv,cpp,bounds,nloc,i,styp)
+         call Iterate(Q,H,W,eigtmp,eigv,cpp,bounds,nloc,i,styp)
 
          IF (styp.eq.-3) EXIT
 
@@ -418,14 +401,12 @@
       ENDDO  ! Loop over cycles
 
       DEALLOCATE(eigtmp)
-      IF (ALLOCATED(Qg)) DEALLOCATE(Qg)
-      IF (ALLOCATED(eigg)) DEALLOCATE(eigg)
 
       end subroutine SolveHPsi
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine Iterate(Qg,Q,H,W,eigg,eigvo,eigv,cpp,bounds,nconv,i,styp)
+      subroutine Iterate(Q,H,W,eigvo,eigv,cpp,bounds,nconv,i,styp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Performs iterations of various types, depending on the value of styp:
@@ -433,11 +414,11 @@
       implicit none
       TYPE (CPpar), INTENT(IN)    :: cpp
       TYPE (CP), INTENT(INOUT) :: Q(:)
-      TYPE (CP), INTENT(IN)    :: Qg(:),H,W
+      TYPE (CP), INTENT(IN)    :: H,W
       integer, intent(inout) :: nconv
       integer, intent(in)    :: i,styp
       real*8, intent(inout)  :: eigv(:)
-      real*8, intent(in)     :: eigg(:),eigvo(:),bounds(2)
+      real*8, intent(in)     :: eigvo(:),bounds(2)
       real*8, parameter      :: tol=1.d-15
       character(len=18)      :: tag
       real*8  :: Eshift
