@@ -43,7 +43,7 @@
       write(*,*) '****************************************************'
       write(*,'(/X,A/)') 'RandomRef_CP8 test:'
       write(*,*) '****************************************************'
-      F=Random_CP(rk,rows,cols) 
+      call F%newrand(rk,rows,cols) 
       write(*,'(/X,A/)') 'ShowStats_CP8 test:'
       call F%show
       write(*,'(/X,A/)') 'PrintMat_CP8 test:'
@@ -55,7 +55,7 @@
       write(*,*) '****************************************************'
       write(*,'(/X,A/)') 'IdentityMatrix_CP8 test'
       write(*,*) '****************************************************'
-      F=IdentityMatrix(rows)
+      call F%identity(rows)
       call F%printmat
       call Flush_CP8(F) !call F%flush
 
@@ -66,7 +66,7 @@
       cols(:)=2
       rows(1)=3
       cols(2)=3
-      F=Random_CP(rk,rows,cols)
+      call F%newrand(rk,rows,cols)
       write(*,*) 'F:'
       call F%printmat
       G=F%diag()
@@ -116,7 +116,7 @@
       write(*,*) '****************************************************'
       rows=(/4,3,2/)
       cols=(/1,1,1/)
-      F=Random_CP(rk,rows,cols)
+      call F%newrand(rk,rows,cols)
       call F%printmat
       call F%transpose() !MatrixTranspose_CP(F)
       call F%printmat
@@ -129,7 +129,7 @@
       write(*,*) '****************************************************'
       rows=(/4,3,2/)
       cols=(/2,3,4/)
-      F=Random_CP(rk,rows,cols)
+      call F%newrand(rk,rows,cols)
       call F%printmat
       call F%transpose() !MatrixTranspose_CP(F)
       call F%printmat
@@ -213,7 +213,7 @@
       write(*,'(/X,A/)') 'ExtractDiagfromMatrix_CP8:'
       write(*,*) '****************************************************'
       rows(:)=4
-      F=Random_CP(rk,rows,rows)
+      call F%newrand(rk,rows,rows)
       write(*,*) 'F:'
       call F%printmat
       write(*,*) 'G: F diagonal as column vec:'
@@ -231,7 +231,7 @@
       write(*,*) '****************************************************'
       rows=(/5,4,3/)
       cols=(/3,4,5/)
-      F=Random_CP(rk,rows,cols)
+      call F%newrand(rk,rows,cols)
       write(*,*) 'F:'
       call F%printmat
       F%coef=(/1.d0,2.d0/)
@@ -275,7 +275,7 @@
       rows(:)=4
       cols(:)=1
       write(*,*) 'F:'
-      F=Random_CP(rk,rows,cols)
+      call F%newrand(rk,rows,cols)
       call F%printvec
       write(*,*) 'G:'
       call G%new0(rows,cols) !G=Zero_CP(rows,cols)

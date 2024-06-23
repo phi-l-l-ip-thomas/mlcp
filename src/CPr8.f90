@@ -20,9 +20,14 @@
          REAL(KIND=8), ALLOCATABLE :: base(:),coef(:)
          CONTAINS
             PROCEDURE :: new => NewGen_CP8
-            PROCEDURE :: new0 => ZeroGen_CP8 
+            PROCEDURE :: new0 => ZeroGen_CP8
+            PROCEDURE :: newrand => RandomGen_CP8
+            PROCEDURE :: newvec => NewVec_CP8
+            PROCEDURE :: newsquarematrix => NewSqmat_CP8
+            PROCEDURE :: identity => IdentityMatrix_CP8
             PROCEDURE :: clone => NewRef_CP8
             PROCEDURE :: clone0 => ZeroRef_CP8
+            PROCEDURE :: clonerand => RandomRef_CP8
             PROCEDURE :: flush => Flush_CP8
             PROCEDURE :: zero => SetZero_CP8
             PROCEDURE :: show => ShowStats_CP8
@@ -46,6 +51,7 @@
             PROCEDURE :: copyto => Copy_all_CP8
             PROCEDURE :: replace => ReplaceVwithW_CP8
             PROCEDURE :: resize => Resize_CP8
+            PROCEDURE :: extendrand => RandomExtend_CP8 
             PROCEDURE :: submatrix => ExtractSubmatrix_CP8
             PROCEDURE :: changesign => VecSignChange_CP8
             PROCEDURE :: mult => VecScalarMult_all_CP8
@@ -55,21 +61,6 @@
             PROCEDURE :: transpose => MatrixTranspose_CP8
             PROCEDURE :: trim => TrimZeros_CP8
       END TYPE CP8
-
-      INTERFACE New_CP
-         MODULE PROCEDURE NewVec_CP8,NewSqmat_CP8
-!         MODULE PROCEDURE NewVec_CP4,NewSqmat_CP4
-      END INTERFACE New_CP
-
-      INTERFACE Random_CP
-         MODULE PROCEDURE RandomGen_CP8,RandomRef_CP8
-!         MODULE PROCEDURE RandomGen_CP4,RandomRef_CP4
-      END INTERFACE Random_CP
-
-      INTERFACE IdentityMatrix
-         MODULE PROCEDURE IdentityMatrix_CP8
-!         MODULE PROCEDURE IdentityMatrix_CP4
-      END INTERFACE IdentityMatrix
 
       INTERFACE MatrixZeroOffDiag
          MODULE PROCEDURE MatrixZeroOffDiag_all_CP8
@@ -130,7 +121,7 @@
 !!!   MOVE to Reduction or SVD modules
       INTERFACE CP2DtoMat
         MODULE PROCEDURE CP2DtoMat_CP8
-        MODULE PROCEDURE CP2DtoMat_CP4
+!        MODULE PROCEDURE CP2DtoMat_CP4
       END INTERFACE CP2DtoMat
 
 !!!   MOVE to Reduction or SVD modules
@@ -226,15 +217,15 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function NewRef_CP8(w,rk) result(v)
+      subroutine NewRef_CP8(v,w,rk)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Initializes CP-matrix v, using sizes in w (including the rank, if not
 ! passed as an optional argument)
 
       implicit none
-      TYPE (CP8)  :: v
-      CLASS (CP8), INTENT(IN) :: w
+      CLASS (CP8)  :: v
+      TYPE (CP8), INTENT(IN) :: w
       INTEGER, INTENT(IN), OPTIONAL :: rk
 
       IF (present(rk)) THEN
@@ -243,7 +234,7 @@
          call v%new(w%R(),w%rows,w%cols)
       ENDIF
 
-      end function NewRef_CP8
+      end subroutine NewRef_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -781,7 +772,7 @@
       INTEGER   :: rk
 
       rk=w%R()
-      v=w%clone(rk)
+      call v%clone(w,rk)
       call v%copy_terms(w,1,rk,1,rk)
 
       end subroutine Copy_all_CP8
@@ -823,7 +814,7 @@
          call AbortWithError('Error in ResizeV(): rk < 1')
 
       IF (rk.ne.rkv) THEN
-         w=v%clone(rk)
+         call w%clone(v,rk)
          call w%copy_terms(v,1,MIN(rkv,rk),1,MIN(rkv,rk))
          call v%replace(w)
       ENDIF
@@ -991,13 +982,13 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function NewVec_CP8(rk,rows,trans) result(v)
+      subroutine NewVec_CP8(v,rk,rows,trans)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Initializes a new vector in CP-format
 
       implicit none
-      TYPE (CP8) :: v
+      CLASS (CP8) :: v
       LOGICAL, INTENT(IN)  :: trans
       INTEGER, INTENT(IN)  :: rows(:)
       INTEGER, INTENT(IN)  :: rk
@@ -1016,24 +1007,24 @@
 
       DEALLOCATE(cols)
 
-      end function NewVec_CP8
+      end subroutine NewVec_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function NewSqmat_CP8(rk,rows) result(v)
+      subroutine NewSqmat_CP8(v,rk,rows)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Initializes a CP-format outer product of square matrices
 
       implicit none
-      TYPE (CP8) :: v
+      CLASS (CP8) :: v
       INTEGER, INTENT(IN) :: rows(:)
       INTEGER, INTENT(IN) :: rk
       INTEGER   :: ndof
 
       call v%new(rk,rows,rows)
 
-      end function NewSqmat_CP8
+      end subroutine NewSqmat_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1046,7 +1037,7 @@
       CLASS (CP8), intent(in) :: w
       TYPE (CP8) :: v
 
-      v=w%clone(1)
+      call w%clone(v,1)
       call SetZero_CP8(v)
 
       end function ZeroRef_CP8
@@ -1069,16 +1060,16 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function RandomRef_CP8(w,rk) result(v)
+      subroutine RandomRef_CP8(v,w,rk)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Builds a CP item with random entries, with dimensions of reference w
 
       implicit none
-      TYPE (CP8) :: v
+      CLASS (CP8) :: v
       TYPE (CP8), INTENT(IN) :: w
       INTEGER, INTENT(IN), OPTIONAL :: rk
-      INTEGER :: rv,d,ndof,ib,fb
+      INTEGER :: rv,d,ndof,ms,mf
       REAL(kind=8)  :: fac
 
       IF (present(rk)) THEN
@@ -1090,29 +1081,29 @@
       ndof=v%D()
 
 !     Generate v with random entries and equal coefs for all terms
-      v=w%clone(rv)
+      call v%clone(w,rv)
       v%coef(:)=1.d0/sqrt(REAL(rv))
 
 !     Shift, scale entries for each mode to make rms norm ~ unity
       DO d=1,ndof
-         ib=v%look(1,d)+1
-         fb=v%look(1,d)+v%nbas(d)
-         call random_number(v%base(ib:fb))
+         ms=v%ms(d)
+         mf=v%mf(d)
+         call random_number(v%base(ms:mf))
          fac=sqrt(12.d0/REAL(v%nbas(d)))
-         v%base(ib:fb)=fac*v%base(ib:fb)-0.5d0
+         v%base(ms:mf)=fac*v%base(ms:mf)-0.5d0
       ENDDO
 
-      end function RandomRef_CP8
+      end subroutine RandomRef_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function RandomGen_CP8(rk,rows,cols) result(v)
+      subroutine RandomGen_CP8(v,rk,rows,cols)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Builds a CP item with random entries. No normalization is done.
 
       implicit none
-      TYPE (CP8) :: v
+      CLASS (CP8) :: v
       INTEGER, INTENT(IN) :: rows(:),cols(:)
       INTEGER, INTENT(IN) :: rk
 
@@ -1121,17 +1112,39 @@
       v%base=v%base-0.5d0
       v%coef(:)=1.d0
 
-      end function RandomGen_CP8
+      end subroutine RandomGen_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function IdentityMatrix_CP8(rows) result(v)
+      subroutine RandomExtend_CP8(v,rk)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Augments v to rank rk by adding random terms with small coefficients
+
+      implicit none
+      CLASS (CP8) :: v
+      TYPE (CP8)  :: w
+      integer, intent(in) :: rk
+      integer :: rkv
+      real(kind=8), parameter :: smallnr=1.d-12
+
+      rkv=v%R()
+      if (rkv.ge.rk) return      
+      call v%clonerand(w,rk-rkv)
+      call v%sumcp(1.d0,w,smallnr)
+      call w%flush
+
+      end subroutine RandomExtend_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine IdentityMatrix_CP8(v,rows)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Gets rank-1 CP outer-product-of-identity-matrices
 
       implicit none
-      TYPE (CP8) :: v
+      CLASS (CP8) :: v
       integer, intent(in) :: rows(:)
       integer :: d,i,l,ndof,m
 
@@ -1148,7 +1161,7 @@
       ENDDO
       v%coef(1)=1.d0
 
-      end function IdentityMatrix_CP8
+      end subroutine IdentityMatrix_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1335,7 +1348,7 @@
 
       IF (nok.lt.rk) THEN
          IF (nok.gt.0) THEN
-            w=v%clone(nok)
+            call w%clone(v,nok)
             DO i=1,nok
                call w%copy_terms(v,i,i,iok(i),iok(i))
             ENDDO
