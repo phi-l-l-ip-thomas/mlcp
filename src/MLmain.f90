@@ -24,9 +24,6 @@
       USE UPDATER
       USE ANALYZER
       USE CHEBLIB
-!!!
-      USE TESTCPR8
-!!!
 
       implicit none
       TYPE (CPpar)        :: cpp
@@ -71,10 +68,6 @@
 !     Initialize random number generator
       CALL CPU_TIME(t2)
       CALL InitRandom(t2-t1,d,t,cpp%rs,rs)
-
-!!!   TEST
-!      call maintestcpr8
-!!!
 
 !     Set up and sort operators into layers; solve bottom layer nodes
       CALL SetupHamiltonian(cpp%system,cpp%opt,Ham,ML)

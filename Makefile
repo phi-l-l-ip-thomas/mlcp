@@ -192,12 +192,6 @@ ${OBJDIR}/ModeComb.o     : ${SRCDIR}/ModeComb.f90 ${COMMONDEP1}
 # CP-format types
 ${OBJDIR}/SepdRepn.o     : ${SRCDIR}/SepdRepn.f90 ${COMMONDEP1}
 
-# CP-format types
-${OBJDIR}/CPr8.o         : ${SRCDIR}/CPr8.f90 ${COMMONDEP1}
-
-# Test CP-format types
-${OBJDIR}/TestCPr8.o     : ${SRCDIR}/TestCPr8.f90 ${OBJDIR}/CPr8.o ${COMMONDEP1}
-
 # CP configuration module
 ${OBJDIR}/CPConfig.o     : ${SRCDIR}/CPConfig.f90 ${OBJDIR}/SepdRepn.o ${COMMONDEP1}
 
@@ -288,5 +282,5 @@ ${OBJDIR}/MLmain.o       : ${SRCDIR}/MLmain.f90 ${OBJDIR}/HamilSetup.o \
                            ${OBJDIR}/Guess.o ${OBJDIR}/Solver.o \
                            ${OBJDIR}/Updater.o ${OBJDIR}/Analyzer.o \
                            ${OBJDIR}/ALSPow.o ${OBJDIR}/LinSolver.o \
-			   ${OBJDIR}/TestCPr8.o ${COMMONDEP2}
+			   ${COMMONDEP2}
 
