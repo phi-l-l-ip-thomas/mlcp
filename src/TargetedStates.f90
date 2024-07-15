@@ -15,7 +15,8 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       subroutine GetStatesinWindow(nbloc,evalsND,qns,evals1Dr,nbas,&
-                  nmode,nexci,nmtarget,netarget,Etarget,mstate)
+                  nmode,nexci,nexmx,nmtarget,netarget,&
+                  mxtarget,Etarget,mstate)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sorts eigenvalues of a direct product separable wavefunction
@@ -25,18 +26,18 @@
       real*8, intent(inout)  :: evalsND(:)
       integer, intent(in)    :: nbloc
       integer, intent(in)    :: nbas(:)
-      integer, intent(in)    :: nmode(:,:),nexci(:,:)
-      integer, intent(in)    :: nmtarget(2),netarget(2)
+      integer, intent(in)    :: nmode(:,:),nexci(:,:),nexmx(:,:)
+      integer, intent(in)    :: nmtarget(2),netarget(2),mxtarget(2)
       integer, intent(out)   :: mstate
       real*8, intent(in)     :: Etarget
       real*8, intent(in)     :: evals1Dr(:,:)
       integer, allocatable   :: iranges(:,:),nranges(:),indx(:),jndx(:)
-      integer, allocatable   :: nmranges(:,:),neranges(:,:)
+      integer, allocatable   :: nmranges(:,:),neranges(:,:),mxranges(:,:)
       real*8, allocatable    :: Eranges(:,:),evals1D(:,:),Edifs(:)
       real*8, parameter      :: smallnr=1.d-8
       real*8  :: ZPE,Esofar,eps
       integer :: i,j,k,l,ndof,prodND,nguess,ii,jj,ind,istate
-      integer :: nmax,imin,imax,nmsofar,nexsofar
+      integer :: nmax,imin,imax,nmsofar,nexsofar,mexsofar
       character(len=64) :: frmt
 
       ndof=SIZE(nbas)
@@ -55,7 +56,7 @@
       ENDDO
 
       ALLOCATE(indx(ndof),nranges(ndof),jndx(ndof),iranges(nmax,ndof),Eranges(ndof,2))
-      ALLOCATE(nmranges(ndof,2),neranges(ndof,2))
+      ALLOCATE(nmranges(ndof,2),neranges(ndof,2),mxranges(ndof,2))
 
 !     Esofar holds sum of energies of modes whose indices vary more
 !     slowly than or equal to that of mode i,
@@ -92,6 +93,11 @@
          neranges(i,2)=neranges(i-1,2)+maxval(nexci(1:nbas(i),i))
       ENDDO
 
+!     mexsofar, mxranges: just keeps values inside limits
+      mexsofar=0
+      mxranges(:,1)=mxtarget(1)
+      mxranges(:,2)=mxtarget(2)
+
       ! Initialize loop limits for outermost mode
       call GetIndexRanges(evals1D(ndof,:nbas(ndof)),Esofar,&
                           Eranges(ndof,1),Eranges(ndof,2),Etarget,eps,&
@@ -100,8 +106,10 @@
       DO i=imin,imax
          if (withinranges(nmode(i,ndof),nmsofar,nmtarget,nmranges(ndof,:))) then
             if (withinranges(nexci(i,ndof),nexsofar,netarget,neranges(ndof,:))) then
-               nranges(ndof)=nranges(ndof)+1
-               iranges(nranges(ndof),ndof)=i
+               if (withinranges(nexmx(i,ndof),mexsofar,mxtarget,mxranges(ndof,:))) then
+                  nranges(ndof)=nranges(ndof)+1
+                  iranges(nranges(ndof),ndof)=i
+               endif
             endif
          endif
       ENDDO
@@ -135,9 +143,11 @@
             ! Add nmode, nexec conditions here
                if (withinranges(nmode(i,j),nmsofar,nmtarget,nmranges(j,:))) then
                   if (withinranges(nexci(i,j),nexsofar,netarget,neranges(j,:))) then
-                    nranges(j)=nranges(j)+1
-                    iranges(nranges(j),j)=i
-!                    write(*,*) 'adding',i
+                     if (withinranges(nexmx(i,ndof),mexsofar,mxtarget,mxranges(ndof,:))) then
+                        nranges(j)=nranges(j)+1
+                        iranges(nranges(j),j)=i
+!                        write(*,*) 'adding',i
+                     endif
                   endif
                endif
             ENDDO

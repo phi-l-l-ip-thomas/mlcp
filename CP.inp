@@ -24,6 +24,8 @@ lowmem
             1
 truncation 
             0
+truncmax
+           -1
 update
             T
 optimize PES

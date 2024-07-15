@@ -172,7 +172,8 @@
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: V(:)
       integer, intent(in)  :: ndof
       integer, allocatable :: nbas(:)
-      real*8, parameter    :: beta=0.1 ! Bilinear coupling constant
+      real*8, parameter    :: beta=0.02 ! Bilinear coupling constant
+      real*8, parameter    :: PI=3.1415926535897932384626433832795028841971
       integer :: i,j,k,betalen
 
       write(*,'(X,A)') "--> Setting up Coupled Oscillator Hamiltonian"
@@ -198,7 +199,7 @@
       k=1
       do i=1,ndof
          V(2)%qns(k,:)=i
-         V(2)%coef(k)=0.5*sqrt(i*0.5d0)
+         V(2)%coef(k)=0.25*(1.d0-cos(PI/ndof*(i-0.5d0)))
          k=k+1
       enddo
 

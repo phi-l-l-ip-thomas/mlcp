@@ -9,7 +9,7 @@
 
       implicit none
       TYPE CPpar
-           integer :: ncycle,npow,lowmem,truncation
+           integer :: ncycle,npow,lowmem,truncation,truncmax
            integer :: ncpu,psirank,hrank,psinals,hnals
            integer :: rs(33)
            real*8  :: solvtol
@@ -93,6 +93,9 @@
 !     truncation layer options
       read(u,*)
       read(u,*) cpp%truncation
+!     truncation layer max excitation
+      read(u,*)
+      read(u,*) cpp%truncmax
 !     do vector updates
       read(u,*)
       read(u,*) cpp%update
@@ -151,6 +154,8 @@
                              cpp%lowmem
       write(*,'(X,A,2X,I5)') 'Truncation criterion      (truncation):',&
                              cpp%truncation
+      write(*,'(X,A,2X,I5)') 'Max truncation q.n.         (truncmax):',&
+                             cpp%truncmax
       write(*,'(X,A,2X,L5)') 'Use vector updates            (update):',&
                              cpp%update
       write(*,'(X,A,2X,L5)') 'Optimize PES by coord. rotation  (opt):',&

@@ -62,14 +62,14 @@
       TYPE (MLtree), INTENT(IN)       :: ML
       TYPE (CP), ALLOCATABLE, INTENT(OUT) :: Q(:)
       integer, intent(in)  :: il,im
-      integer, allocatable :: qns(:,:),nbas(:),nmode(:,:),nexci(:,:)
+      integer, allocatable :: qns(:,:),nbas(:),nmode(:,:),nexci(:,:),nexmx(:,:)
       integer, allocatable :: qnfull(:)
       real*8, allocatable  :: evals1D(:,:)
       real*8, allocatable, intent(out) :: evalsND(:)
       integer :: i,j,mi,nsubm,mstart,nbloc,maxbas,nagn
-      integer :: prodND,nmsum,nesum,neibas,mst,mfi,constraint
+      integer :: prodND,nmsum,nesum,neibas,mst,mfi,constraint,nemax
       real *8 :: t1,t2,Etarget
-      character*64 :: frmt,tag
+      character*64 :: frmt,tag,tag2
 
       IF (.NOT. GUESS_SETUP) call InitializeGuessModule()
 
@@ -109,7 +109,7 @@
 !     Allocate the block vectors (Q), guess energy, and guess quantum
 !     number arrays
       ALLOCATE(Q(nbloc),evalsND(nbloc),qns(nbloc,nsubm))
-      ALLOCATE(nmode(maxbas,nsubm),nexci(maxbas,nsubm))
+      ALLOCATE(nmode(maxbas,nsubm),nexci(maxbas,nsubm),nexmx(maxbas,nsubm))
 
 !     Copy the eigenvalues of the sub-modes to evals1D
       ALLOCATE(evals1D(nsubm,maxbas))
@@ -121,12 +121,12 @@
       ENDDO
 
 !     N-mode coupling and excitation data for submodes in each state
-      call getsubmodedata(il,im,H,ML,nbas,nmode,nexci,nmsum,nesum)
+      call getsubmodedata(il,im,H,ML,nbas,nmode,nexci,nexmx,nmsum,nesum,nemax)
 
 !     Generate the guess states
       call sortDPeigvalsGen(nbloc,evalsND,qns,evals1D,nbas,&
-                            nmode,nexci,nmsum,nesum,constraint,&
-                            Etarget)
+                            nmode,nexci,nexmx,nmsum,nesum,nemax,constraint,&
+                            cpp%truncmax,Etarget)
 !      call sortDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
 !      call structuredDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
 
@@ -149,9 +149,13 @@
             case default
                tag='invalid truncation choice'
             end select
-            write(*,'(/3X,2(A,I0),A,A/)') &
+            tag2=''
+            if (cpp%truncation.ne.0 .and. cpp%truncmax.gt.-1) &
+               write(tag2,'(A,I0,A)') &
+               '(single-mode excitation limit = ',cpp%truncmax,')'
+            write(*,'(/3X,2(A,I0),A,A,X,A/)') &
             'Truncating basis from ',maxbas,' to ',nbloc,&
-            ' functions by ',trim(adjustl(tag))
+            ' functions by ',trim(adjustl(tag)),trim(adjustl(tag2))
          ENDIF
 
          write(frmt,'(2(A,I0),A)') '(',4*nsubm+26,'X,',nagn,'(I2,X))'
@@ -170,7 +174,7 @@
 !     Build the N-D separable eigenfunctions
       call BuildProdFunctions(Q,nbas,qns)
 
-      DEALLOCATE(qns,nbas,evals1D,nmode,nexci)
+      DEALLOCATE(qns,nbas,evals1D,nmode,nexci,nexmx)
 
       call CPU_TIME(t2)
       guess_time=guess_time+t2-t1
@@ -239,7 +243,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine getsubmodedata(il,im,H,ML,nbas,nmode,nexci,nmsum,nesum)
+      subroutine getsubmodedata(il,im,H,ML,nbas,nmode,nexci,nexmx,nmsum,nesum,nemax)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -247,14 +251,15 @@
       TYPE (Hamiltonian), INTENT(IN) :: H
       TYPE (MLtree), INTENT(IN)      :: ML
       integer, intent(in)  :: il,im
-      integer, intent(inout) :: nbas(:),nmode(:,:),nexci(:,:)
-      integer, intent(out)   :: nmsum,nesum
+      integer, intent(inout) :: nbas(:),nmode(:,:),nexci(:,:),nexmx(:,:)
+      integer, intent(out)   :: nmsum,nesum,nemax
       integer, allocatable :: subqns(:)
       integer :: i,j,k,nsubm,neibas
 
       nsubm=ML%modcomb(il,im)
       nmsum=0
       nesum=0
+      nemax=0
       DO j=1,nsubm
          neibas=0
          DO i=1,nbas(j)
@@ -264,6 +269,8 @@
 !           Calculate the nmode and the nexci values for each single mode fxn
             nmode(i,j)=0
             nexci(i,j)=0
+            nexmx(i,j)=MAXVAL(subqns)
+            nemax=MAX(nemax,MAXVAL(subqns))
             DO k=1,SIZE(subqns)
                IF (subqns(k).gt.1) nmode(i,j)=nmode(i,j)+1
                nexci(i,j)=nexci(i,j)+subqns(k)-1
@@ -281,8 +288,8 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       subroutine sortDPeigvalsGen(nbloc,evalsND,qns,evals1D,nbas,&
-                                  nmode,nexci,nmsum,nesum,constraint,&
-                                  Etarget)
+                                  nmode,nexci,nexmx,nmsum,nesum,nemax,&
+                                  constraint,maxex,Etarget)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Generates all vecs in the direct-product representation (for testing)
@@ -290,32 +297,37 @@
       implicit none
       integer, intent(inout) :: qns(:,:)
       real*8, intent(inout)  :: evalsND(:)
-      integer, intent(in)    :: nmode(:,:),nexci(:,:)
+      integer, intent(in)    :: nmode(:,:),nexci(:,:),nexmx(:,:)
       integer, intent(in)    :: nbas(:)
       real*8, intent(in)     :: evals1D(:,:)
-      integer, intent(in)    :: nbloc,nmsum,nesum,constraint
+      integer, intent(in)    :: nbloc,nmsum,nesum,nemax,constraint,maxex
       real*8, intent(in)     :: Etarget
       integer, allocatable   :: qnstmp(:,:)
       real*8,  allocatable   :: evalsNDtmp(:),tabindx(:)
       integer, allocatable   :: subqns(:)
-      integer :: nmtarget(2),netarget(2)
-      integer :: i,j,k,ndof,nstate,mstate
+      integer :: nmtarget(2),netarget(2),mxtarget(2)
+      integer :: i,j,k,ndof,nstate,mstate,qnmax
 !!!
-!      integer :: l
-!      character(len=64) :: frmt
+      integer :: l
+      character(len=64) :: frmt
 !!!
       ndof=SIZE(nbas)
 !!! TEST
-!      write(frmt,'(A,I0,A)') '(',ndof,'(X,I3),X,f16.8)'
+      write(frmt,'(A,I0,A)') '(',ndof,'(X,I3),X,f16.8)'
 !!!
+
+      qnmax=maxex+1 ! qnmax: apply user-imposed limit
+      if (maxex.lt.0 .or. constraint.eq.0) &
+         qnmax=nemax ! qnmax: up to max excitation in basis
+      mxtarget=(/0,qnmax/)
 
       select case(constraint)
       case(0) ! Sort only by energy
          nmtarget=(/0,nmsum/) ! Default: any number of modes coupled
          netarget=(/0,nesum/) ! Default: any excitation level
          call GetStatesinWindow(nbloc,evalsND,qns,evals1D,nbas,&
-                                nmode,nexci,nmtarget,netarget,Etarget,&
-                                nstate)
+                                nmode,nexci,nexmx,nmtarget,netarget,&
+                                mxtarget,Etarget,nstate)
 
       case(1) ! Sort by increasing nmode, by energy for each nmode value
          nstate=0
@@ -325,8 +337,8 @@
             netarget=(/j,nesum/)
 !           Get states having j modes coupled
             call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,nbas,&
-                                   nmode,nexci,nmtarget,netarget,Etarget,&
-                                   mstate)
+                                   nmode,nexci,nexmx,nmtarget,netarget,&
+                                   mxtarget,Etarget,mstate)
 !!!
             if (mstate.gt.0) write(*,*) 'Adding ',j,'-mode states:'
 !!!
@@ -336,7 +348,7 @@
                qns(nstate,:)=qnstmp(k,:)
                evalsND(nstate)=evalsNDtmp(k)
 !!!
-!               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
 !!!
                if (nstate.ge.nbloc) exit
             enddo
@@ -352,10 +364,10 @@
             netarget(1:2)=j
 !           Get states having j excitations
             call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,nbas,&
-                                   nmode,nexci,nmtarget,netarget,&
-                                   Etarget,mstate)
+                                   nmode,nexci,nexmx,nmtarget,netarget,&
+                                   mxtarget,Etarget,mstate)
 !!!
-!            if (mstate.gt.0) write(*,*) 'Adding ',j,'-excited states:'
+            if (mstate.gt.0) write(*,*) 'Adding ',j,'-excited states:'
 !!!
 
 !           Add the states to the master list
@@ -364,7 +376,7 @@
                qns(nstate,:)=qnstmp(k,:)
                evalsND(nstate)=evalsNDtmp(k)
 !!!
-!               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
 !!!
                if (nstate.ge.nbloc) exit
             enddo
@@ -382,11 +394,11 @@
                netarget(1:2)=i
 !              Get states having j modes coupled and i quanta
                call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,&
-                                      nbas,nmode,nexci,nmtarget,netarget,&
-                                      Etarget,mstate)
+                                      nbas,nmode,nexci,nexmx,nmtarget,netarget,&
+                                      mxtarget,Etarget,mstate)
 !!!
-!               if (mstate.gt.0) &
-!               write(*,*) 'Adding ',j,'-mode ',i,'-excited states:'
+               if (mstate.gt.0) &
+               write(*,*) 'Adding ',j,'-mode ',i,'-excited states:'
 !!!
 
 !              Add the states to the master list
@@ -395,7 +407,7 @@
                   qns(nstate,:)=qnstmp(k,:)
                   evalsND(nstate)=evalsNDtmp(k)
 !!!
-!                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
 !!!
                   if (nstate.ge.nbloc) exit
                enddo
@@ -415,11 +427,11 @@
                nmtarget(1:2)=j
 !              Get states having i quanta and j modes coupled
                call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,&
-                                      nbas,nmode,nexci,nmtarget,netarget,&
-                                      Etarget,mstate)
+                                      nbas,nmode,nexci,nexmx,nmtarget,netarget,&
+                                      mxtarget,Etarget,mstate)
 !!!
-!               if (mstate.gt.0) &
-!               write(*,*) 'Adding ',i,'-excited ',j,'-mode states:'
+               if (mstate.gt.0) &
+               write(*,*) 'Adding ',i,'-excited ',j,'-mode states:'
 !!!
 
 !              Add the states to the master list
@@ -428,7 +440,7 @@
                   qns(nstate,:)=qnstmp(k,:)
                   evalsND(nstate)=evalsNDtmp(k)
 !!!
-!                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
+                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
 !!!
 
                   if (nstate.ge.nbloc) exit

@@ -149,6 +149,9 @@
       IF (cpp%truncation.ne.cprst%truncation) write(*,*) &
          ' * truncation changed from ',cprst%truncation,&
                                 ' to ',cpp%truncation
+      IF (cpp%truncmax.ne.cprst%truncmax) write(*,*) &
+         ' * truncmax changed from ',cprst%truncmax,&
+                                ' to ',cpp%truncmax
       IF (cpp%update.neqv.cprst%update) write(*,*) &
          ' * update changed from ',cprst%update,' to ',cpp%update
       IF (cpp%solvtol.ne.cprst%solvtol) write(*,*) &
@@ -239,6 +242,9 @@
 !     truncation layer criterion
       write(u,'(A)') 'truncation'
       write(u,'(I16)') cpp%truncation
+!     truncation maximum
+      write(u,'(A)') 'truncmax'
+      write(u,'(I16)') cpp%truncmax
 !     USE vector updates
       write(u,'(A)') 'update'
       write(u,'(L16)') cpp%update
