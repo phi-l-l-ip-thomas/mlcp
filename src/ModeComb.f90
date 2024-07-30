@@ -11,9 +11,9 @@
       implicit none
       TYPE MLtree
           integer, dimension(:,:), allocatable :: modcomb,modstart,&
-          whichmod,gdim
+          whichmod,gdim,truncate
           integer, dimension(:), allocatable :: nmode,resort
-          integer :: nlayr,ndof
+          integer :: nlayr,ndof,ntrunc
       END TYPE MLtree
 
       real*8  :: mc_time
@@ -47,10 +47,10 @@
       TYPE (MLtree) :: ML
       character(len=64), intent(in) :: fnm      
       integer, allocatable :: nmode_tmp(:),blankline(:),res_tmp(:)
-      integer, allocatable :: bas_tmp(:,:),layrs_tmp(:,:)
+      integer, allocatable :: bas_tmp(:,:),layrs_tmp(:,:),trunc_tmp(:,:)
       integer :: il,im,ii,i2,u,InpStat,ReadStat,linelen,maxndof
-      integer :: iri,irf,ili,ilf,ibi,ibf,maxlines,ilb,ill
-      integer :: iline,nlines,iblk,nblk,rblk,bblk,lblk
+      integer :: iri,irf,ili,ilf,ibi,ibf,iti,itf,maxlines,ilb,ill,ilt
+      integer :: iline,nlines,iblk,nblk,rblk,bblk,lblk,tblk
       character(len=1024)  :: line
       character(len=32)    :: string
       real*8  :: t1,t2
@@ -68,6 +68,8 @@
       ibf=0
       ili=0
       ilf=0
+      iti=0
+      itf=0
 
 !     Open input file
       u = LookForFreeUnit()
@@ -106,6 +108,10 @@
             ili=iline
          ELSEIF (line(1:11) == '$end-layers') THEN
             ilf=iline
+         ELSEIF (line(1:9) == '$truncate') THEN
+            iti=iline
+         ELSEIF (line(1:13) == '$end-truncate') THEN
+            itf=iline
          ELSEIF (line(linelen:linelen).ne.'/') THEN
             CALL AbortWithError('Error: input list must end with "/"')
          ENDIF
@@ -115,26 +121,40 @@
 
 !     Detect input errors
       IF (iri.eq.0 .or. irf.eq.0 .or. ibi.eq.0 .or. ibf.eq.0 .or. &
-          ili.eq.0 .or. ilf.eq.0 .or. iri.gt.irf .or. &
-          ibi.gt.ibf .or. ili.gt.ilf .or. &
+          ili.eq.0 .or. ilf.eq.0 .or. iti.eq.0 .or. itf.eq.0 .or. &
+          iri.gt.irf .or. ibi.gt.ibf .or. &
+          ili.gt.ilf .or. iti.gt.itf .or. &
           (ili.ge.iri .and. ili.le.irf) .or. &
           (ili.ge.ibi .and. ili.le.ibf) .or. &
+          (ili.ge.iti .and. ili.le.itf) .or. &
           (ilf.ge.iri .and. ilf.le.irf) .or. &
           (ilf.ge.ibi .and. ilf.le.ibf) .or. &
+          (ilf.ge.iti .and. ilf.le.itf) .or. &
           (ibi.ge.iri .and. ibi.le.irf) .or. &
           (ibi.ge.ili .and. ibi.le.ilf) .or. &
+          (ibi.ge.iti .and. ibi.le.itf) .or. &
           (ibf.ge.iri .and. ibf.le.irf) .or. &
           (ibf.ge.ili .and. ibf.le.ilf) .or. &
+          (ibf.ge.iti .and. ibf.le.itf) .or. &
           (iri.ge.ibi .and. iri.le.ibf) .or. &
           (iri.ge.ili .and. iri.le.ilf) .or. &
+          (iri.ge.iti .and. iri.le.itf) .or. &
           (irf.ge.ibi .and. irf.le.ibf) .or. &
-          (irf.ge.ili .and. irf.le.ilf)) &
+          (irf.ge.ili .and. irf.le.ilf) .or. &
+          (irf.ge.iti .and. irf.le.itf) .or. &
+          (iti.ge.ili .and. iti.le.ilf) .or. &
+          (iti.ge.iri .and. iti.le.irf) .or. &
+          (iti.ge.ibi .and. iti.le.ibf) .or. &
+          (itf.ge.ili .and. itf.le.ilf) .or. &
+          (itf.ge.iri .and. itf.le.irf) .or. &
+          (itf.ge.ibi .and. itf.le.ibf)) &
           CALL AbortWithError('unable to read input groups')
 
 !     Make sure layer counts are consistent
       rblk=0
       bblk=0
       lblk=0
+      tblk=0
       DO iblk=1,nblk
         IF (blankline(iblk).gt.iri .and. blankline(iblk).lt.irf) &
            rblk=rblk+1
@@ -142,18 +162,25 @@
            bblk=bblk+1
         IF (blankline(iblk).gt.ili .and. blankline(iblk).lt.ilf) &
            lblk=lblk+1
+        IF (blankline(iblk).gt.iti .and. blankline(iblk).lt.itf) &
+           tblk=tblk+1
       ENDDO
       IF (irf-iri-rblk.ne.2) &
          CALL AbortWithError('Resort section must have exactly 1 line')
       IF (ibf-ibi-bblk.ne.ilf-ili-lblk+1) &
          CALL AbortWithError('Inconsistent input layer numbers')
       ML%nlayr=ibf-ibi-bblk-1
+      ML%ntrunc=itf-iti-tblk-1
       IF (ML%nlayr.lt.1) CALL AbortWithError('No layers!')
 
       REWIND(u)
 
 !     Read sections
       ALLOCATE(res_tmp(maxndof),bas_tmp(ML%nlayr,maxndof))
+      IF (ML%ntrunc.gt.0) THEN
+         ALLOCATE(ML%truncate(ML%ntrunc,5))
+         ML%truncate(:,:)=-1
+      ENDIF
       IF (ML%nlayr.gt.1) THEN
          ALLOCATE(layrs_tmp(ML%nlayr-1,maxndof))
       ENDIF
@@ -162,6 +189,7 @@
       iblk=1
       ilb=0
       ill=0
+      ilt=0
       DO iline=1,nlines
          IF (iline.eq.blankline(iblk)) THEN
             READ(u,*,IOSTAT=ReadStat)
@@ -174,6 +202,9 @@
          ELSEIF (iline.gt.ili .and. iline.lt.ilf) THEN
             ill=ill+1
             READ(u,*,err=225) (layrs_tmp(ill,im),im=1,maxndof)
+         ELSEIF (iline.gt.iti .and. iline.lt.itf) THEN
+            ilt=ilt+1
+            READ(u,*,err=225) (ML%truncate(ilt,im),im=1,5)
          ELSE
             READ(u,*,IOSTAT=ReadStat)
          ENDIF
@@ -305,11 +336,23 @@
          write(*,1234) il,(ML%gdim(il,im),im=1,ML%nmode(il))
       ENDDO
 
+      IF (ML%ntrunc.gt.0) then
+      write(*,'(/A)') 'truncation: trim basis based on criteria'
+      write(*,'(A)') 'layer - mode: nmode-max sum-max q.n.-max '
+      write(*,'(4(A,X))') '=============','---------','-------',&
+                         '--------'
+         DO il=1,ML%ntrunc
+            write(*,1236) ML%truncate(il,1),'-',ML%truncate(il,2),':',&
+                          (ML%truncate(il,im),im=3,5)
+         ENDDO
+      ENDIF
+
       write(*,'(/X,A)') '********************************************'
 
 1233  format(6X,32(I4,X))
 1234  format(I4,2X,32(I4,X))
 1235  format(A5,1X,32(A4,X))
+1236  format(I5,X,A,X,I4,A,X,I9,X,I7,X,I8)
 
       end subroutine PrintModeDat
 
@@ -382,6 +425,41 @@
                ENDIF
             ENDIF
          ENDDO
+      ENDDO
+
+!     Truncation node validation
+      DO k=1,ML%ntrunc
+         il=ML%truncate(k,1)
+         im=ML%truncate(k,2)
+
+!        Check for out-of-range entries
+         IF (il.lt.2 .or. il.gt.ML%nlayr) THEN
+            write(*,'(2(A,I0),A)') 'truncation: layer-mode ',&
+                                 il,'-',im,' is out of range'
+            CALL AbortWithError('ValidateModeDat(): bad input')
+         ELSEIF (im.lt.1 .or. im.gt.ML%nmode(il)) THEN
+            write(*,'(2(A,I0),A)') 'truncation: mode-layer ',&
+                                 il,'-',im,' is out of range'
+            CALL AbortWithError('ValidateModeDat(): bad input')
+         ENDIF
+
+!        Truncation nodes must have only one parent
+         IF (firstmode(il,il-1,im,ML).ne.lastmode(il,il-1,im,ML)) THEN
+            write(*,'(2(A,I0),A)') 'truncation: layer-mode ',&
+                         il,'-',im,' must have exactly 1 parent node'
+            CALL AbortWithError('ValidateModeDat(): bad input')
+         ENDIF
+
+!        Enforce ordering to prevent duplicate entries
+         IF (k.gt.1) THEN
+            IF (il.lt.ML%truncate(k-1,1) .or. (il.eq.ML%truncate(k-1,1)&
+                .and. im.le.ML%truncate(k-1,2))) THEN
+               write(*,'(2(A,I0),A)') &
+               'truncation: layer-mode ',il,'-',im,&
+               ': entries must be in ascending order and not repeated.'
+               CALL AbortWithError('ValidateModeDat(): bad input')
+            ENDIF
+         ENDIF
       ENDDO
 
       end subroutine ValidateModeDat

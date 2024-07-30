@@ -1,5 +1,5 @@
 System
-        ch3cn
+        forma
 NCPU
             1
 red2D
@@ -7,7 +7,7 @@ red2D
 redND
           ALS
 psirank
-           10
+            4
 hrank
             0
 psinals
@@ -17,9 +17,9 @@ hnals
 solver
          pals
 ncycle
-           10
+            2
 npow
-           10
+            4
 lowmem
             1
 truncation 
