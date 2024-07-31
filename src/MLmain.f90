@@ -133,6 +133,9 @@
 
             trm=GetModeHNr(il,im,Ham)  ! mode term
             IF (Ham%ndof(trm,il).eq.1 .and. Ham%nop(trm,il).eq.1) THEN
+!              Overwrite ML tree in case truncation changed block size
+!              in GuessPsi()
+               call SaveModeDat(ML,cpp%resfile)
                write(*,'(3X,A)') '(Mode solved previously)'
             ELSE
                call SolverAlg(eigv,delta,cpp,Q,H,W,il,ML%nlayr)

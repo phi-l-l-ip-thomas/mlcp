@@ -103,7 +103,8 @@
          IF (prodND.ge.nbloc) EXIT
       ENDDO
       IF (nbloc.gt.prodND) THEN
-         write(*,*) 'Error: nbloc is too large for product basis size'
+         write(*,'(X,2(A,I0),A)') 'nbloc (',nbloc,&
+         ') is too large for product basis size (',prodND,')'
          call AbortWithError('Error in GuessPsi()')
       ENDIF
 
@@ -127,8 +128,8 @@
 !     pre-truncated node block size as nbloc
       IF (gentrunc) THEN
          nbloc=ML%gdim(il-1,mstart)
-         write(*,*) '  * Previous layer input block size       : ',&
-                    nbloc
+         write(*,'(X,A,X,I0)') &
+         '  * Block size initially set to previous layer size:',nbloc
       ENDIF
 
       ALLOCATE(evalsND(nbloc),qns(nbloc,nsubm))
@@ -145,9 +146,10 @@
       IF (gentrunc) THEN
          if (SIZE(evalsND).lt.nbloc) then
             nbloc=SIZE(evalsND)
+            write(*,'(X,A,X,I0,X,A,X,I0,X,A)') &
+            '  * New block size determined from constraints     :',&
+            nbloc,'(overwrites',ML%gdim(il,im),'from layers.inp)'
             ML%gdim(il,im)=nbloc
-            write(*,*) '  * Block size determined from constraints: ',&
-                       nbloc
          endif
       ENDIF
 
@@ -161,7 +163,7 @@
                write(tag2,'(3(A,I0),A)') &
                '(limited to nmode-max = ',nmsum,&
                            '; sum-max = ',nesum,&
-                          '; q.n.-max = ',nemax-1,')'
+                          '; q.n.-max = ',nemax,')'
             else
                select case (cpp%truncation)
                case(0)
@@ -185,7 +187,7 @@
                   '(single-mode excitation limit = ',cpp%truncmax,')'
             endif
             
-            write(*,'(/3X,2(A,I0),A,A,/3X,A/)') &
+            write(*,'(3X,2(A,I0),A,A,/3X,A/)') &
             'Truncating basis from ',maxbas,' to ',nbloc,&
             ' functions by ',trim(adjustl(tag)),trim(adjustl(tag2))
          ENDIF
@@ -306,8 +308,8 @@
 !           Calculate the nmode and the nexci values for each single mode fxn
             nmode(i,j)=0
             nexci(i,j)=0
-            nexmx(i,j)=MAXVAL(subqns)
-            nemax=MAX(nemax,MAXVAL(subqns))
+            nexmx(i,j)=MAXVAL(subqns)-1
+            nemax=MAX(nemax,MAXVAL(subqns)-1)
             DO k=1,SIZE(subqns)
                IF (subqns(k).gt.1) nmode(i,j)=nmode(i,j)+1
                nexci(i,j)=nexci(i,j)+subqns(k)-1
@@ -325,22 +327,22 @@
          if (ML%truncate(j,1).eq.il .and. ML%truncate(j,2).eq.im) then
             if (ML%truncate(j,3).ge.0) nmsum=min(nmsum,ML%truncate(j,3))
             if (ML%truncate(j,4).ge.0) nesum=min(nesum,ML%truncate(j,4))
-            if (ML%truncate(j,5).ge.0) nemax=min(nemax,ML%truncate(j,5)+1)
+            if (ML%truncate(j,5).ge.0) nemax=min(nemax,ML%truncate(j,5))
 
-            if (nesum.gt.nmsum*(nemax-1)) then
+            if (nesum.gt.nmsum*nemax) then
                write(*,'(A,2(A,I0))') &
                '   * sum-max contraint exceeds (nmode-max * q.n.-max), ',&
                'so modifying sum-max: ',&
-               nesum,' -> ',nmsum*(nemax-1)
-               nesum=nmsum*(nemax-1)
+               nesum,' -> ',nmsum*nemax
+               nesum=nmsum*nemax
             endif
 
-            if (nemax-1.gt.nesum) then
+            if (nemax.gt.nesum) then
                write(*,'(A,2(A,I0))') &
                '   * q.n.-max constraint exceeds sum-max, ',&
                'so modifying q.n.-max: ',&
-               nemax-1,' -> ',nesum
-               nemax=nesum+1
+               nemax,' -> ',nesum
+               nemax=nesum
             endif
             gentrunc=.true.
             exit
@@ -374,7 +376,7 @@
       integer :: nmtarget(2),netarget(2),mxtarget(2)
       integer :: i,j,k,ndof,nstate,mstate,qnmax
 !!!
-      integer :: l
+      integer :: l,m
       character(len=64) :: frmt
 !!!
       ndof=SIZE(nbas)
@@ -410,7 +412,7 @@
 
       else
 
-      qnmax=maxex+1 ! qnmax: apply user-imposed limit
+      qnmax=maxex ! qnmax: apply user-imposed limit
       if (maxex.lt.0 .or. constraint.eq.0) &
          qnmax=nemax ! qnmax: up to max excitation in basis
       mxtarget=(/0,qnmax/)

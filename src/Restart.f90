@@ -23,7 +23,7 @@
 
       implicit none
       TYPE (CPpar), INTENT(INOUT) :: cpp
-      TYPE (MLtree), INTENT(IN)   :: ML
+      TYPE (MLtree), INTENT(INOUT) :: ML
       TYPE (Hamiltonian), INTENT(INOUT) :: Ham
       integer, intent(out) :: il,im
       character(len=64) :: fnm
@@ -98,7 +98,7 @@
       implicit none
       TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (CPpar)  :: cprst
-      TYPE (MLtree), INTENT(IN) :: ML
+      TYPE (MLtree), INTENT(INOUT) :: ML
       TYPE (MLtree) :: MLrst
       character(len=64) :: fnm
       integer :: il,im,j
@@ -180,6 +180,27 @@
                AbortWithError("ValidateRestart(): $layers do not match")
          ENDDO
       ENDDO
+      IF (ML%ntrunc.ne.MLrst%ntrunc) call &
+         AbortWithError("ValidateRestart(): $truncate do not match")
+      DO il=1,ML%ntrunc
+         DO im=1,5
+            IF (ML%truncate(il,im).ne.MLrst%truncate(il,im)) call &
+            AbortWithError("ValidateRestart(): $truncate do not match")
+         ENDDO
+      ENDDO
+
+!     If truncation is used, then some of the mode sizes may differ in
+!     the restart file. These must be updated in the restarted ML tree
+!     or the number of eigenvalues to be read later will be incorrect.
+      DO il=2,ML%nlayr
+         DO im=1,ML%nmode(il)
+            IF (firstmode(il,il-1,im,ML).eq.lastmode(il,il-1,im,ML)) THEN
+               IF (ML%gdim(il,im).ne.MLrst%gdim(il,im)) &
+                   ML%gdim(il,im)=MLrst%gdim(il,im)
+            ENDIF
+         ENDDO
+      ENDDO
+
 
       call Flush_ModeComb(MLrst)
 
@@ -308,6 +329,16 @@
          write(u,frmt) (ML%modcomb(il,im),im=1,ML%nmode(il)),'/'
       ENDDO
       write(u,'(A)') '$end-layers'
+      write(u,*)
+
+!     Write truncate section
+      write(u,*)
+      write(u,'(A)') '$truncate'
+      DO il=1,ML%ntrunc
+         write(frmt,'(A)') '(5(I0,X),A)'
+         write(u,frmt) (ML%truncate(il,im),im=1,5),'/'
+      ENDDO
+      write(u,'(A)') '$end-truncate'
       write(u,*)
 
       close(u)

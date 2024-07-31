@@ -140,10 +140,9 @@
 
             nranges(j)=0
             DO i=imin,imax
-            ! Add nmode, nexec conditions here
                if (withinranges(nmode(i,j),nmsofar,nmtarget,nmranges(j,:))) then
                   if (withinranges(nexci(i,j),nexsofar,netarget,neranges(j,:))) then
-                     if (withinranges(nexmx(i,ndof),mexsofar,mxtarget,mxranges(ndof,:))) then
+                     if (withinranges(nexmx(i,j),mexsofar,mxtarget,mxranges(j,:))) then
                         nranges(j)=nranges(j)+1
                         iranges(nranges(j),j)=i
 !                        write(*,*) 'adding',i

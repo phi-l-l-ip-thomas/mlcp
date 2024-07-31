@@ -421,7 +421,7 @@
                   write(*,*) 'Layer: ',il,' Mode: ',im,&
                   ' # functions desired: ',nbloc,&
                   ' product basis size: ',prod
-                  CALL AbortWithError('Product basis exceeded')
+                  CALL ShowWarning('Product basis exceeded')
                ENDIF
             ENDIF
          ENDDO
