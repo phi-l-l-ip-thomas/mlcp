@@ -28,6 +28,25 @@
           module procedure CompareStringsForEQ
       end interface
 
+      INTERFACE PrintMatrix
+         MODULE PROCEDURE PrintMatrix1D
+         MODULE PROCEDURE PrintMatrix2D
+      END INTERFACE
+
+      INTERFACE swap
+         MODULE PROCEDURE iswap
+      END INTERFACE swap
+
+      INTERFACE getsortkey
+         MODULE PROCEDURE getisortkey
+         MODULE PROCEDURE getrsortkey
+      END INTERFACE getsortkey
+
+      INTERFACE sortbykey
+         MODULE PROCEDURE sortibykey1D,sortibykey2D 
+         MODULE PROCEDURE sortrbykey1D,sortrbykey2D
+      END INTERFACE sortbykey
+
       INTERFACE Vec2Mat
          MODULE PROCEDURE Vec2Matrix,Vec2SymMat
       END INTERFACE Vec2Mat
@@ -169,13 +188,13 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine PrintMatrix(mat)
+      subroutine PrintMatrix2D(mat)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Print out a matrix
 
       implicit none
-      real*8, intent(in) :: mat(:,:)
+      real(kind=8), intent(in) :: mat(:,:)
       integer   :: ir,ic,rows,cols
 
       rows=SIZE(mat,1)
@@ -183,14 +202,40 @@
 
       write(*,*)
       do ir=1,rows
-          write(*,*) (mat(ir,ic),ic=1,cols)
+         write(*,*) (mat(ir,ic),ic=1,cols)
 !         write(*,'(40(f15.8))') (mat(ir,ic),ic=1,cols)
 !         write(*,'(40(f13.6))') (mat(ir,ic),ic=1,cols)
 !         write(*,'(40(f6.2))') (mat(ir,ic),ic=1,cols)
       enddo
       write(*,*)
 
-      end subroutine PrintMatrix
+      end subroutine PrintMatrix2D
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine PrintMatrix1D(mat,rows,cols)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Print out a matrix
+
+      implicit none
+      real(kind=8), intent(in) :: mat(:)
+      integer, intent(in) :: rows,cols
+      integer   :: ir,ic
+
+      if (rows*cols .ne. SIZE(mat)) then
+         write(*,*) "'mat' is size(",SIZE(mat),") but must be (",&
+         rows," x ",cols,")"
+         call AbortWithError('PrintMatrix1D(): wrong sizes')
+      endif
+
+      write(*,*)
+      do ir=1,rows
+         write(*,*) (mat((ic-1)*rows+ir),ic=1,cols)
+      enddo
+      write(*,*)
+
+      end subroutine PrintMatrix1D
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -200,7 +245,7 @@
 ! Print out a vector
 
       implicit none
-      real*8, intent(in) :: vec(:)
+      real(kind=8), intent(in) :: vec(:)
       integer   :: ir,rows
 
       rows=SIZE(vec)
@@ -221,7 +266,7 @@
 ! Reflects triangular matrix to fill in entries
 
       implicit none
-      real*8, intent(inout) :: M(:,:)
+      real(kind=8), intent(inout) :: M(:,:)
       logical, intent(in)   :: u2l
       integer :: i,j,n
 
@@ -256,8 +301,8 @@
 ! Converts matrix in stored diagonal form to upper triangular form
 
       implicit none
-      real*8, allocatable, intent(out) :: tmat(:,:)
-      real*8, intent(in)  :: dmat(:,:)
+      real(kind=8), allocatable, intent(out) :: tmat(:,:)
+      real(kind=8), intent(in)  :: dmat(:,:)
       integer, intent(in) :: sym
       logical, intent(in) :: refl
       integer :: i,j,dimr,dimc,dl
@@ -298,8 +343,8 @@
 ! Converts matrix from upper triangular to stored diagonal form
 
       implicit none
-      real*8, allocatable, intent(out) :: dmat(:,:)
-      real*8, intent(in)     :: tmat(:,:)
+      real(kind=8), allocatable, intent(out) :: dmat(:,:)
+      real(kind=8), intent(in)     :: tmat(:,:)
       integer, intent(inout) :: sym
       integer :: i,j,dimr,dl
 
@@ -332,10 +377,10 @@
 ! symmetry can be imposed, reducing the size further
 
       implicit none
-      real*8, allocatable, intent(inout) :: dmat(:,:)
-      real*8, allocatable  :: tmpmat(:,:)
+      real(kind=8), allocatable, intent(inout) :: dmat(:,:)
+      real(kind=8), allocatable  :: tmpmat(:,:)
       integer, intent(inout) :: sym
-      real*8  :: tol,elem
+      real(kind=8)  :: tol,elem
       integer :: i,j,nr,nc,finalcol,newr,newc,newsym
 
       tol=1.0d-12
@@ -424,8 +469,8 @@
 ! row index changes fastest
 
       implicit none
-      real*8, intent(in)  :: v(:)
-      real*8, allocatable, intent(out) :: M(:,:)
+      real(kind=8), intent(in)  :: v(:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
       integer, intent(in) :: nr,nc
       integer :: i,ir,ic
 
@@ -454,8 +499,8 @@
 ! sqrt(2)
 
       implicit none
-      real*8, allocatable, intent(out):: v(:)
-      real*8, intent(in)  :: M(:,:)
+      real(kind=8), allocatable, intent(out):: v(:)
+      real(kind=8), intent(in)  :: M(:,:)
       logical, intent(in) :: sym
 
       IF (sym) THEN
@@ -474,8 +519,8 @@
 ! Unwraps a matrix to vector. The vector is filled column-at-a-time
 
       implicit none
-      real*8, allocatable, intent(out):: v(:)
-      real*8, intent(in) :: M(:,:)
+      real(kind=8), allocatable, intent(out):: v(:)
+      real(kind=8), intent(in) :: M(:,:)
       integer :: nr,nc,i,j,k
 
       nr=SIZE(M,1)
@@ -500,9 +545,9 @@
 ! Wraps a vector to matrix format, then converts to stored diagonal form
 
       implicit none
-      real*8, intent(in)  :: v(:)
-      real*8, allocatable, intent(out) :: M(:,:)
-      real*8, allocatable :: D(:,:)
+      real(kind=8), intent(in)  :: v(:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
+      real(kind=8), allocatable :: D(:,:)
       integer, intent(in)  :: nr,nc
       integer, intent(out) :: sym
 
@@ -525,10 +570,10 @@
 ! two-off-diagonal, etc.
 
       implicit none
-      real*8, allocatable, intent(out) :: v(:)
-      real*8, intent(in) :: M(:,:)
+      real(kind=8), allocatable, intent(out) :: v(:)
+      real(kind=8), intent(in) :: M(:,:)
       integer :: n,i,j,k,l
-      real*8  :: s
+      real(kind=8)  :: s
 
       s=sqrt(2.d0)
 
@@ -562,10 +607,10 @@
 ! matrix
 
       implicit none
-      real*8, intent(in) :: v(:)
-      real*8, allocatable, intent(out) :: M(:,:)
+      real(kind=8), intent(in) :: v(:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
       integer :: n,i,j,k,l
-      real*8  :: s
+      real(kind=8)  :: s
 
       s=1/sqrt(2.d0)
       n=GetSymN(SIZE(v))
@@ -600,8 +645,8 @@
 ! entries are the lower triangle ordered by columns
 
       implicit none
-      real*8, allocatable, intent(out) :: v(:)
-      real*8, intent(in) :: M(:,:)
+      real(kind=8), allocatable, intent(out) :: v(:)
+      real(kind=8), intent(in) :: M(:,:)
       integer :: n,i,j,k
 
       n=SIZE(M,1)
@@ -639,30 +684,13 @@
 ! Unpacks the vector version of a symmetric packed matrix to matrix form
 
       implicit none
-      real*8, intent(in) :: v(:)
-      real*8, allocatable, intent(out) :: M(:,:)
+      real(kind=8), intent(in) :: v(:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
       integer :: n,i,j,k
 
       n=GetSymN(SIZE(v))
       ALLOCATE(M(n,n))
 
-!     Fill the lower triangle
-!      k=1
-!      DO j=1,n
-!         DO i=j,n
-!            M(i,j)=v(k)
-!            k=k+1
-!         ENDDO
-!      ENDDO
-
-!     Copy lower triangle to upper triangle
-!      DO i=1,n-1
-!         DO j=i+1,n
-!            M(i,j)=M(j,i)
-!         ENDDO
-!      ENDDO
-
-!!!   ALT
 !     Fill the upper triangle
       k=1
       DO j=1,n
@@ -689,7 +717,7 @@
 ! Symmetrizes a matrix by averaging the i,j-th element with the j,i-th
 
       implicit none
-      real*8, intent(inout) :: M(:,:)
+      real(kind=8), intent(inout) :: M(:,:)
       integer :: n,i,j
 
       n=SIZE(M,1)
@@ -713,11 +741,11 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
-      real*8, allocatable, intent(out) :: M(:,:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
       integer, intent(in) :: n
       logical, intent(in) :: norm
       integer :: i
-      real*8  :: val
+      real(kind=8)  :: val
 
       val=1.d0
       IF (norm) val=val/sqrt(REAL(n))
@@ -738,8 +766,8 @@
 ! Fills v with random values and normalizes
 
       implicit none
-      real*8, intent(inout) :: v(:)
-      real*8 :: norm
+      real(kind=8), intent(inout) :: v(:)
+      real(kind=8) :: norm
 
       call random_number(v(:))
       v(:)=v(:)-0.5d0
@@ -756,7 +784,7 @@
 ! Moves all entries in a vector up or down one position
 
       implicit none
-      real*8, intent(inout) :: v(:)
+      real(kind=8), intent(inout) :: v(:)
       logical, intent(in) :: up
       integer :: i,n
 
@@ -775,6 +803,31 @@
       ENDIF
 
       end subroutine Cascade
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function findival(v,i) RESULT(j)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Finds index of first element equal to value 'i' (c.f. findloc)
+! Returns zero if value 'i' not found
+
+      implicit none
+      integer, intent(in) :: v(:)
+      integer, intent(in) :: i
+      integer :: n,j,k
+
+      n=SIZE(v)
+      j=0
+
+      DO k=1,n
+         IF (v(k).eq.i) THEN
+            j=k
+            EXIT
+         ENDIF
+      ENDDO
+
+      end function findival
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -815,6 +868,76 @@
       ENDIF
 
       end subroutine NextIndex
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function rbisectL(v,i) RESULT(ju)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Finds index of first item of v that is >= i, by bisection
+! Data values must be in monotonically-ascending order
+
+      implicit none
+      real*8, intent(in) :: v(:)
+      real*8, intent(in) :: i
+      integer :: n,ju,jl,t
+
+      n=SIZE(v)
+
+      jl=0
+      ju=n+1
+      IF (i.le.v(1)) THEN
+         ju=1
+      ELSEIF (i.gt.v(n)) THEN
+         jl=n
+      ENDIF
+
+      DO
+        IF (ju-jl.le.1) EXIT
+        t=(ju+jl)/2
+        IF (v(t).lt.i) THEN
+           jl=t
+        ELSE
+           ju=t
+        ENDIF
+      ENDDO
+
+      end function rbisectL
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function rbisectH(v,i) RESULT(jl)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Finds index of last item of v that is <= i, by bisection
+! Data values must be in monotonically-ascending order
+
+      implicit none
+      real*8, intent(in) :: v(:)
+      real*8, intent(in) :: i
+      integer :: n,ju,jl,t
+
+      n=SIZE(v)
+
+      jl=0
+      ju=n+1
+      IF (i.lt.v(1)) THEN
+         ju=1
+      ELSEIF (i.ge.v(n)) THEN
+         jl=n
+      ENDIF
+
+      DO
+        IF (ju-jl.le.1) EXIT
+        t=(ju+jl)/2
+        IF (v(t).le.i) THEN
+           jl=t
+        ELSE
+           ju=t
+        ENDIF
+      ENDDO
+
+      end function rbisectH
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -908,6 +1031,203 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine iswap(i,j)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Swaps values of integers i,j
+
+      implicit none
+      integer, intent(inout) :: i,j
+      integer :: tmp
+
+      tmp=i
+      i=j
+      j=tmp
+
+      end subroutine iswap
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function getisortkey(list) result (key)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns key needed to sort integer list
+
+      implicit none
+      integer, intent(in)  :: list(:)
+      integer, allocatable :: key(:)
+      real(kind=8), allocatable :: rkey(:),st(:)
+      integer :: i,n
+
+      n=SIZE(list)
+
+      IF (n.eq.1) THEN
+         ALLOCATE(key(1))
+         key(1)=1
+         RETURN
+      ENDIF
+
+      ALLOCATE(rkey(n),st(n))
+      DO i=1,n
+         rkey(i)=REAL(i)
+      ENDDO
+      st(:)=REAL(list(:))
+
+!     Sort by indices
+      call dsort(st,rkey,n,2)
+
+      ALLOCATE(key(n))
+      key(:)=nint(rkey(:))
+
+      DEALLOCATE(rkey,st)
+
+      end function getisortkey
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function getrsortkey(list) result (key)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns key needed to sort integer list
+
+      implicit none
+      real(kind=8), intent(in) :: list(:)
+      integer, allocatable :: key(:)
+      real(kind=8), allocatable :: rkey(:),st(:)
+      integer :: i,n
+
+      n=SIZE(list)
+
+      IF (n.eq.1) THEN
+         ALLOCATE(key(1))
+         key(1)=1
+         RETURN
+      ENDIF
+
+      ALLOCATE(rkey(n),st(n))
+      DO i=1,n
+         rkey(i)=REAL(i)
+      ENDDO
+      st(:)=list(:)
+
+!     Sort by indices
+      call dsort(st,rkey,n,2)
+
+      ALLOCATE(key(n))
+      key(:)=nint(rkey(:))
+
+      DEALLOCATE(rkey,st)
+
+      end function getrsortkey
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine sortibykey1D(list,key)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Rearranges integer 1D list by key
+
+      implicit none
+      integer, intent(inout) :: list(:)
+      integer, intent(in) :: key(:)
+      integer, allocatable :: ltmp(:)
+      integer :: i,m
+
+      m=SIZE(list)
+
+      IF (m.eq.1) RETURN
+
+      ALLOCATE(ltmp(m))
+      ltmp(:)=list(:)
+      do i=1,m
+         list(i)=ltmp(key(i))
+      enddo
+      DEALLOCATE(ltmp)
+
+      end subroutine sortibykey1D
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine sortibykey2D(list,key)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Rearranges integer 2D list by key
+
+      implicit none
+      integer, intent(inout) :: list(:,:)
+      integer, intent(in) :: key(:)
+      integer, allocatable :: ltmp(:,:)
+      integer :: i,n,m
+
+      m=SIZE(list,1)
+      n=SIZE(list,2)
+
+      IF (m.eq.1) RETURN
+
+      ALLOCATE(ltmp(m,n))
+      ltmp(:,:)=list(:,:)
+      do i=1,m
+         list(i,:)=ltmp(key(i),:)
+      enddo
+      DEALLOCATE(ltmp)
+
+      end subroutine sortibykey2D
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine sortrbykey1D(list,key)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Rearranges real 1D list by key
+
+      implicit none
+      real(kind=8), intent(inout) :: list(:)
+      integer, intent(in) :: key(:)
+      real(kind=8), allocatable :: ltmp(:)
+      integer :: i,m
+
+      m=SIZE(list)
+
+      IF (m.eq.1) RETURN
+
+      ALLOCATE(ltmp(m))
+      ltmp(:)=list(:)
+      do i=1,m
+         list(i)=ltmp(key(i))
+      enddo
+      DEALLOCATE(ltmp)
+
+      end subroutine sortrbykey1D
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine sortrbykey2D(list,key)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Rearranges real 2D list by key
+
+      implicit none
+      real(kind=8), intent(inout) :: list(:,:)
+      integer, intent(in) :: key(:)
+      real(kind=8), allocatable :: ltmp(:,:)
+      integer :: i,n,m
+
+      m=SIZE(list,1)
+      n=SIZE(list,2)
+
+      IF (m.eq.1) RETURN
+
+      ALLOCATE(ltmp(m,n))
+      ltmp(:,:)=list(:,:)
+      do i=1,m
+         list(i,:)=ltmp(key(i),:)
+      enddo
+      DEALLOCATE(ltmp)
+
+      end subroutine sortrbykey2D
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       integer function FACRL(n)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -963,7 +1283,7 @@
 ! Search a matrix for NaN values, return .TRUE. if there are any
 
       implicit none
-      real*8, intent(in) :: M(:,:)
+      real(kind=8), intent(in) :: M(:,:)
       integer :: nr,nc,i,j
       
       nr=SIZE(M,1)
@@ -990,7 +1310,7 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8 :: x(1)
+      real(kind=8) :: x(1)
 
       CALL ERROR(n<1,'GetRandomIndex(): n < 1')
 
@@ -1020,8 +1340,10 @@
         n=n+1
         i=i+n
       ENDDO
-      IF (i.ne.s) &
+      IF (i.ne.s) THEN
+         write(*,*) 'SIZE(v): must be length ',i,' but is ',s
          call AbortWithError('GetSymN(): SIZE(v) -X-> n x n matrix')
+      ENDIF
 
       GetSymN=n
 
@@ -1077,6 +1399,84 @@
       equal_result = equal
 
       end function compareStringsForEQ
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      logical function string2logical(str) result(val)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      character(len=*) :: str
+      character(5) :: ls
+
+      ls=trim(adjustl(str))
+
+      if ((ls(1:1).seq.'t') .or. (ls(1:4).seq.'true')) then
+         val=.true.
+      elseif ((ls(1:1).seq.'f') .or. (ls(1:5).seq.'false')) then
+         val=.false.
+      else
+         write(*,*) "string2logical(): must be 'true' or 'false', not ",ls
+         call AbortWithError('string2logical(): bad input value')
+      endif
+
+      end function string2logical
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      integer function string2integer(str) result(num)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      character(len=*) :: str
+
+      read(str,*) num
+
+      end function string2integer
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      real(kind=4) function string2real4(str) result(num)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      character(len=*) :: str
+
+      read(str,*) num
+
+      end function string2real4
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      real(kind=8) function string2real8(str) result(num)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      character(len=*) :: str
+
+      read(str,*) num
+
+      end function string2real8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function string2integerarray(str,n) result(num)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      integer, intent(in) :: n
+      integer :: num(n)
+      character(len=*) :: str
+      integer :: i
+
+      read(str,*) (num(i),i=1,n)
+
+      end function string2integerarray
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

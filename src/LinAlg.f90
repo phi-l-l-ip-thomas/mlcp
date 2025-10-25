@@ -10,7 +10,7 @@
       USE MYMPI
 
       implicit none
-      real*8, private  :: eigen_time=0.d0
+      real(kind=8), allocatable, private :: eigen_time(:)
       logical, private :: EIGEN_SETUP = .FALSE.
 
       INTERFACE VecVecProd
@@ -29,34 +29,32 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine InitializeEigen()
+      subroutine Init_Eigen_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      eigen_time = 0.d0
+      allocate(eigen_time(mpinodes))
+      eigen_time(:) = 0.d0
       EIGEN_SETUP = .TRUE.
 
-      end subroutine InitializeEigen
+      end subroutine Init_Eigen_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeEigen()
+      subroutine Dispose_Eigen_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. EIGEN_SETUP) call InitializeEigen()
-
+      IF (.NOT. EIGEN_SETUP) call Init_Eigen_Module()
+      call Get_MPI_Timings('LAPACK eigenvalue calculation',eigen_time)
       EIGEN_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total eigenvalue calculation time (s)',&
-                            eigen_time
+      deallocate(eigen_time)
 
-      end subroutine DisposeEigen
-
+      end subroutine Dispose_Eigen_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -66,9 +64,9 @@
 ! Multiplies M1 <- M1 x M2. Set tx (x={1,2}) to .TRUE. to do transpose
 
       implicit none
-      real*8, allocatable, intent(inout) :: M1(:,:)
-      real*8, intent(in)  :: M2(:,:)
-      real*8, allocatable :: Mt(:,:)
+      real(kind=8), allocatable, intent(inout) :: M1(:,:)
+      real(kind=8), intent(in)  :: M2(:,:)
+      real(kind=8), allocatable :: Mt(:,:)
       logical, intent(in) :: t1,t2
       integer :: r1,r2,c1,c2,ld1,ld2
       character(1) :: tN1,tN2
@@ -117,9 +115,9 @@
 ! Multiplies M3 <- M1 x M2. Set tx (x={1,2}) to .TRUE. to do transpose
 
       implicit none
-      real*8, intent(in)  :: M1(:,:)
-      real*8, intent(in)  :: M2(:,:)
-      real*8, allocatable, intent(out) :: M3(:,:)
+      real(kind=8), intent(in)  :: M1(:,:)
+      real(kind=8), intent(in)  :: M2(:,:)
+      real(kind=8), allocatable, intent(out) :: M3(:,:)
       logical, intent(in) :: t1,t2
       integer :: r1,r2,c1,c2,ld1,ld2
       character(1) :: tN1,tN2
@@ -163,9 +161,9 @@
 ! Multiplies M*v, replacing v. Set 't' to .TRUE. to use transpose of M
 
       implicit none
-      real*8, intent(in)  :: M(:,:)
-      real*8, allocatable, intent(inout) :: v(:)
-      real*8, allocatable :: vtmp(:)
+      real(kind=8), intent(in)  :: M(:,:)
+      real(kind=8), allocatable, intent(inout) :: v(:)
+      real(kind=8), allocatable :: vtmp(:)
       logical, intent(in) :: t
       integer :: mr,mc,i,j
 
@@ -211,9 +209,9 @@
 ! Multiplies M*v = w. Set 't' to .TRUE. to use transpose of M
 
       implicit none
-      real*8, intent(in)  :: M(:,:)
-      real*8, intent(in)  :: v(:)
-      real*8, intent(out) :: w(:)
+      real(kind=8), intent(in)  :: M(:,:)
+      real(kind=8), intent(in)  :: v(:)
+      real(kind=8), intent(out) :: w(:)
       logical, intent(in) :: t
       integer :: mr,mc,i,j
 
@@ -259,9 +257,9 @@
 ! Here M is stored as a vector with dimensions (SIZE(v)*SIZE(w))
 
       implicit none
-      real*8, intent(in)    :: M(:)
-      real*8, intent(in)    :: v(:)
-      real*8, intent(inout) :: w(:)
+      real(kind=8), intent(in)    :: M(:)
+      real(kind=8), intent(in)    :: v(:)
+      real(kind=8), intent(inout) :: w(:)
       logical, intent(in)   :: t
       integer :: mr,mc,i,j,k,mci
 
@@ -303,8 +301,8 @@
 ! Multiplies v1=v1*v2, entrywise multiplication
 
       implicit none
-      real*8, intent(inout) :: v1(:)
-      real*8, intent(in)    :: v2(:)
+      real(kind=8), intent(inout) :: v1(:)
+      real(kind=8), intent(in)    :: v2(:)
       integer :: i,sv
 
       sv=SIZE(v1)
@@ -328,8 +326,8 @@
 ! Multiplies v3=v1*v2, entrywise multiplication
 
       implicit none
-      real*8, intent(inout) :: v3(:)
-      real*8, intent(in)    :: v1(:),v2(:)
+      real(kind=8), intent(inout) :: v3(:)
+      real(kind=8), intent(in)    :: v1(:),v2(:)
       integer :: i,sv
 
       sv=SIZE(v1)
@@ -359,8 +357,8 @@
 ! reorders into U, where U has dimensions [ri*ci x ro*co] 
 
       implicit none
-      real*8, allocatable :: U(:,:)
-      real*8, intent(in)  :: M(:,:)
+      real(kind=8), allocatable :: U(:,:)
+      real(kind=8), intent(in)  :: M(:,:)
       integer, intent(in) :: ri,ci,ro,co
       integer :: j,k,l,kl,js,jf,ks,kf,ls,lf
 
@@ -410,8 +408,8 @@
 ! as M, where M is an [ro x co] matrix of inner [ri x ci] matrices
 
       implicit none
-      real*8, allocatable :: M(:,:)
-      real*8, intent(in)  :: U(:,:)
+      real(kind=8), allocatable :: M(:,:)
+      real(kind=8), intent(in)  :: U(:,:)
       integer, intent(in) :: ri,ci,ro,co
       integer :: j,k,l,kl,js,jf,ks,kf,ls
 
@@ -464,14 +462,14 @@
 ! 'V' ->  " + eigvecs of original matrix (give QHQ for this)
 
       implicit none
-      real*8, intent(inout) :: QHQ(:,:)
-      real*8, intent(inout) :: avec(:),bvec(:)
-      real*8, allocatable   :: WORK(:)
+      real(kind=8), intent(inout) :: QHQ(:,:)
+      real(kind=8), intent(inout) :: avec(:),bvec(:)
+      real(kind=8), allocatable   :: WORK(:)
       integer     :: n,INFO,LWORK
-      real*8      :: t1,t2
+      real(kind=8)      :: t1,t2
       character*1 :: COMPZ
 
-      IF (.NOT. EIGEN_SETUP) call InitializeEigen()
+      IF (.NOT. EIGEN_SETUP) call Init_Eigen_Module()
       call CPU_TIME(t1)
 
       n=SIZE(avec)
@@ -502,14 +500,14 @@
 ! 'V' ->   " + eigvecs
 
       implicit none
-      real*8, intent(inout) :: QHQ(:,:),S(:,:)
-      real*8, intent(inout) :: avec(:)
-      real*8, allocatable   :: WORK(:)
+      real(kind=8), intent(inout) :: QHQ(:,:),S(:,:)
+      real(kind=8), intent(inout) :: avec(:)
+      real(kind=8), allocatable   :: WORK(:)
       integer     :: n,INFO,LWORK
-      real*8      :: t1,t2
+      real(kind=8)      :: t1,t2
       character*1 :: COMPZ
 
-      IF (.NOT. EIGEN_SETUP) call InitializeEigen()
+      IF (.NOT. EIGEN_SETUP) call Init_Eigen_Module()
       call CPU_TIME(t1)
 
       n=SIZE(avec)
@@ -538,8 +536,8 @@
 ! Prints SVD of matrix A, for quick check
 
       implicit none
-      real*8, intent(in)  :: M(:,:)
-      real*8, allocatable :: A(:,:),U(:,:),VT(:,:),svals(:)
+      real(kind=8), intent(in)  :: M(:,:)
+      real(kind=8), allocatable :: A(:,:),U(:,:),VT(:,:),svals(:)
       integer :: i
 
       ALLOCATE(A(SIZE(M,1),SIZE(M,2)))
@@ -570,12 +568,12 @@
 ! SVD of m x n matrix, using call to LAPACK DGESVD
 
       implicit none
-      real*8, allocatable, intent(inout) :: A(:,:)
-      real*8, allocatable, intent(out)   :: U(:,:),VT(:,:)
-      real*8, allocatable, intent(out)   :: svals(:)
-      real*8, allocatable :: WORK(:)
+      real(kind=8), allocatable, intent(inout) :: A(:,:)
+      real(kind=8), allocatable, intent(out)   :: U(:,:),VT(:,:)
+      real(kind=8), allocatable, intent(out)   :: svals(:)
+      real(kind=8), allocatable :: WORK(:)
       integer :: n,m,mmn,INFO,LWORK
-      real*8  :: optdim(1)
+      real(kind=8)  :: optdim(1)
 
       m=SIZE(A,1)
       n=SIZE(A,2)
@@ -608,11 +606,11 @@
 ! Gets QR-decomposition of matrix. Matrix is given as R on input
 
       implicit none
-      real*8, allocatable, intent(inout) :: R(:,:)
-      real*8, allocatable, intent(out)   :: Q(:,:)
-      real*8, allocatable :: RR(:,:),WORK(:),TAU(:)
+      real(kind=8), allocatable, intent(inout) :: R(:,:)
+      real(kind=8), allocatable, intent(out)   :: Q(:,:)
+      real(kind=8), allocatable :: RR(:,:),WORK(:),TAU(:)
       integer :: i,m,n,k,INFO,LWORK
-      real*8  :: optdim(1)
+      real(kind=8)  :: optdim(1)
 
       m=SIZE(R,1)
       n=SIZE(R,2)
@@ -662,11 +660,11 @@
 ! Gets QR-decomposition of matrix. Matrix is given as R on input
 
       implicit none
-      real*8, intent(inout) :: R(:,:)
-      real*8, allocatable, intent(out)   :: Q(:,:)
-      real*8, allocatable :: WORK(:),TAU(:)
+      real(kind=8), intent(inout) :: R(:,:)
+      real(kind=8), allocatable, intent(out)   :: Q(:,:)
+      real(kind=8), allocatable :: WORK(:),TAU(:)
       integer :: i,j,m,n,k,INFO,LWORK
-      real*8  :: optdim(1)
+      real(kind=8)  :: optdim(1)
 
       m=SIZE(R,1)
       n=SIZE(R,2)
@@ -712,9 +710,9 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Performs unitary transformation U^T*M*U, returning the transformed M
 
-      real*8, allocatable, intent(inout) :: M(:,:)
-      real*8, intent(in)  :: U(:,:)
-      real*8, allocatable :: Mtmp(:,:)
+      real(kind=8), allocatable, intent(inout) :: M(:,:)
+      real(kind=8), intent(in)  :: U(:,:)
+      real(kind=8), allocatable :: Mtmp(:,:)
       integer :: ur,uc,mr,mc,i,j,k
 
       mr=SIZE(M,1)
@@ -770,11 +768,11 @@
 ! Computes matrix pseudoinverse using SVD.
 
       implicit none
-      real*8, intent(in) :: M(:,:)
-      real*8, allocatable, intent(out) :: Mi(:,:)
-      real*8, allocatable :: SIG(:,:),U(:,:),VT(:,:),svals(:)
+      real(kind=8), intent(in) :: M(:,:)
+      real(kind=8), allocatable, intent(out) :: Mi(:,:)
+      real(kind=8), allocatable :: SIG(:,:),U(:,:),VT(:,:),svals(:)
       integer :: i,rm,cm,ns
-      real*8, parameter :: tol=1.d-12
+      real(kind=8), parameter :: tol=1.d-12
 
       rm=SIZE(M,1)
       cm=SIZE(M,2)
@@ -805,6 +803,32 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine SolveLinSys(A,B,reg,solver)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Solves linear system A*X = B, via SVD-calculated Moore-Penrose
+! pseudoinverse, where A is an (m x m) matrix, and B,X are a group of n 
+! length-m vectors. Solution X replaces B; A is destroyed by this routine
+
+      implicit none
+      real(kind=8), intent(in) :: reg
+      real(kind=8), intent(inout) :: A(:,:),B(:,:)
+      character(len=*) :: solver
+
+      IF (TRIM(ADJUSTL(solver)).seq.'lu') THEN
+         call SolveLinSysLU(A,B,reg)
+      ELSEIF (TRIM(ADJUSTL(solver)).seq.'svd') THEN
+         call SolveLinSysSVD(A,B,reg)
+      ELSE
+         write(*,*) "Linear solver algorithm '",TRIM(ADJUSTL(solver)),&
+         "' not recognized; valid choices are 'LU' and 'SVD'"
+         call AbortWithError("Error in SolveLinSys()")
+      ENDIF
+
+      end subroutine SolveLinSys
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine SolveLinSysSVD(A,B,reg)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -813,11 +837,11 @@
 ! length-m vectors. Solution X replaces B; A is destroyed by this routine
 
       implicit none
-      real*8, intent(in) :: reg
-      real*8, intent(inout) :: A(:,:),B(:,:)
-      real*8, allocatable :: U(:,:),VT(:,:),SIG(:,:),svals(:),WORK(:)
+      real(kind=8), intent(in) :: reg
+      real(kind=8), intent(inout) :: A(:,:),B(:,:)
+      real(kind=8), allocatable :: U(:,:),VT(:,:),SIG(:,:),svals(:),WORK(:)
       integer :: i,m,p,q,INFO,LWORK
-      real*8  :: tol,thresh,optdim(1)
+      real(kind=8)  :: tol,thresh,optdim(1)
 
       m=SIZE(A,1)
       p=SIZE(B,2)
@@ -892,9 +916,8 @@
 ! Solution X replaces B, and A is destroyed by this routine
 
       implicit none
-      real*8, intent(inout) :: A(:,:)
-      real*8, intent(inout) :: B(:,:)
-      real*8, intent(in)    :: reg
+      real(kind=8), intent(inout) :: A(:,:),B(:,:)
+      real(kind=8), intent(in)    :: reg
       integer, allocatable  :: IPV(:)
       integer :: i,m,n,info
 

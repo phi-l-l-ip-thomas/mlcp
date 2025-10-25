@@ -11,40 +11,39 @@
       USE MYMPI
 
       implicit none
-      real*8, private  :: munkres_time=0.d0
-      logical, private :: MUNKRES_SETUP = .FALSE.
+      real(kind=8), allocatable, private :: module_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine InitializeMunkres()
+      subroutine Init_Munkres_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      munkres_time = 0.d0
-      MUNKRES_SETUP = .TRUE.
+      allocate(module_time(mpinodes))
+      module_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine InitializeMunkres
+      end subroutine Init_Munkres_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeMunkres()
+      subroutine Dispose_Munkres_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. MUNKRES_SETUP) call InitializeMunkres()
+      IF (.NOT. MODULE_SETUP) call Init_Munkres_Module()
+      call Get_MPI_Timings('Munkres: making assignments',module_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(module_time)
 
-      MUNKRES_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total munkres assignment time     (s)',&
-                            munkres_time
-
-      end subroutine DisposeMunkres
+      end subroutine Dispose_Munkres_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -63,10 +62,10 @@
       logical, allocatable :: covrow(:),covcol(:)
       integer, allocatable :: Z(:,:)
       integer :: i,j,nr,nc,prow,pcol
-      real*8  :: t1,t2
+      real(kind=8) :: ti1,ti2
 
-      IF (.NOT. MUNKRES_SETUP) call InitializeMunkres()
-      call CPU_TIME(t1)
+      IF (.NOT. MODULE_SETUP) call Init_Munkres_Module()
+      call CPU_TIME(ti1)
 
       nr=SIZE(M,1)
       nc=SIZE(M,2)
@@ -142,8 +141,8 @@
       DEALLOCATE(covrow,covcol)
       DEALLOCATE(Z)
 
-      call CPU_TIME(t2)
-      munkres_time=munkres_time+t2-t1
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
       end function AssignMatrix
 

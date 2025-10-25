@@ -10,7 +10,8 @@
       USE LINALG
 
       implicit none
-      real*8, private  :: norm_time=0.d0,pvv_time=0.d0,svv_time=0.d0
+      real(kind=8), allocatable, private :: norm_time(:),pvv_time(:)
+      real(kind=8), allocatable, private :: svv_time(:)
       logical, private :: MVV_SETUP = .FALSE.
 
       INTERFACE VecScalarMult
@@ -44,40 +45,36 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine InitializeMVV()
+      subroutine Init_MVV_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      norm_time = 0.d0
-      pvv_time  = 0.d0
-      svv_time = 0.d0
+      allocate(pvv_time(mpinodes),svv_time(mpinodes),norm_time(mpinodes))
+      pvv_time(:) = 0.d0
+      svv_time(:) = 0.d0
+      norm_time(:) = 0.d0
       MVV_SETUP = .TRUE.
 
-      end subroutine InitializeMVV
+      end subroutine Init_MVV_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeMVV()
+      subroutine Dispose_MVV_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
-
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
+      call Get_MPI_Timings('MODVECVEC: inner products',pvv_time)
+      call Get_MPI_Timings('MODVECVEC: vector summation',svv_time)
+      call Get_MPI_Timings('MODVECVEC: normalization',norm_time)
       MVV_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) THEN
-      write(*,'(X,A,X,f20.3)') 'Total vector inner-product time   (s)',&
-                            pvv_time
-      write(*,'(X,A,X,f20.3)') 'Total vector normalization time   (s)',&
-                            norm_time
-      write(*,'(X,A,X,f20.3)') 'Total vector-vector addition time (s)',&
-                            svv_time
-      ENDIF
+      deallocate(pvv_time,svv_time,norm_time)
 
-      end subroutine DisposeMVV
+      end subroutine Dispose_MVV_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -149,7 +146,7 @@
       integer :: rF,rG,ndof
       real*8  :: t1,t2
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
       call CPU_TIME(t1)
 
       IF (.NOT.CHECKNBAS(F,G)) THEN
@@ -204,7 +201,7 @@
       integer :: i,nbloc,rst,nrki
       real*8  :: t1,t2
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
       call CPU_TIME(t1)
 
       nbloc=SIZE(facs)
@@ -303,7 +300,7 @@
       real*8  :: norm1D,t1,t2
       integer :: i,rF
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
       call CPU_TIME(t1)
 
       rF=F%R()
@@ -337,7 +334,7 @@
       real*8  :: norm1D,normND,t1,t2
       integer :: ndim,ir,irk,id,imod,rF,gst
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
       call CPU_TIME(t1)
 
       rF=SIZE(F%coef)
@@ -587,7 +584,7 @@
       integer :: i,j,k,ik
       real*8  :: t1,t2
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
       call CPU_TIME(t1)
 
       IF (.NOT.CHECKNBAS(M1,M2)) THEN
@@ -629,7 +626,7 @@
       real*8  :: PRODVV_AA,t1,t2
       integer :: nrk,i,j
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
       call CPU_TIME(t1)
 
       nrk=SIZE(F%coef)
@@ -669,7 +666,7 @@
       real*8  :: PRODVV_AB,t1,t2
       integer :: rF,rG,i,j
 
-      IF (.NOT. MVV_SETUP) call InitializeMVV()
+      IF (.NOT. MVV_SETUP) call Init_MVV_Module()
       call CPU_TIME(t1)
 
       IF (.NOT.CHECKNBAS(F,G)) THEN
@@ -743,6 +740,59 @@
                  (SIZE(G%coef).eq.SIZE(P,1))
 
       end function CHECKPDIMS
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+!      subroutine BuildP_CP8(F,G,P,modes,update)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Master routine for constructing / updating P matrix
+! 'modes' array tells which modes to act on
+! 'update' multiplies when true, divides otherwise
+
+!      implicit none
+!      TYPE (CP8), INTENT(IN)      :: F,G
+!      real(kind=8), intent(inout) :: P
+!      logical, intent(in) :: modes(:)
+!      logical :: update
+!      integer :: rF,rG,i,j,d
+
+!      rF=F%R()
+!      rG=G%R()
+!      ndof=F%D()
+
+!     Error checking
+!      IF (.not.CHECKPDIMS(F,G,P)) THEN
+!         write(*,*) 'P is (',SIZE(P,1),' x ',SIZE(P,2),&
+!                    ') but must be (',rG,' x ',rF,')'
+!         call AbortWithError('BuildP_CP8(): dimension mismatch')
+!      ENDIF
+
+!      IF (SIZE(modes).ne.ndof) THEN
+!         write(*,*) 'modes is len ',SIZE(modes),&
+!                   ' but must be ',ndof
+!         call AbortWithError('BuildP_CP8(): dimension mismatch')
+!      ENDIF
+
+!      do d=1,ndof
+!!! No coef mult here (only in dot prod vsn)
+!!!      Don't forget logic for up/downdating and modes!
+! cuBLAS call goes here
+!        msf=F%MS(d)
+!        mff=F%MF(d)
+!        msg=G%MS(d)
+!        mfg=G%MF(d)
+!        nbas=F%MN(d)
+! mult F%base(ms:mf) by G%base(ms:mf)
+!      tN1='T' ! transposed
+!      tN2='N' ! as is
+!      call DGEMM(tN1,tN2,rF,rG,nbas,1.d0,F%base(ms:mf),nbas,&
+!             G%base(ms:mf),nbas,0.d0,P,rF)
+!!! Accumulate result in P by mult or divide
+
+!      enddo
+
+!      end subroutine BuildP_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

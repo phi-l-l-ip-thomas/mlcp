@@ -13,6 +13,10 @@
       USE CPMMM
       USE ALSOO
 
+      implicit none
+      real(kind=8), private :: als_penalty=-1.d0
+      character(len=64), private :: als_solver='uninitialized'
+
       INTERFACE ALS_trials
          MODULE PROCEDURE ALS_reduce_trials
          MODULE PROCEDURE ALS_Wreduce_trials
@@ -29,6 +33,28 @@
       END INTERFACE ALS_solve
 
       CONTAINS
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine set_als_settings_ALS(penalty,solver)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets the ALS regularization penalty for the module
+
+      implicit none
+      real(kind=8), intent(in) :: penalty
+      character(len=64), intent(in) :: solver
+
+      if (penalty.gt.1.d0 .or. penalty.lt.0.d0) then
+         write(*,'(A,ES11.4,A)') 'ALS regularization penalty ',&
+         penalty,' must be in range: 0 <= penalty <= 1'
+         call AbortWithError('set_als_settings_ALS(): wrong value')
+      endif
+
+      als_penalty=penalty
+      als_solver=solver
+
+      end subroutine set_als_settings_ALS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -141,7 +167,10 @@
 
       IF (.not.ALLOCATED(X%dofincluded)) call NewALS(X,F,G)
       IF (present(nm)) call X%setname(nm)
-      call X%setoption('prtconv',.FALSE.)
+      call X%setvalue('penalty',als_penalty)
+      call X%setstringval('solver',als_solver)
+      call X%setoption('chkconv',.TRUE.)
+      call X%setoption('prtconv',.TRUE.)
 
       DO i=1,nals
          DO d=1,ndof
@@ -154,7 +183,7 @@
          IF (conv.gt.0) EXIT
       ENDDO
 
-      call X%showconv()
+!      call X%showconv()
 
       end function ALS_reduce_X
 
@@ -242,8 +271,10 @@
 
       IF (.not.ALLOCATED(X%dofincluded)) call NewALS(X,F,G,W)
       IF (present(nm)) call X%setname(nm)
-
-!      call X%setoption('prtconv',.FALSE.)
+      call X%setvalue('penalty',als_penalty)
+      call X%setstringval('solver',als_solver)
+      call X%setoption('chkconv',.TRUE.)
+      call X%setoption('prtconv',.TRUE.)
 
       DO i=1,nals
          DO d=1,ndof
@@ -379,6 +410,10 @@
       IF (.not.ALLOCATED(X%dofincluded)) &
          call NewLinSolver(X,A,F,G,.FALSE.,.FALSE.,ish,Esh)
       IF (present(nm)) call X%setname(nm)
+      call X%setvalue('penalty',als_penalty)
+      call X%setstringval('solver',als_solver)
+      call X%setoption('chkconv',.TRUE.)
+      call X%setoption('prtconv',.TRUE.)
 
 !     A*F = AF
       IF (.not.ALLOCATED(AF%coef)) &
@@ -392,9 +427,9 @@
             call SolveLS(X,F,G,d)
             call CPMM(A,ish,Esh,.FALSE.,F,0,0.d0,.FALSE.,AF,d)
             call ProdMatsUD(X,AF,G,d,conv)
-!            IF (conv.gt.0) EXIT
+            IF (conv.gt.0) EXIT
          ENDDO
-!         IF (conv.gt.0) EXIT
+         IF (conv.gt.0) EXIT
       ENDDO
 
       end function ALS_solve_X
@@ -472,6 +507,10 @@
       IF (.not.ALLOCATED(X%dofincluded)) &
          call NewLinSolver(X,A,F,G,W,.FALSE.,.FALSE.,.FALSE.,ish,Esh)
       IF (present(nm)) call X%setname(nm)
+      call X%setvalue('penalty',als_penalty)
+      call X%setstringval('solver',als_solver)
+      call X%setoption('chkconv',.TRUE.)
+      call X%setoption('prtconv',.TRUE.)
 
 !     A*F = AF
       IF (.not.ALLOCATED(AF%coef)) &
@@ -480,8 +519,6 @@
 !     Multiply weights with A*F,G
       call CPMM(W,.FALSE.,AF,.FALSE.,WAF)
       call CPMM(W,.FALSE.,G,.FALSE.,WG)
-
-      call X%setoption('prtconv',.FALSE.)
       
 !     ALS iterations
       DO i=1,nals
@@ -523,6 +560,8 @@
 !     Calc A*F = AF, then create the ALS object
       call CPMM(A,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,AF)
       call NewALS(X,F,AF)
+      call X%setvalue('penalty',als_penalty)
+      call X%setstringval('solver',als_solver)
 !      call X%show
 
       DO i=1,nals

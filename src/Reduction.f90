@@ -16,10 +16,13 @@
 
       implicit none
       integer, private :: newrank,nloop
-      real*8, private  :: redn_time=0.d0,eps
+      real(kind=8), private :: eps
+      real(kind=8), private :: als_penalty=-1.d0
+      real(kind=8), allocatable, private :: redn_time(:)
       logical, private :: RED_SETUP=.FALSE.
       logical, private :: printredn=.FALSE.
       character(3), private :: red2D='N/A',redND='N/A'
+      character(len=64), private :: als_solver='uninitialized'
 
       INTERFACE reduc
          MODULE PROCEDURE reduc_AA,reduc_AB
@@ -30,17 +33,22 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       subroutine SetReductionParameters(rrnk,nals,redtol,prnt,rtyp2D,&
-                                        rtypND)
+                                        rtypND,penalty,solver)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       integer, intent(in) :: rrnk,nals
-      real*8, intent(in)  :: redtol
+      real(kind=8), intent(in) :: redtol,penalty
       logical, intent(in) :: prnt
       character*3, intent(in) :: rtyp2D,rtypND
+      character(len=64), intent(in) :: solver
 
-      IF (.NOT. RED_SETUP) call SetupReduction()
+      if (penalty.gt.1.d0 .or. penalty.lt.0.d0) then
+         write(*,'(A,ES11.4,A)') 'ALS regularization penalty ',&
+         penalty,' must be in range: 0 <= penalty <= 1'
+         call AbortWithError('SetReductionParameters(): wrong value')
+      endif
 
       newrank=rrnk
       nloop=nals
@@ -48,64 +56,63 @@
       printredn=prnt
       red2D=rtyp2D
       redND=rtypND
+      als_penalty=penalty
+      als_solver=solver
 
       end subroutine SetReductionParameters
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SetupReduction()
+      subroutine Init_Reduction_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      redn_time=0.d0
-      RED_SETUP=.TRUE.
+      allocate(redn_time(mpinodes))
+      redn_time(:) = 0.d0
+      RED_SETUP = .TRUE.
 
-      end subroutine SetupReduction
+      end subroutine Init_Reduction_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeReduction()
+      subroutine Dispose_Reduction_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. RED_SETUP) call SetupReduction()
-
+      IF (.NOT. RED_SETUP) call Init_Reduction_Module()
+      call Get_MPI_Timings('Reduction',redn_time)
       RED_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total reduction time (REDUCTION)  (s)',&
-                            redn_time
+      deallocate(redn_time)
 
-      end subroutine DisposeReduction
+      end subroutine Dispose_Reduction_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function getRednMem(rG,rF,nbas,ncpu,useSVD)
+      function getRednMem(rG,rF,nbas,npara,useSVD)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Determines memory needed for reduction
 
       implicit none
-      integer, intent(in) :: rG,rF,ncpu
+      integer, intent(in) :: rG,rF,npara
       integer, intent(in) :: nbas(:)
       logical, intent(in) :: useSVD
       integer :: n
       real*8  :: getRednMem
 
-      IF (.NOT. RED_SETUP) call SetupReduction()
-
       IF (useSVD) THEN ! Reduce ranks with SVD
          n=MINVAL(nbas)
 !!!      WORK ARRAY SIZE NOT YET INCLUDED BELOW
-         getRednMem=REAL(ncpu)*(nbas(1)*nbas(2)+n*(nbas(1)+nbas(2)+1))
+         getRednMem=REAL(npara)*(nbas(1)*nbas(2)+n*(nbas(1)+nbas(2)+1))
       ELSE ! Reduce ranks with ALS
          n=MAXVAL(nbas)
 !        Memory allocated for PS,BB,BBmem and either PSk or bjk+IPV
 !        (PSk and bjk+IPV are never allocated simultaneously)
-         getRednMem=REAL(ncpu)*rF*(rG+2*rF+MAX(rG,n+1))
+         getRednMem=REAL(nomp_threads)*rF*(rG+2*rF+MAX(rG,n+1))
       ENDIF
 
       end function getRednMem
@@ -152,7 +159,7 @@
       logical :: useA,ok
       integer :: badF
 
-      IF (.NOT. RED_SETUP) call SetupReduction()
+      IF (.NOT. RED_SETUP) call Init_Reduction_Module()
 
 !     No reduction requested
       IF (newrank.eq.0 .or. SIZE(G%nbas).eq.1 .or. SIZE(G%coef).eq.1) &
@@ -179,7 +186,7 @@
 
 !     ALS or RID reduction (set NALS=0 to do RID by itself)
       ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'ALS') .or. &
-              (SIZE(G%nbas).gt.2 .and. redND.eq.'ALS')) THEN
+              (SIZE(G%nbas).ne.2 .and. redND.eq.'ALS')) THEN
 
 !        The initial guess is the existing vector F, but if the rank
 !        of F is too small then we must generate a new guess
@@ -193,7 +200,7 @@
 
 !     Successive rank-1 approximations (uses ALS code)
       ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'SR1') .or. &
-              (SIZE(G%nbas).gt.2 .and. redND.eq.'SR1')) THEN
+              (SIZE(G%nbas).ne.2 .and. redND.eq.'SR1')) THEN
 
          IF (.not.ALLOCATED(F%coef)) THEN
             F=RandomCP(G,newrank)
@@ -205,14 +212,14 @@
 
 !     Orthogonal rank-1 projections plus sorting
       ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'OPS') .or. &
-              (SIZE(G%nbas).gt.2 .and. redND.eq.'OPS')) THEN
+              (SIZE(G%nbas).ne.2 .and. redND.eq.'OPS')) THEN
          call FlushCP(F)
          call reduc_orthog(G,F,5*newrank)
          call reduc_bysorting(F,newrank)
 
 !     Rank-1 reduction with orthogonal rank-1 projection
       ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'ROP') .or. &
-              (SIZE(G%nbas).gt.2 .and. redND.eq.'ROP')) THEN
+              (SIZE(G%nbas).ne.2 .and. redND.eq.'ROP')) THEN
          call FlushCP(F)
          call reduc_rop(G,F,newrank,abs(nloop))
 
@@ -667,7 +674,7 @@
       TYPE (CP), INTENT(INOUT) :: F
       integer, intent(in)  :: nitn
       real*8, dimension (:,:), allocatable :: BB,PS,bjk,BBmem
-      real*8  :: valpen,gtmp
+      real*8  :: gtmp
       integer :: rG,rF,ndim,i,j,ir,imod,k,l,n,gst,itn,kp
       logical :: update
 
@@ -687,9 +694,6 @@
       IF (ndim.le.3)  update=.FALSE.
 
       allocate(BB(rF,rF),BBmem(rF,rF),PS(rG,rF))
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 76    continue
 
@@ -742,8 +746,7 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
-!            call SolveLinSysSVD(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,bjk,k)
@@ -890,7 +893,7 @@
       integer, intent(in) :: nitn
       real*8, dimension (:,:), allocatable :: BB,PS,&
       PSk,PSkm1,BBk,BBkm1
-      real*8  :: valpen,oldcoef,Tcoef,snorm
+      real*8  :: oldcoef,Tcoef,snorm
       integer :: rF,rG,rrG,ndim,i,j,ir,k,l,n,itn,kp,gi,gf,nbad
       real*8, parameter :: tol=1.d-15
       logical :: update
@@ -903,7 +906,6 @@
       rF=SIZE(F%coef)
       ndim=SIZE(G%nbas)
       snorm=1.d0
-      valpen=maxval(F%coef)*1.d-10
 
 !     Update the ALS matrices BB and PS if ndim > 3. For ndim <= 3 it
 !     is faster to build BB and PS at each iteration.
@@ -986,9 +988,6 @@
                   ENDDO
                ENDIF
 
-!              Penalty to avoid ill-conditioning (section 3.2, Beylkin)
-               BB(1,1)=BB(1,1)+valpen
-
 !              Apply the ALS update to T
                T%base(gi:gf,1)=0.d0
                T%coef(1)=0.d0
@@ -1004,12 +1003,10 @@
                   T%base(ir,1)=T%base(ir,1)/BB(1,1)
                   T%coef(1)=T%coef(1)+T%base(ir,1)**2
                enddo
+
 !              Normalization
                T%coef(1)=sqrt(abs(T%coef(1)))
                T%base(gi:gf,1)=T%base(gi:gf,1)/T%coef(1)
-
-!              Remove penalty on BB after update
-               BB(1,1)=BB(1,1)-valpen
 
                IF (T%coef(1).ne.T%coef(1)) THEN
 !                  call AbortWithError('reduc_SR1(): NaN on update')

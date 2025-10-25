@@ -40,7 +40,7 @@
          enddo
 
          IF (mpirank.eq.mpi_prnt_rank) &
-            write(*,'(/X,A/)') 'Random seed used from input file...'
+            write(*,'(/X,A)') 'Random seed used from input file...'
 
       ELSE
 !        Fill seed using values derived from date and time

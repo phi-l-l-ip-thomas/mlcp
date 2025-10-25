@@ -19,47 +19,67 @@
 !!!
 
       implicit none
-      real*8, private  :: linsolver_time=0.d0
-      logical, private :: LINSOLVER_SETUP=.FALSE.
+      real(kind=8), private :: als_penalty=-1.d0
+      real(kind=8), allocatable, private :: module_time(:)
+      character(len=64), private :: als_solver='uninitialized'
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SetupLinSolver()
+      subroutine Init_LinSolver_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Set up linear solver module
 
       implicit none
 
-      linsolver_time=0.d0
-      LINSOLVER_SETUP=.TRUE.
+      allocate(module_time(mpinodes))
+      module_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine SetupLinSolver
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine DisposeLinSolver()
+      end subroutine Init_LinSolver_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Dispose linear solver module
+
+      subroutine Dispose_LinSolver_Module()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. LINSOLVER_SETUP) call SetupLinSolver()
+      IF (.NOT. MODULE_SETUP) call Init_LinSolver_Module()
+      call Get_MPI_Timings('ALS linear solver',module_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(module_time)
 
-!     Set up the module if it was not set up already
-      LINSOLVER_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total reduction time (LINSOLVER)  (s)',&
-                            linsolver_time
-
-      end subroutine DisposeLinSolver
+      end subroutine Dispose_LinSolver_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine LinSolver_alg(A,F,G,nitn,ishift,Eshift,lowmem,show)
+      subroutine set_als_settings_LinSolver(penalty,solver)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets the ALS regularization penalty for the module
+
+      implicit none
+      real(kind=8), intent(in) :: penalty
+      character(len=64), intent(in) :: solver
+
+      if (penalty.gt.1.d0 .or. penalty.lt.0.d0) then
+         write(*,'(A,ES11.4,A)') 'ALS regularization penalty ',&
+         penalty,' must be in range: 0 <= penalty <= 1'
+         call AbortWithError('set_als_settings_LinSolver(): wrong value')
+      endif
+
+      als_penalty=penalty
+      als_solver=solver
+
+      end subroutine set_als_settings_LinSolver
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine LinSolver_alg(A,F,G,nitn,ishift,Eshift,which,show)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Select the linear solver algorithm depending on the value of 'lowmem'
@@ -68,18 +88,25 @@
       TYPE (CP), INTENT(IN)    :: A,G
       TYPE (CP), INTENT(INOUT) :: F
       logical, optional, intent(in) :: show
-      integer, intent(in) :: nitn,ishift,lowmem
+      integer, intent(in) :: nitn,ishift,which
       real*8, intent(in)  :: Eshift
+      real(kind=8) :: ti1,ti2
 
+      IF (.NOT. MODULE_SETUP) call Init_LinSolver_Module()
 
-      IF (.NOT. LINSOLVER_SETUP) call SetupLinSolver()
+      call CPU_TIME(ti1)
 
-      IF (lowmem.ne.1) THEN
-         write(*,*) 'LinSolver_alg(): only lowmem=1 implemented so far'
-         call AbortWithError('LinSolver_alg(): invalid lowmem')
-      ELSE
+      IF (which.eq.1) THEN
          call LinSolver_1(A,F,G,nitn,ishift,Eshift,show)
+      ELSEIF (which.eq.2) THEN
+         call LinSolver_2(A,F,G,nitn,ishift,Eshift,show)
+      ELSE
+         write(*,*) 'LinSolver_alg(): only which={1,2} implemented'
+         call AbortWithError('LinSolver_alg(): invalid algorithm')
       ENDIF
+
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
       end subroutine LinSolver_alg
 
@@ -98,14 +125,13 @@
       integer, intent(in) :: nitn,ishift
       real*8, intent(in)  :: Eshift
       real*8, dimension (:,:), allocatable :: BB,PS,lhs,rhs
-      real*8  :: valpen,tmp,t1,t2
-      real*8  :: GGprod,AFAFprod,AFGprod,conver
+      real*8  :: GGprod,AFAFprod,AFGprod,conver,FF,FAF,tmp
       integer :: rA,rG,rF,rAF,rFn,ndof
       integer :: d,i,j,k,l,m,n,s,t
       integer :: ir,imod,gst,itn
       integer :: browa,brow,bcola,bcol,lrow,lrowa,lcol,lcola,atark
       integer :: rrowa,rrow,rcola,pcola,pcol,atgrk,atgind,ataind
-      logical :: useSVD=.TRUE.
+      logical :: useSVD=.FALSE.
 
       IF (nitn.eq.0) return
 
@@ -117,8 +143,6 @@
       call CPMM(A,ishift,Eshift,.TRUE.,G,0,0.d0,.FALSE.,ATG)
       call CPMM(A,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,AF)
 
-      call CPU_TIME(t1)
-
 !     Set parameters
       rA=SIZE(A%coef)
       IF (ishift.ne.0) rA=rA+1
@@ -126,10 +150,6 @@
       rF=SIZE(F%coef)
       rAF=rA*rF
       ndof=SIZE(G%nbas)
-
-!     Penalty to avoid bad conditioning
-!      valpen=maxval(F%coef)*1.d-10
-      valpen=sqrt(2.d0)*EPSILON(1.d0)
 
 !     BB(l,l') = Pi_{i=2}^ndof < (A*F)_i^l , (A*F)_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndof < G_i^l , (A*F)_i^l' >
@@ -143,6 +163,10 @@
             write(*,*) "LinSolver_1() iterations..."
          ENDIF
       ENDIF
+
+      FF=PRODVV(F)
+      FAF=PRODVV(F,AF)
+      write(*,*) 'ials = ',0,'; RQ = ',(FAF+ishift*Eshift*FF)/FF
 
 !     Main loop over ALS iterations
       DO itn=1,nitn
@@ -220,11 +244,7 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            IF (useSVD) THEN
-               call SolveLinSysSVD(lhs,rhs,valpen)
-            ELSE
-               call SolveLinSysLU(lhs,rhs,valpen)
-            ENDIF
+            call SolveLinSys(lhs,rhs,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,rhs,d)
@@ -239,10 +259,7 @@
             ENDIF
 
 !           Update AF, BB, PS using new Fs
-            call CPU_TIME(t2)
-            linsolver_time=linsolver_time+t2-t1
             call CPMM(A,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,AF,d)
-            call CPU_TIME(t1)
             call UPDATEP(AF,d,BB,.FALSE.)
             call UPDATEP(AF,G,d,PS,.FALSE.)
 
@@ -264,19 +281,20 @@
 
             IF (present(show)) THEN
                IF (show) &
-               write(*,*) 'Itn: ',itn,', d: ',d,', ||AF-G||/||G|| = ',&
-                          conver,'; <F,F> = ',PRODVV(F)
+               write(*,'(2(A,X,I3,X),2(A,X,ES16.8))') &
+                          'Itn: ',itn,', d: ',d,', ||AF-G||/||G|| = ',&
+                          conver,'; <AF,AF> = ',AFAFprod!PRODVV(F)
             ENDIF
          enddo  ! loop over d
+         FF=PRODVV(F)
+         FAF=PRODVV(F,AF)
+         write(*,*) 'ials = ',itn,'; RQ = ',(FAF+ishift*Eshift*FF)/FF
       ENDDO  ! loop over iterations
 
       deallocate(BB,PS)
       call FlushCP(ATA)
       call FlushCP(ATG)
       call FlushCP(AF)
-
-      call CPU_TIME(t2)
-      linsolver_time=linsolver_time+t2-t1
 
       end subroutine LinSolver_1
 
@@ -290,19 +308,20 @@
       implicit none
       TYPE (CP), INTENT(IN)    :: A,G
       TYPE (CP), INTENT(INOUT) :: F
-      TYPE (CP) :: AF
+      TYPE (CP) :: AF,Id
       logical, optional, intent(in) :: show
       integer, intent(in) :: nitn,ishift
       real*8, intent(in)  :: Eshift
       real*8, dimension (:,:), allocatable :: BB,PS,lhs,rhs
-      real*8  :: valpen,tmp,t1,t2
-      real*8  :: GGprod,AFAFprod,AFGprod,conver
-      integer :: rA,rG,rF,rAF,rFn,ndof
+      real*8  :: GGprod,AFAFprod,AFGprod,conver,tmp
+      real*8  :: AFFprod,FGprod,conver2,FF,FAF
+      integer :: rA,rAs,rG,rF,rAF,rFn,ndof
       integer :: d,i,j,k,l,m,n,s,t
       integer :: ir,imod,gst,itn
       integer :: browa,brow,bcola,bcol,lrow,lrowa,lcol,lcola,atark
       integer :: rrowa,rrow,rcola,pcola,pcol,atgrk,atgind,ataind
-      logical :: useSVD=.TRUE.
+      logical, allocatable :: sym(:)
+      logical :: useSVD=.FALSE.
 
       IF (nitn.eq.0) return
 
@@ -312,19 +331,21 @@
 !     Precompute initial AF
       call CPMM(A,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,AF)
 
-      call CPU_TIME(t1)
-
 !     Set parameters
       rA=SIZE(A%coef)
-      IF (ishift.ne.0) rA=rA+1
+      rAs=rA
+      IF (ishift.ne.0) rAs=rAs+1
       rG=SIZE(G%coef)
       rF=SIZE(F%coef)
-      rAF=rA*rF
+      rAF=rAs*rF
       ndof=SIZE(G%nbas)
 
-!     Penalty to avoid bad conditioning
-!      valpen=maxval(F%coef)*1.d-10
-      valpen=sqrt(2.d0)*EPSILON(1.d0)
+!     Precompute identity matrix for Eshift
+      allocate(sym(ndof))
+      sym(:)=.FALSE.
+      Id=IdentityCPMatrix(A%rows,A%cols,sym)
+      call VecScalarMult(Id,-Eshift)
+      deallocate(sym)
 
 !     BB(l,l') = Pi_{i=2}^ndof < (A*F)_i^l , (A*F)_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndof < G_i^l , (A*F)_i^l' >
@@ -338,6 +359,10 @@
             write(*,*) "LinSolver_2() iterations..."
          ENDIF
       ENDIF
+
+      FF=PRODVV(F)
+      FAF=PRODVV(F,AF)
+      write(*,*) 'ials = ',0,'; RQ = ',(FAF+ishift*Eshift*FF)/FF
 
 !     Main loop over ALS iterations
       DO itn=1,nitn
@@ -355,7 +380,7 @@
 !           Compute the left-hand sides of the linear system
             allocate(lhs(rFn,rFn))
             lhs=0.d0
-            do t=1,rA
+            do t=1,rA ! (does not include Eshift term from Id)
                browa=(t-1)*rF ! row group of BB from A
                do k=1,n
                   lrowa=(k-1)*rF ! row group of lhs from basis
@@ -363,11 +388,14 @@
                      lcola=(l-1)*rF ! col group of lhs from basis
                      ataind=A%ibas(d)-1+(l-1)*n+k ! A elem index
                      tmp=A%coef(t)*A%base(ataind,t)
+!                     write(*,*) 't = ',t,';A%coef(t) = ',A%coef(t),&
+!                     '; A%base(atind,t) = ',A%base(ataind,t)
                      do i=1,rF
                         brow=browa+i ! row of BB from A and F
-                        lrow=lrowa+i ! row of lhs from A and F
+!                        lrow=lrowa+i ! row of lhs from A and F
                         do j=1,rF
-                           lcol=lcola+j ! col of lhs from A and F
+                           lrow=lrowa+i
+                           lcol=lcola+j
                            lhs(lrow,lcol)=&
                            lhs(lrow,lcol)+tmp*BB(brow,j)
                         enddo
@@ -375,6 +403,33 @@
                   enddo
                enddo
             enddo
+
+!           Accumulate energy shift term into LHS (not included above!)
+            do t=rA+1,rAs
+               browa=(t-1)*rF ! row group of BB from A
+               do k=1,n
+                  lrowa=(k-1)*rF ! row group of lhs from basis
+                  do l=1,n
+                     lcola=(l-1)*rF ! col group of lhs from basis
+                     ataind=A%ibas(d)-1+(l-1)*n+k ! A elem index
+                     tmp=Id%coef(t-rA)*Id%base(ataind,t-rA)
+!                     write(*,*) 't = ',t,';Id%coef(1) = ',Id%coef(t-rA),&
+!                     '; Id%base(atind,1) = ',Id%base(ataind,t-rA)
+                     do i=1,rF
+                        brow=browa+i ! row of BB from A and F
+!                        lrow=lrowa+i ! row of lhs from A and F
+                        do j=1,rF
+                           lrow=lrowa+i !!! i
+                           lcol=lcola+j !!! j
+                           lhs(lrow,lcol)=&
+                           lhs(lrow,lcol)+tmp*BB(brow,j)
+                        enddo
+                     enddo
+                  enddo
+               enddo
+            enddo
+
+            if (ishift.lt.0) lhs(:,:)=-lhs(:,:)
 
 !           Compute the right-hand sides of the linear system
             allocate(rhs(rFn,m))
@@ -401,15 +456,25 @@
 !               write(*,*) 'lhs, CP-ified:'
 !               call truncateCPtest(lhs,(/rF,n/),(/rF,n/))
             ENDIF
+
+!            write(*,*) 'LinSolver_2 B: itn,d = ',itn,d
+!            write(*,*) '(',rAF,' x ',rF,')'
+!            call PrintMatrix(BB)
+!            write(*,*) 'LinSolver_2 P: itn,d = ',itn,d
+!            write(*,*) '(',rG,' x ',rF,')'
+!            call PrintMatrix(PS)
+!            write(*,*) 'LinSolver_2 lhs: itn,d = ',itn,d
+!            write(*,*) '(',rFn,' x ',rFn,')'
+!            call PrintMatrix(lhs)
+!            write(*,*) 'LinSolver_2 rhs: itn,d = ',itn,d
+!            write(*,*) '(',rFn,' x ',m,')'
+!            call PrintMatrix(rhs)
+
 !!! END TEST
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            IF (useSVD) THEN
-               call SolveLinSysSVD(lhs,rhs,valpen)
-            ELSE
-               call SolveLinSysLU(lhs,rhs,valpen)
-            ENDIF
+            call SolveLinSys(lhs,rhs,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,rhs,d)
@@ -424,10 +489,7 @@
             ENDIF
 
 !           Update AF, BB, PS using new Fs
-            call CPU_TIME(t2)
-            linsolver_time=linsolver_time+t2-t1
             call CPMM(A,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,AF,d)
-            call CPU_TIME(t1)
             call UPDATEP(F,AF,d,BB,.FALSE.)
             call UPDATEP(F,G,d,PS,.FALSE.)
 
@@ -445,23 +507,31 @@
 !                  AFGprod=AFGprod+G%coef(i)*AF%coef(k)*PS(i,k)
 !               ENDDO
 !            ENDDO
-            AFAFprod=PRODVV(AF) !!! TEMP, for testing
-            AFGprod=PRODVV(AF,G) !!! TEMP, for testing
-            conver=sqrt(abs((AFAFprod+GGprod-2*AFGprod)/GGprod))
+
+!            AFAFprod=PRODVV(AF,AF) !!! TEMP, for testing
+!            AFGprod=PRODVV(AF,G) !!! TEMP, for testing
+!            conver=sqrt(abs((AFAFprod+GGprod-2*AFGprod)/GGprod))
+            AFFprod=PRODVV(F,AF) !!! TEMP, for testing
+            FGprod=PRODVV(F,G) !!! TEMP, for testing
+!            conver2=sqrt(abs((AFFprod-2*FGprod)/FGprod))
 
             IF (present(show)) THEN
                IF (show) &
-               write(*,*) 'Itn: ',itn,', d: ',d,', ||AF-G||/||G|| = ',&
-                          conver,'; <F,F> = ',PRODVV(F)
+!               write(*,'(2(A,X,I0),2(A,X,ES16.8))') &
+!                          'Itn:',itn,', d:',d,', ||AF-G||/||G|| = ',&
+!                          conver,'; <AF,AF> = ',AFAFprod!PRODVV(F)
+               write(*,'(2(A,X,I0),2(A,X,ES16.8))') &
+                          'Itn:',itn,', d:',d,', <AF,F> = ',&
+                         abs(AFFprod),'; <G,F> = ',abs(FGprod)
             ENDIF
          enddo  ! loop over d
+         FF=PRODVV(F)
+         write(*,*) 'ials = ',itn,'; RQ = ',(AFFprod+ishift*Eshift*FF)/FF
       ENDDO  ! loop over iterations
 
       deallocate(BB,PS)
+      call FlushCP(Id)
       call FlushCP(AF)
-
-      call CPU_TIME(t2)
-      linsolver_time=linsolver_time+t2-t1
 
       end subroutine LinSolver_2
 
@@ -482,13 +552,17 @@
       integer :: irep,nrep
 !!!
       real*8, dimension (:,:), allocatable :: BB,PS,lhs,rhs
-      real*8  :: valpen,tmp,t1,t2
-      real*8 :: FFprod,AFFprod,rqold,rqnew
+      real*8 :: FFprod,AFFprod,rqold,rqnew,tmp
       integer :: rA,rG,rF,rAF,rFn,ndof
       integer :: d,i,j,k,l,n,s,t
       integer :: ir,imod,gst,itn
       integer :: browa,brow,bcola,bcol,lrow,lrowa,lcol,lcola,atark
       integer :: rrowa,rrow,pcola,pcol,atgrk,atgind,ataind
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_LinSolver_Module()
+
+      call CPU_TIME(ti1)
 
       IF (nitn.eq.0) return
 
@@ -499,16 +573,11 @@
       call CPMM(A,1,rqold,.TRUE.,A,1,rqold,.FALSE.,ATA)
       call CPMM(A,1,rqold,.FALSE.,F,0,0.d0,.FALSE.,AF)
 
-      call CPU_TIME(t1)
-
 !     Set parameters
       rA=SIZE(A%coef)+1 ! +1 due to Eshift
       rF=SIZE(F%coef)
       rAF=rA*rF
       ndof=SIZE(F%nbas)
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     BB(l,l') = Pi_{i=2}^ndof < (A*F)_i^l , (A*F)_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndof < F_i^l , (A*F)_i^l' >
@@ -604,10 +673,7 @@
             
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(lhs,rhs,valpen)
-!!! TEST: use SVD instead
-!            call SolveLinSysSVD(lhs,rhs,valpen)
-!!!
+            call SolveLinSys(lhs,rhs,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,rhs,d)
@@ -638,13 +704,8 @@
 !            call NORMALIZE(F)
 
 !           Update AF, Rayleigh Quotient, BB, PS using new Fs
-            call CPU_TIME(t2)
-            linsolver_time=linsolver_time+t2-t1
-
 !!! Watch out: the call below uses the old Rayleigh Quotient
             call CPMM(A,1,rqold,.FALSE.,F,0,0.d0,.FALSE.,AF,d)
-
-            call CPU_TIME(t1)
 
 !!! Watch out here also: if RQ changes sign, part of PS corresponding to
 ! Eshift will have wrong sign
@@ -705,8 +766,8 @@
       call FlushCP(ATA)
       call FlushCP(AF)
 
-      call CPU_TIME(t2)
-      linsolver_time=linsolver_time+t2-t1
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
       end subroutine LintertwinedInvItn_1
 

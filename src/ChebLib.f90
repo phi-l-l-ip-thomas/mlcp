@@ -6,14 +6,14 @@
 
       USE ERRORTRAP
 
-      real, parameter :: PI=3.1415926535897932384626433832795028841971
+      real(kind=8), parameter :: PI=3.1415926535897932384626433832795028841971
 
       TYPE ChebObj
          integer :: n,intlevl
          character(LEN=3) :: bc
-         real*8, allocatable, dimension(:) :: pt,acospt,mpt,fpt,coef,wt
-         real*8, allocatable, dimension(:,:) :: deriv,intgl
-         real*8  :: avdf(2),defint
+         real(kind=8), allocatable, dimension(:) :: pt,acospt,mpt,fpt,coef,wt
+         real(kind=8), allocatable, dimension(:,:) :: deriv,intgl
+         real(kind=8)  :: avdf(2),defint
          logical :: defintcalcd,egrid
       END TYPE ChebObj
 
@@ -30,11 +30,11 @@
       implicit none
       TYPE (ChebObj) :: chb
       integer, intent(in) :: n
-      real*8, intent(in)  :: st,fn
+      real(kind=8), intent(in)  :: st,fn
       logical, intent(in) :: egrid
       character(3), intent(in) :: bc
       integer :: i,nmod
-      real*8, parameter :: bignr=1.d45
+      real(kind=8), parameter :: bignr=1.d45
 
       chb%n=n
       chb%intlevl=0   ! Level of integration(>0) or differentiation(<0)
@@ -117,9 +117,9 @@
       implicit none
       TYPE (ChebObj) :: chb
       integer, intent(in) :: n
-      real, allocatable, intent(inout) :: iconsts(:)
-      real, allocatable :: tv(:),tv2(:)
-      real*8  :: ic(1)
+      real(kind=8), allocatable, intent(inout) :: iconsts(:)
+      real(kind=8), allocatable :: tv(:),tv2(:)
+      real(kind=8)  :: ic(1)
       integer :: i,j,nmod
 
       nmod=chb%n
@@ -308,8 +308,8 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8, intent(in)  :: x
-      real*8 :: Tcheb
+      real(kind=8), intent(in)  :: x
+      real(kind=8) :: Tcheb
 
       IF (n.lt.0) THEN
          CALL AbortWithError("Tcheb(): n must be >= 0")
@@ -337,9 +337,9 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8, allocatable, intent(out) :: cn(:)
+      real(kind=8), allocatable, intent(out) :: cn(:)
       integer :: i
-      real*8  :: pN
+      real(kind=8)  :: pN
 
       IF (n.lt.1) &
          CALL AbortWithError("ChebNodes(): n must be > 0")
@@ -362,9 +362,9 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8, allocatable, intent(out) :: ce(:)
+      real(kind=8), allocatable, intent(out) :: ce(:)
       integer :: i
-      real*8  :: pN
+      real(kind=8)  :: pN
 
       IF (n.lt.0) &
          CALL AbortWithError("ChebExtr(): n must be >= 0")
@@ -387,9 +387,9 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8, allocatable, intent(out) :: acn(:)
+      real(kind=8), allocatable, intent(out) :: acn(:)
       integer :: i
-      real*8  :: pN
+      real(kind=8)  :: pN
 
       IF (n.lt.1) &
          CALL AbortWithError("acosNodes(): n must be > 0")
@@ -412,9 +412,9 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8, allocatable, intent(out) :: ace(:)
+      real(kind=8), allocatable, intent(out) :: ace(:)
       integer :: i
-      real*8  :: pN
+      real(kind=8)  :: pN
 
       IF (n.lt.0) &
          CALL AbortWithError("acosExtr(): n must be >= 0")
@@ -437,9 +437,9 @@
 
       implicit none
       integer, intent(in) :: n,j
-      real*8, intent(in)  :: x
+      real(kind=8), intent(in)  :: x
       logical, intent(in) :: egrid
-      real*8 :: ChebCard
+      real(kind=8) :: ChebCard
 
       IF (egrid) THEN
          ChebCard=ChebCardEx(n,j,x)
@@ -459,9 +459,9 @@
 
       implicit none
       integer, intent(in) :: n,j
-      real*8, intent(in)  :: x
-      real*8, parameter :: tol=1.d-12
-      real*8 :: xx,x1,ChebCardNd
+      real(kind=8), intent(in)  :: x
+      real(kind=8), parameter :: tol=1.d-12
+      real(kind=8) :: xx,x1,ChebCardNd
 
       IF (n.lt.0) &
          CALL AbortWithError("ChebCardNd(): n must be >=0")
@@ -513,10 +513,10 @@
 
       implicit none
       integer, intent(in) :: n,j
-      real*8, intent(in)  :: x
-      real*8, parameter :: tol=1.d-12
+      real(kind=8), intent(in)  :: x
+      real(kind=8), parameter :: tol=1.d-12
       integer :: cj
-      real*8  :: xj,xd,st,acx,ChebCardEx
+      real(kind=8)  :: xj,xd,st,acx,ChebCardEx
 
       IF (n.lt.0) &
          CALL AbortWithError("ChebCardEx(): n must be >=0")
@@ -571,9 +571,9 @@
 ! extrema grids
 
       implicit none
-      real*8, intent(in)  :: v(:)
+      real(kind=8), intent(in)  :: v(:)
       logical, intent(in) :: forw,egrid
-      real*8, allocatable, intent(out) :: dct(:)
+      real(kind=8), allocatable, intent(out) :: dct(:)
 
       IF (egrid) THEN
          call slowDCTe(v,dct,forw)
@@ -591,11 +591,11 @@
 ! Discrete cosine transform, extrema grid (slow version)
 
       implicit none
-      real*8, intent(in)  :: v(:)
+      real(kind=8), intent(in)  :: v(:)
       logical, intent(in) :: forw
-      real*8, allocatable, intent(out) :: dct(:)
+      real(kind=8), allocatable, intent(out) :: dct(:)
       integer :: i,j,lv
-      real*8  :: pl,plj,ve,vo,sm
+      real(kind=8)  :: pl,plj,ve,vo,sm
 
       lv=SIZE(v)
 
@@ -632,13 +632,13 @@
 ! Discrete cosine transform, nodes grid (slow version)
 
       implicit none
-      real*8, intent(in)  :: v(:)
+      real(kind=8), intent(in)  :: v(:)
       logical, intent(in) :: forw
-      real*8, allocatable, intent(out) :: dct(:)
-      real*8, allocatable :: cnodes(:)
+      real(kind=8), allocatable, intent(out) :: dct(:)
+      real(kind=8), allocatable :: cnodes(:)
       logical, parameter  :: egrid=.FALSE.
       integer :: i,j,lv
-      real*8  :: pl,sm,plj
+      real(kind=8)  :: pl,sm,plj
 
       lv=SIZE(v)
       pl=PI/lv
@@ -673,12 +673,12 @@
 ! See NR, 3rd ed. p.242-243
 
       implicit none
-      real*8, intent(inout) :: v(:)
-      real*8, intent(in)    :: avdf(2)
+      real(kind=8), intent(inout) :: v(:)
+      real(kind=8), intent(in)    :: avdf(2)
       logical, intent(in) :: forw,egrid
-      real*8, allocatable :: w(:),w2(:)
+      real(kind=8), allocatable :: w(:),w2(:)
       integer :: i,j,n
-      real*8  :: sv
+      real(kind=8)  :: sv
 
       n=SIZE(v)
       ALLOCATE(w(n),w2(n))
@@ -745,7 +745,7 @@
       implicit none
       integer, intent(in) :: n
       logical, intent(in) :: forw,egrid
-      real*8, allocatable, intent(out) :: M(:,:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
 
       IF (egrid) THEN
           call DCTmate(n,M,forw)
@@ -765,9 +765,9 @@
       implicit none
       integer, intent(in) :: n
       logical, intent(in) :: forw
-      real*8, allocatable, intent(out) :: M(:,:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
       integer :: i,j
-      real*8  :: pn,pkn
+      real(kind=8)  :: pn,pkn
 
       IF (n.lt.1) CALL AbortWithError('DCTmate(): n < 1')
 
@@ -803,9 +803,9 @@
       implicit none
       integer, intent(in) :: n
       logical, intent(in) :: forw
-      real*8, allocatable, intent(out) :: M(:,:)
+      real(kind=8), allocatable, intent(out) :: M(:,:)
       integer :: i,j
-      real*8  :: pn,pkn,tn
+      real(kind=8)  :: pn,pkn,tn
 
       IF (n.lt.1) CALL AbortWithError('DCTmatn(): n < 1')
 
@@ -843,11 +843,11 @@
 ! at point x. 'ty' can be 'N' (nodes) or 'E' (extrema)
 
       implicit none
-      real*8, intent(in)  :: cc(:)
-      real*8, intent(in)  :: x
+      real(kind=8), intent(in)  :: cc(:)
+      real(kind=8), intent(in)  :: x
       integer, intent(in) :: n
       logical, intent(in) :: egrid
-      real*8  :: tx,ov,nv,sv,ClenshawRecur
+      real(kind=8)  :: tx,ov,nv,sv,ClenshawRecur
       integer :: k
 
       IF (n.ge.SIZE(cc)) &
@@ -879,8 +879,8 @@
 ! Returns average and difference formulas from endpoints
 
       implicit none
-      real*8, intent(in) :: v(:)
-      real*8  :: averdif(2)
+      real(kind=8), intent(in) :: v(:)
+      real(kind=8)  :: averdif(2)
       integer :: lv
 
       lv=SIZE(v)
@@ -904,10 +904,10 @@
 
       implicit none
       character(3), intent(in) :: bc
-      real*8, intent(in)  :: x
-      real*8, intent(in)  :: avdf(2)
+      real(kind=8), intent(in)  :: x
+      real(kind=8), intent(in)  :: avdf(2)
       logical, intent(in) :: forw
-      real*8  :: mapx,tmp
+      real(kind=8)  :: mapx,tmp
       integer :: i,n
 
 !     cosine mapping (use higher order for sharper peaked distribution)
@@ -978,11 +978,11 @@
 ! integral Intgrl_start^finish f(x) dx
 
       implicit none
-      real*8, intent(in)      :: cc(:),avdf(2)
+      real(kind=8), intent(in)      :: cc(:),avdf(2)
       character*3, intent(in) :: bc
       logical, intent(in) :: egrid
       integer :: lv,j
-      real*8  :: tmp,ChebDefIntgrl
+      real(kind=8)  :: tmp,ChebDefIntgrl
 
       IF (bc.ne.'fin' .and. bc.ne.'sem' .and. bc.ne.'inf' .and. &
           bc.ne.'per' .and. bc.ne.'cos') &
@@ -1035,11 +1035,11 @@
 
       implicit none
       character(3), intent(in) :: bc
-      real*8, allocatable, intent(out) :: cint(:)
-      real*8, intent(in)  :: cc(:),c0(:),avdf(2)
-      real*8, allocatable :: tv(:)
+      real(kind=8), allocatable, intent(out) :: cint(:)
+      real(kind=8), intent(in)  :: cc(:),c0(:),avdf(2)
+      real(kind=8), allocatable :: tv(:)
       integer :: n,ccs,i,j
-      real*8  :: norm,sm,fac
+      real(kind=8)  :: norm,sm,fac
 
       IF (bc.ne.'fin' .and. bc.ne.'sem' .and. &
           bc.ne.'inf' .and. bc.ne.'per' .and. &
@@ -1095,10 +1095,10 @@
 
       implicit none
       character(3), intent(in) :: bc
-      real*8, allocatable, intent(out) :: cder(:)
-      real*8, intent(in)  :: cc(:),avdf(2)
+      real(kind=8), allocatable, intent(out) :: cder(:)
+      real(kind=8), intent(in)  :: cc(:),avdf(2)
       integer, intent(in) :: n
-      real*8, allocatable :: tv(:)
+      real(kind=8), allocatable :: tv(:)
       integer :: lv,i,j
 
       IF (bc.ne.'fin' .and. bc.ne.'sem' .and. &
@@ -1148,10 +1148,10 @@
       character(3), intent(in) :: bc
       logical, intent(in) :: egrid
       integer, intent(in) :: n
-      real*8, intent(in)  :: avdf(2),xs(:)
-      real*8, allocatable, intent(out) :: wts(:)
+      real(kind=8), intent(in)  :: avdf(2),xs(:)
+      real(kind=8), allocatable, intent(out) :: wts(:)
       integer :: i,j
-      real*8  :: tn,sm
+      real(kind=8)  :: tn,sm
 
       IF (bc.ne.'fin' .and. bc.ne.'sem' .and. &
           bc.ne.'inf' .and. bc.ne.'per' .and. &
@@ -1205,8 +1205,8 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
-      real*8, intent(in) :: pts(:),wts(:)
-      real*8  :: ChebIntQuad
+      real(kind=8), intent(in) :: pts(:),wts(:)
+      real(kind=8)  :: ChebIntQuad
       integer :: i,n
 
       n=SIZE(wts)
@@ -1229,13 +1229,13 @@
 
       implicit none
       TYPE (ChebObj) :: chbn,chbe
-      real*8, allocatable :: xset(:),yset(:),xmap(:),ychbe(:),ychbn(:)
-      real*8, allocatable :: iconsts(:)
+      real(kind=8), allocatable :: xset(:),yset(:),xmap(:),ychbe(:),ychbn(:)
+      real(kind=8), allocatable :: iconsts(:)
       character(3) :: bc
       logical :: egrid
-      real*8  :: avdf(2)
+      real(kind=8)  :: avdf(2)
       integer :: i,j,npts,nord
-      real*8  :: xstart,xend,p1,p2
+      real(kind=8)  :: xstart,xend,p1,p2
 
       write(*,'(/A/)') '***********************************************'
       write(*,*) 'Chebyshev library test'
@@ -1381,8 +1381,8 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
-      real*8, intent(in) :: x
-      real*8 :: ftest
+      real(kind=8), intent(in) :: x
+      real(kind=8) :: ftest
       integer :: i
 
 !      ftest=(x-1.d0)*x**2+1.d0
@@ -1410,8 +1410,8 @@
 
       implicit none
       integer, intent(in) :: typ,ip1,ip2
-      real*8, intent(in)  :: x,rp1,rp2,rp3,rp4,rp5
-      real*8 :: my1Dfunction
+      real(kind=8), intent(in)  :: x,rp1,rp2,rp3,rp4,rp5
+      real(kind=8) :: my1Dfunction
 
       IF (typ.eq.0) THEN
 !        q^ip1
@@ -1438,8 +1438,8 @@
 
       implicit none
       integer, intent(in) :: pow
-      real*8, intent(in)  :: x,a
-      real*8 :: sqgauss
+      real(kind=8), intent(in)  :: x,a
+      real(kind=8) :: sqgauss
 
       IF (mod(pow,2).ne.0) &
          call AbortWithError('sqgauss(): odd value of pow')
@@ -1456,8 +1456,8 @@
 
       implicit none
       integer, intent(in) :: pow
-      real*8, intent(in)  :: x,b,a,c
-      real*8 :: morse1D
+      real(kind=8), intent(in)  :: x,b,a,c
+      real(kind=8) :: morse1D
 
       morse1D=b*(1.d0-exp(-a*(x-c)))**pow
 
@@ -1472,9 +1472,9 @@
 ! at x, orders 0...n-1, where n is the length of HOx
 
       implicit none
-      real*8, intent(inout) :: HOx(:)
-      real*8, intent(in)    :: x
-      real*8  :: fac
+      real(kind=8), intent(inout) :: HOx(:)
+      real(kind=8), intent(in)    :: x
+      real(kind=8)  :: fac
       integer :: i,n
 
       n=SIZE(HOx)
@@ -1506,8 +1506,8 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8, intent(in)  :: x
-      real*8  :: fac,rov,ov,HObasisfxn
+      real(kind=8), intent(in)  :: x
+      real(kind=8)  :: fac,rov,ov,HObasisfxn
       integer :: i
 
       fac=gaussian(x,1.d0,0.5d0,0.d0)/PI**(0.25d0)
@@ -1540,8 +1540,8 @@
 ! Gaussian function
 
       implicit none
-      real*8, intent(in) :: b,a,c,x
-      real*8 :: gaussian
+      real(kind=8), intent(in) :: b,a,c,x
+      real(kind=8) :: gaussian
 
       gaussian=b*exp(-a*(x-c)**2)
 
@@ -1556,9 +1556,9 @@
 
       implicit none
       integer, intent(in) :: n
-      real*8, intent(in)  :: x
+      real(kind=8), intent(in)  :: x
       integer :: i
-      real*8  :: tx,hermite,rov,ov
+      real(kind=8)  :: tx,hermite,rov,ov
 
       IF (n.eq.0) THEN
          hermite=1.d0

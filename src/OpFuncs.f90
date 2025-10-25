@@ -12,7 +12,7 @@
       TYPE OperMat
          integer :: dof
          character(64) :: label
-         real*8, allocatable :: mat(:)
+         real(kind=8), allocatable :: mat(:)
       END TYPE OperMat
 
       INTERFACE SumOperMats
@@ -42,31 +42,31 @@
       character(64) :: lab
 
 !     Operator defs and calls
-      IF (P.ge.0) THEN      ! Harmonic oscillator q_i^P
-         IF (typ.eq.0) THEN
-            write(lab,'(A,I0,A)') '(q^',P,')_'
-!           Power of q
-            call xnop(N,P,Md)
-            call MatDiag2Utriang(Md,Mt,MOD(abs(P),2),.FALSE.)
-            DEALLOCATE(Md)
+      IF (typ.eq.-1) THEN ! Harmonic oscillator p_i^2
 
-         ELSE
-!           Arbitrary PES type
-!           For now only one integer parameter and one real parameter
-!           are used; the rest are called with dummy arguments
-            write(lab,'(3A,I0,A)') '(',&
-                  TRIM(ADJUSTL(GetFunctionLabel(typ))),'^',P,')_'
-            call GenFunctionHOmat(N,Mt,typ,P,ip,alpha,rp,rp,rp,rp)
-         ENDIF
-      ELSEIF (P.eq.-2) THEN ! Harmonic oscillator KEO
-         lab='(p^2)_'
+         if (P.ne.2) call AbortWithError(&
+            'GetPrimitiveOperMat(): P must be 2 for KEO')
+
+         write(lab,'(2(A,I0))') '(p^',abs(P),')_',dof
          call top(N,Md)
          call MatDiag2Utriang(Md,Mt,MOD(abs(P),2),.FALSE.)
          DEALLOCATE(Md)
 
+      ELSEIF (typ.eq.0) THEN ! Harmonic oscillator q_i^P
+
+         write(lab,'(2(A,I0))') '(q^',P,')_',dof
+         call xnop(N,P,Md)
+         call MatDiag2Utriang(Md,Mt,MOD(abs(P),2),.FALSE.)
+         DEALLOCATE(Md)
+
       ELSE
-         write(*,*) 'Operator type not recognized'
-         call AbortWithError('Error in GetPrimitiveOperMat()')
+!        Arbitrary PES type
+!        For now only one integer parameter and one real parameter
+!        are used; the rest are called with dummy arguments
+         write(lab,'(3A,2(I0,A))') '(',&
+               TRIM(ADJUSTL(GetFunctionLabel(typ))),'^',P,')_',dof
+         call GenFunctionHOmat(N,Mt,typ,P,ip,alpha,rp,rp,rp,rp)
+
       ENDIF
 
       call SymPackMat2Vec(GetPrimitiveOperMat%mat,Mt)
@@ -76,37 +76,6 @@
       DEALLOCATE(Mt)
 
       end function GetPrimitiveOperMat
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function GetEigenOperMat(dof,eigvals)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Fills type OperMat with diagonal operator matrix
-! (i.e. list of eigenvalues) provided as input
-! dof = degree-of-freedom/mode that operator acts upon
-
-      implicit none
-      TYPE (OperMat)      :: GetEigenOperMat
-      integer, intent(in) :: dof
-      real*8, intent(in)  :: eigvals(:)
-      integer :: i,s,n
-
-      n=SIZE(eigvals)
-
-      GetEigenOperMat%dof=dof
-      GetEigenOperMat%label='eigen'
-
-!     Fill the operator matrix with eigenvalues
-      ALLOCATE(GetEigenOperMat%mat(n*(n+1)/2))
-      GetEigenOperMat%mat=0.d0
-      s=0
-      DO i=1,n
-         s=s+i
-         GetEigenOperMat%mat(s)=eigvals(i)
-      ENDDO
-
-      end function GetEigenOperMat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -122,12 +91,22 @@
       real*8, intent(in) :: fac1,fac2
       integer :: n1,n2
 
-      n1=SIZE(OM1%mat)
       n2=SIZE(OM2%mat)
+
+!     Create new OM1 if not present
+      IF (.not.allocated(OM1%mat)) THEN
+         ALLOCATE(OM1%mat(n2))
+         OM1%mat(:)=0.d0
+         OM1%dof=OM2%dof
+         OM1%label=OM2%label
+      ENDIF
+
+      n1=SIZE(OM1%mat)
 
 !     Error checking
       IF (n1.ne.n2) THEN
-         write(*,*) 'Operator array size mismatch'
+         write(*,*) 'Operator array size mismatch: OM1 (',n1,&
+                    '), OM2 (',n2,')'
          CALL AbortWithError('Error in SumOperMatsABA()')
       ENDIF
       IF (OM1%dof.ne.OM2%dof) THEN
@@ -345,7 +324,9 @@
       integer, intent(in) :: id
       character(len=32)   :: GetFunctionLabel
 
-      IF (id.eq.0) THEN
+      IF (id.eq.-1) THEN
+         GetFunctionLabel='p'
+      ELSEIF (id.eq.0) THEN
          GetFunctionLabel='q'
       ELSEIF (id.eq.1) THEN
          GetFunctionLabel='tanh(a*q)'

@@ -15,8 +15,42 @@
       USE ALSPOW
       USE ALSUTILS
       USE ALSDRVR
+      USE SOLVER8
+
+      implicit none
+      real(kind=8), allocatable, private :: module_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Init_Solver_Module()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+
+      allocate(module_time(mpinodes))
+      module_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
+
+      end subroutine Init_Solver_Module
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Dispose_Solver_Module()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+
+      IF (.NOT. MODULE_SETUP) call Init_Solver_Module()
+      call Get_MPI_Timings('Solver module',module_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(module_time)
+
+      end subroutine Dispose_Solver_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -31,11 +65,15 @@
 !     Determine styp
       IF (cpp%solver .seq. 'powr') THEN
          styp=1
-      ELSEIF (cpp%solver .seq. 'pALS') THEN
+      ELSEIF (cpp%solver .seq. 'iitn') THEN
+         styp=2
+      ELSEIF (cpp%solver .seq. 'iitf') THEN
+         styp=3
+      ELSEIF (cpp%solver .seq. 'pALS')  THEN
 !        Use ALS-guided power method unless 2D with SVD reduction
          IF (SIZE(Q(1)%nbas).eq.2 .and. cpp%red2D.eq.'SVD') THEN
             IF (mpirank.eq.mpi_prnt_rank) call ShowWarning(&
-            'SVD reduction selected; using ordinary power iterations')
+            '2D node with SVD reduction; using ordinary power method')
             styp=1
          ELSE
             styp=-1
@@ -62,7 +100,7 @@
       TYPE (CP), INTENT(IN) :: H
       integer, intent (in) :: styp
       real*8, intent(in)   :: eigv(:)
-      integer :: htrm,ndof,rF,rG,nev,ncpu,npara,veclen,nmax
+      integer :: htrm,ndof,rF,rG,nev,npara,veclen,nmax
       real*8  :: GB,mvGB,GSGB,QHQGB,upGB,redGB,Blen,mvlen
       logical :: useSVD
 
@@ -72,8 +110,7 @@
       nmax=maxval(Q(1)%nbas)
       rF=cpp%psirank
       nev=SIZE(eigv)
-      ncpu=cpp%ncpu
-      npara=min(ncpu,nev)
+      npara=min(nomp_threads,nev)
       GB=1.d0/(2**27)
       mvGB=0.d0  ! matrix-vector product memory
       upGB=0.d0  ! vector update memory
@@ -88,11 +125,11 @@
       useSVD=.FALSE.
       IF (ndof.eq.2 .and. cpp%red2D.eq.'SVD') useSVD=.TRUE.
 
-      rank0 : IF (mpirank.eq.mpi_prnt_rank) THEN
+      rank0 : IF (mpirank.eq.mpi_prnt_rank .and. ndof.gt.1) THEN
 
 !     Print parameters affecting the memory usage
       write(*,'(3X,A)') '*** Solver memory usage ***'
-      write(*,'(7X,A,30X,A,X,I11)') 'Number of CPUs,','(N): ',ncpu
+      write(*,'(7X,A,27X,A,X,I11)') 'Number of threads,','(N): ',nomp_threads
       write(*,'(7X,A,31X,A,X,I11)') 'Vector length,','(V): ',veclen
       write(*,'(7X,A,34X,A,X,I11)') 'Block size,','(B): ',nev
       write(*,'(7X,A,14X,A,X,I11)') 'Terms in H (including E-shift),',&
@@ -144,12 +181,10 @@
                write(*,'(7X,A,22X,A,X,f12.6,A)') &
                     'BlockPower iteration TOTAL',':',mvGB,' GB'
             ENDIF
-         ELSEIF (styp.eq.-2) THEN
-            write(*,*) 'Davidson mem coming soon!!!'
-         ELSEIF (styp.eq.-3) THEN
-            write(*,*) 'MSBII mem coming soon!!!'
-         ELSEIF (styp.eq.-4) THEN
-            write(*,*) 'Inverse itn mem coming soon!!!'
+         ELSEIF (styp.eq.2) THEN
+            write(*,*) 'TODO: memory for inverse iteration-normal form'
+         ELSEIF (styp.eq.3) THEN
+            write(*,*) 'TODO: memory for inverse iteration-fast form'
          ELSE
             call AbortWithError('ShowPsiMem(): Solver not recognized')
          ENDIF
@@ -161,7 +196,7 @@
             write(*,'(7X,A,19X,A,X,f12.6,A)') &
                  'Gram-Schmidt storage,','(2B*V*R):',GSGB,' GB'
             redGB=getRednMem(rG,rF,Q(1)%nbas,1,useSVD)*GB
-         ELSE  !!! Add styp=-2
+         ELSE
             GSGB=Blen*GB
             write(*,'(7X,A,20X,A,X,f12.6,A)') &
                  'Gram-Schmidt storage,','(B*V*R):',GSGB,' GB'
@@ -192,7 +227,7 @@
                     'Vector update storage,',&
                     '([2+P]*B*V*R):',upGB,' GB'
                redGB=getRednMem(rG,rF,Q(1)%nbas,npara,useSVD)*GB
-            ELSE !!! Add styp=-2,-3
+            ELSE
                QHQGB=(Blen+npara*REAL(veclen)*rF)*GB
                write(*,'(7X,A,13X,A,X,f12.6,A)') &
                     'QHQ calculation storage,',&
@@ -262,7 +297,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolveHPsi(eigv,delta,cpp,Q,H,W)
+      subroutine SolveHPsi(eigv,delta,bounds,cpp,Q,H,W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for computing the eigenfunctions and 
@@ -275,35 +310,64 @@
       real*8, allocatable, intent(inout) :: eigv(:)
       real*8, allocatable, intent(inout) :: delta(:)
       real*8, allocatable  :: eigtmp(:),ccoef(:)
-      real*8  :: bounds(2)
-      integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp
-      logical :: conv,showFmG,diag,readsuccess
+      real*8, intent(inout) :: bounds(2)
+      integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp,algo
+      logical :: conv,showFmG,diag,readsuccess,calcbounds
       real*8  :: rmsdelta,oldrms,maxdelta,sumdelta
       real*8, parameter :: redtol=1.d-12
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_Solver_Module()
+
+      call CPU_TIME(ti1)
 
 !     Initializations
       nev=SIZE(eigv)
       ist=0
       showFmG=.FALSE.
       oldrms=1.d99
-      bounds=0.d0
       styp=GetSolverType(cpp,Q)
-
-      call DetermineDiag(Q,diag)
       call ShowPsiMem(eigv,cpp,Q,H,styp)
+
+      IF (cpp%algo.ge.0) THEN
+         IF (Q(1)%D().eq.2 .and. cpp%red2D.eq.'SVD') THEN
+            IF (mpirank.eq.mpi_prnt_rank) write(*,'(X,A,X,A/)') &
+            'Entering Solver: legacy CPU algorithm selected',&
+            '(2D node with SVD reduction)...'
+         ELSE
+            call WrapSolver_CP8(eigv,delta,bounds,cpp,Q,H,W)
+            call CPU_TIME(ti2)
+            module_time=module_time+ti2-ti1
+            RETURN
+         ENDIF
+      ELSE
+         IF (mpirank.eq.mpi_prnt_rank) write(*,'(X,A/)') &
+         'Entering Solver: legacy CPU algorithm selected...'
+      ENDIF
+
+      call set_als_settings_ALS(cpp%alspenalty,cpp%als_linsys_alg)
+      call set_als_settings_ALSPow(cpp%alspenalty,cpp%als_linsys_alg)
+      call set_als_settings_ALSUtils(cpp%alspenalty,cpp%als_linsys_alg)
+      call set_als_settings_LinSolver(cpp%alspenalty,cpp%als_linsys_alg)
+      call DetermineDiag(Q,diag)
+!      call ShowPsiMem(eigv,cpp,Q,H,styp)
       call ReadPsi(ist,bounds,eigv,delta,Q,cpp,readsuccess)
 
 !     Calculate the spectral range of H
-      IF (cpp%npow.gt.0 .and. cpp%ncycle.gt.0 &
-          .and. (.not.diag) .and. (.not.readsuccess)) THEN
+      IF (cpp%npow.gt.0 .and. cpp%ncycle.gt.0 .and. (.not.diag) &
+         .and. ((readsuccess .and. (cpp%calcbounds.seq.'recalc')) &
+         .or. (.not.readsuccess))) THEN
+         calcbounds=(.not.(cpp%calcbounds.seq.'guess'))
          call SetReductionParameters(min(50,cpp%psirank),cpp%psinals,&
-                                     redtol,showFmG,'SVD','ALS')
+                            redtol,showFmG,'SVD','ALS',cpp%alspenalty,&
+                            cpp%als_linsys_alg)
          call GetSpectralRange(min(50,cpp%psirank),10,5,Q,H,bounds,&
-                               cpp%lowmem)
+                               cpp%lowmem,calcbounds)
       ENDIF
 
       call SetReductionParameters(cpp%psirank,cpp%psinals,redtol,&
-                                  showFmG,cpp%red2D,cpp%redND)
+                       showFmG,cpp%red2D,cpp%redND,cpp%alspenalty,&
+                       cpp%als_linsys_alg)
 
 !     Initial guess and pre-diagonalization
       IF (readsuccess) THEN
@@ -327,14 +391,19 @@
 
 !     If all the eigenvalues were requested, exit here since the 
 !     pre-diagonalization already gives the exact answer
-      IF (diag) RETURN
+      IF (diag) THEN
+         call CPU_TIME(ti2)
+         module_time=module_time+ti2-ti1
+         RETURN
+      ENDIF
 
 !     If intertwining is used and the number of vectors in the block
 !     ('nev') is smaller than psirank, the vectors will have a maximum 
 !     rank of nev. Since intertwining does not change the rank of the 
 !     input vectors, the step below ensures that we apply intertwining
 !     to vectors with the correct rank
-      IF (styp.lt.0 .and. styp.ne.-3) call AugmentQWithRandom(Q,cpp%psirank)
+!      IF (styp.lt.0) &
+      call AugmentQWithRandom(Q,cpp%psirank)
 
       ALLOCATE(eigtmp(nev))
       IF (ist.eq.0) delta=1.d99
@@ -402,6 +471,9 @@
 
       DEALLOCATE(eigtmp)
 
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
+
       end subroutine SolveHPsi
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -412,9 +484,9 @@
 ! Performs iterations of various types, depending on the value of styp:
 
       implicit none
-      TYPE (CPpar), INTENT(IN)    :: cpp
+      TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (CP), INTENT(INOUT) :: Q(:)
-      TYPE (CP), INTENT(IN)    :: H,W
+      TYPE (CP), INTENT(IN)  :: H,W
       integer, intent(inout) :: nconv
       integer, intent(in)    :: i,styp
       real*8, intent(inout)  :: eigv(:)
@@ -422,7 +494,7 @@
       real*8, parameter      :: tol=1.d-15
       character(len=18)      :: tag
       real*8  :: Eshift
-      integer :: j,nbloc,sz,os
+      integer :: j,nbloc,sz,os,szmx
 
 !     Easy exit for zero iterations
       IF (cpp%npow.lt.1) RETURN
@@ -435,6 +507,10 @@
          tag='BlockPower cycle: '
 !        Power method: get estimate of optimal E-shift
          call GetBlockShift(eigv,bounds,Eshift)
+      ELSEIF (styp.eq.2) THEN
+         tag='Inv. it. N cycle: '
+      ELSEIF (styp.eq.3) THEN
+         tag='Inv. it. F cycle: '
       ELSEIF (styp.eq.-1) THEN
          call GetBlockShift(eigv,bounds,Eshift)
          tag='ALS-Power cycle : '
@@ -443,13 +519,17 @@
       ENDIF
 
 !     Assign vectors to this MPI rank
-      call calc_mpi_partition(nbloc-nconv,sz,os)
+      call calc_mpi_partition(nbloc-nconv,sz,os,szmx)
       os=os+nconv
 
 !     Run power iterations on each vector in the block
       DO j=1,sz
          IF (styp.eq.1) THEN
             call PowrRecurse(Q(os+j),H,cpp%npow,Eshift)
+         ELSEIF (styp.eq.2) THEN
+            call InverseRecurse(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),1)
+         ELSEIF (styp.eq.3) THEN
+            call InverseRecurse(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),2)
          ELSEIF (styp.eq.-1) THEN
             call ALS_POW_alg(H,Q(os+j),cpp%npow,1,Eshift,cpp%lowmem)
          ENDIF
@@ -495,7 +575,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetSpectralRange(rk,npow,ncyc,Q,H,bounds,lowmem)
+      subroutine GetSpectralRange(rk,npow,ncyc,Q,H,bounds,lowmem,calcbounds)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Estimates the spectral range of the Hamiltonian using power method
@@ -505,83 +585,88 @@
       TYPE (CP) :: Q(:),T
       TYPE (CP), allocatable :: Qt(:)
       integer, intent(in) :: rk,npow,ncyc,lowmem
-      real*8, intent(out) :: bounds(2)
+      logical, intent(in) :: calcbounds
+      real*8, intent(inout) :: bounds(2)
       integer :: i,j,gst,ndof
       real*8  :: btmp(2)
 
       ndof=SIZE(Q(1)%nbas)
-      bounds=0.d0
 
       IF (mpirank.eq.mpi_prnt_rank) THEN
          write(*,'(X,A/)') 'Power spectral range estimation'
          write(*,'(A,X,2(9X,A))') '  i','boundsl','boundsu'
+         write(*,'(3X,2(X,f16.6),X,A)') bounds(1),bounds(2),&
+                                         '(uncoupled guess)'
       ENDIF
 
-      ALLOCATE(Qt(2))
+      IF (calcbounds) THEN
 
-!     Guesses for upper and lower eigenvectors
-      Qt(1)=ZeroCPvec(Q(1)%nbas)
-      Qt(2)=ZeroCPvec(Q(1)%nbas)
-      Qt(1)%coef(1)=1.d0
-      Qt(2)%coef(1)=1.d0
-      Qt(1)%base=1.d-15
-      Qt(2)%base=1.d-15
-      gst=0
-      DO i=1,ndof
-         Qt(1)%base(gst+1,1)=1.d0
-         gst=gst+Qt(1)%nbas(i)
-         Qt(2)%base(gst,1)=1.d0
-      ENDDO
+         ALLOCATE(Qt(2))
 
-!     Since the ALS-guided power method (used for > 2 DOF) does not
-!     change the rank, each vector must be initiated with rank rk, so
-!     fill Qt(1) and Qt(2) up to rank rk with random terms
-      IF (SIZE(Q(1)%nbas).gt.2 .and. rk.gt.1) THEN
-         T=RandomCP(Q(1),rk-1)
-         call NORMBASE(T)
-         T%coef=1.d-7
-         call SUMVECVEC(Qt(1),1.d0,T,1.d0)
-         call SUMVECVEC(Qt(2),1.d0,T,1.d0)
-         call FlushCP(T)
-      ENDIF
+!        Guesses for upper and lower eigenvectors
+         Qt(1)=ZeroCPvec(Q(1)%nbas)
+         Qt(2)=ZeroCPvec(Q(1)%nbas)
+         Qt(1)%coef(1)=1.d0
+         Qt(2)%coef(1)=1.d0
+         Qt(1)%base=1.d-15
+         Qt(2)%base=1.d-15
+         gst=0
+         DO i=1,ndof
+            Qt(1)%base(gst+1,1)=1.d0
+            gst=gst+Qt(1)%nbas(i)
+            Qt(2)%base(gst,1)=1.d0
+         ENDDO
 
-!     Initial bounds
-!$omp parallel
-!$omp do private(j) schedule(static)
-      DO j=1,2
-         bounds(j)=RayleighQuotient2(Qt(j),H)
-      ENDDO
-!$omp end do
-!$omp end parallel
+!        Since the ALS-guided power method (used for > 2 DOF) does not
+!        change the rank, each vector must be initiated with rank rk, so
+!        fill Qt(1) and Qt(2) up to rank rk with random terms
+         IF (SIZE(Q(1)%nbas).gt.2 .and. rk.gt.1) THEN
+            T=RandomCP(Q(1),rk-1)
+            call NORMBASE(T)
+            T%coef=1.d-7
+            call SUMVECVEC(Qt(1),1.d0,T,1.d0)
+            call SUMVECVEC(Qt(2),1.d0,T,1.d0)
+            call FlushCP(T)
+         ENDIF
 
-!     btmp is the shift for the power method
-      btmp(1)=0.5*(bounds(1)+bounds(2))
-      btmp(2)=0.d0
-
-      IF (mpirank.eq.mpi_prnt_rank) &
-         write(*,'(i3,2(X,2f16.6))') 0,bounds(1),bounds(2)
-
-!     Run the power method to improve the bounds
-      DO i=1,ncyc
+!        Initial bounds
 !$omp parallel
 !$omp do private(j) schedule(static)
          DO j=1,2
-            IF (SIZE(Q(1)%nbas).eq.2) THEN  ! 2 DOF: use power itn + SVD
-               call PowrRecurse(Qt(j),H,npow,btmp(j))
-            ELSE  ! >2 DOF: use ALS-guided power method
-               call ALS_POW_alg(H,Qt(j),npow,1,btmp(j),lowmem)
-            ENDIF
             bounds(j)=RayleighQuotient2(Qt(j),H)
          ENDDO
 !$omp end do
 !$omp end parallel
-!        Update the shift for the ground state
-         btmp(1)=0.5*(bounds(1)+bounds(2))
-         IF (mpirank.eq.mpi_prnt_rank) &
-            write(*,'(i3,2(X,2f16.6))') i,bounds(1),bounds(2)
-      ENDDO
 
-      DEALLOCATE(Qt)
+!        btmp is the shift for the power method
+         btmp(1)=0.5*(bounds(1)+bounds(2))
+         btmp(2)=0.d0
+
+         IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,'(i3,2(X,f16.6))') 0,bounds(1),bounds(2)
+
+!        Run the power method to improve the bounds
+         DO i=1,ncyc
+!$omp parallel
+!$omp do private(j) schedule(static)
+            DO j=1,2
+               IF (SIZE(Q(1)%nbas).eq.2) THEN  ! 2 DOF: use power itn + SVD
+                  call PowrRecurse(Qt(j),H,npow,btmp(j))
+               ELSE  ! >2 DOF: use ALS-guided power method
+                  call ALS_POW_alg(H,Qt(j),npow,1,btmp(j),lowmem)
+               ENDIF
+               bounds(j)=RayleighQuotient2(Qt(j),H)
+            ENDDO
+!$omp end do
+!$omp end parallel
+!           Update the shift for the ground state
+            btmp(1)=0.5*(bounds(1)+bounds(2))
+            IF (mpirank.eq.mpi_prnt_rank) &
+               write(*,'(i3,2(X,f16.6))') i,bounds(1),bounds(2)
+         ENDDO
+
+         DEALLOCATE(Qt)
+      ENDIF
 
       IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(/X,A,2(f15.6,A))') 'Spectral range of H = [',&

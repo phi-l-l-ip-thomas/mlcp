@@ -9,933 +9,595 @@
       USE UTILS
       USE MYMPI
       USE MODECOMB
+      USE NODETREE
       USE OPFUNCS
       USE LINALG
       USE CPCONFIG
       USE FFPES
       USE REDUCTION
-      USE HAMILOPT
       USE SEPDREPN
 
       implicit none
-      REAL*8, PRIVATE  :: Ham_time=0.d0
-
-      TYPE EigList
-         real*8, allocatable  :: evals(:)
-         integer, allocatable :: assgn(:,:)
-      END TYPE Eiglist
+      real(kind=8), allocatable, private :: module_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
 
       TYPE Hamiltonian
-         TYPE (OperMat), ALLOCATABLE :: pops(:)
-         TYPE (EigList), ALLOCATABLE :: eig(:,:)
-         TYPE (IVEC), ALLOCATABLE :: mops(:,:)
-         integer, allocatable :: nterms(:),nop(:,:),ops(:,:,:)
-         integer, allocatable :: ndof(:,:),dofs(:,:,:),optyp(:,:,:)
-         real*8, allocatable  :: facs(:,:)
+         TYPE (OperMat), ALLOCATABLE :: ops(:,:,:)
+         TYPE (TN), ALLOCATABLE :: nt(:)
+         LOGICAL, ALLOCATABLE   :: optable(:,:,:)
       END TYPE Hamiltonian
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SetupHamiltonian(sys,opt,H,ML)
+      subroutine Init_HamilSetup_Module()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+
+      allocate(module_time(mpinodes))
+      module_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
+
+      end subroutine Init_HamilSetup_Module
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Dispose_HamilSetup_Module()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+
+      IF (.NOT. MODULE_SETUP) call Init_HamilSetup_Module()
+      call Get_MPI_Timings('HamilSetup module',module_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(module_time)
+
+      end subroutine Dispose_HamilSetup_Module
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SetupHamiltonian(sys,trans,verbosity,afac,Ham,ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Master subroutine for building Hamiltonian matrix
 
       implicit none
       TYPE (MLtree)       :: ML
-      TYPE (Hamiltonian)  :: H
-      TYPE (Configs), ALLOCATABLE :: V(:)
-      logical, intent(in) :: opt
-      character(5), intent(in) :: sys
-      integer, allocatable :: vtype(:,:)
-      real*8, allocatable  :: alpha(:),omega(:)
-      real*8  :: t1,t2
+      TYPE (Hamiltonian)  :: Ham
+      TYPE (Configs), ALLOCATABLE :: V(:),vtype(:)
+      character(len=*), intent(in) :: sys,trans
+      integer, intent(in) :: verbosity
+      real(kind=8), intent(in)  :: afac
+      integer, allocatable :: opmap(:)
+      real(kind=8), allocatable :: alpha(:),omega(:)
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_HamilSetup_Module()
+
+      call CPU_TIME(ti1)
 
       if (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(/X,A/)') 'Hamiltonian setup...'
+      write(*,'(/X,A)') 'Hamiltonian setup...'
 
-      call CPU_TIME(t1)
+!     Compute PES or read from file
+      call GetPotential(V,sys,ML%nmode(1),verbosity)
 
-      call GetPotential(V,sys,ML%nmode(1))
+!     Generate the operator map and table
+      call AllocHamilOp(Ham,V,trans,opmap,verbosity)
 
-!     Rotate Hamiltonian to use "optimized" coordinates
-      IF (opt) call OptimizePesdirections(V)
+!     Extract harmonic constants from PES (for building KEO)
+      call ExtractOmegas(V,omega,verbosity)
 
-      call TransformPES(V,vtype,alpha,omega)
+!     PES coordinate transformation (if requested)
+      call TransformPES(V,vtype,alpha,trans,afac,opmap,Ham%optable)
 
-!     Store PES in type Hamiltonian, construct KEO
-      call FillHamilType(V,vtype,H,omega)
+!     Print out PES info (for debugging)
+      call ShowPESInfo(Ham,V,vtype,trans,opmap,verbosity)
 
-      DEALLOCATE(V,vtype,omega)
-
-!     Rearrange the modes in the Hamiltonian before sorting
-      call ResortHmodes(H,ML)
-      call ResortAlphas(alpha,ML)
+!     Construct node tree from ML tree
+      call BuildNodeTree(Ham%nt,ML%modcomb,ML%modstart,ML%gdim,ML%nmode,ML%resort)
 
 !     Sort Hamiltonian into multilayer format
-      call sortHamiltonian(H,ML)
+      call FillHamilNodeTree(Ham%nt,V,vtype,omega,verbosity)
 
 !     Get the unique primitive operator matrices
-      call FindUniqueOperators(H,ML,alpha)
-
-      DEALLOCATE(alpha)
-
-!     Print structure of Hamiltonian
-      call printHamiltonianInfo(H)
+      call GetPrimitiveOperators(Ham,ML,V,alpha,opmap,verbosity)
 
 !     Construct bottom-layer mode operators from primitive operator
 !     matrices, then solve and update primitive operators
-      call SolveandUpdateFirstLayer(H)
-      call PrintFirstLayerEnergies(H,ML)
+!      call SolveandUpdateFirstLayer(Ham)
 
-      call CPU_TIME(t2)
-      Ham_time=Ham_time+t2-t1
+      DEALLOCATE(V,vtype,alpha,omega,opmap)
 
-!      call AbortWithError('Done')
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
       end subroutine SetupHamiltonian
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine FlushHamiltonian(H)
+      subroutine Flush_Hamiltonian(Ham)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Disposes Hamiltonian module
 
       implicit none
-      TYPE (Hamiltonian) :: H
+      TYPE (Hamiltonian) :: Ham
 
-      IF (ALLOCATED(H%pops)) DEALLOCATE(H%pops)
-      IF (ALLOCATED(H%eig)) DEALLOCATE(H%eig)
-      IF (ALLOCATED(H%nop)) DEALLOCATE(H%nop)
-      IF (ALLOCATED(H%ops)) DEALLOCATE(H%ops)
-      IF (ALLOCATED(H%mops)) DEALLOCATE(H%mops)
-      IF (ALLOCATED(H%optyp)) DEALLOCATE(H%optyp)
-      IF (ALLOCATED(H%nterms)) DEALLOCATE(H%nterms)
-      IF (ALLOCATED(H%facs)) DEALLOCATE(H%facs)
-      IF (ALLOCATED(H%ndof)) DEALLOCATE(H%ndof)
-      IF (ALLOCATED(H%dofs)) DEALLOCATE(H%dofs)
+      IF (ALLOCATED(Ham%ops)) DEALLOCATE(Ham%ops)
+      IF (ALLOCATED(Ham%optable)) DEALLOCATE(Ham%optable)
+      call FlushNodeTree(Ham%nt)
 
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total Hamiltonian generation time (s)',&
-                             Ham_time
-
-      end subroutine FlushHamiltonian
+      end subroutine Flush_Hamiltonian
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine printHamiltonianInfo(H)
+      subroutine AllocHamilOp(Ham,V,trans,opmap,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Writes info about Hamiltonian to 'Hamiltonian.out'
+! Allocates and sets arrays in Hamiltonian structure
 
       implicit none
-      TYPE (Hamiltonian) :: H
-      integer      :: u,il,nlayr,i,j,k,maxdof,poplen
-      character*64 :: frmt
+      TYPE (Hamiltonian), INTENT(INOUT) :: Ham
+      TYPE (Configs), INTENT(IN) :: V(:)
+      character(len=*), intent(in) :: trans
+      integer, allocatable, intent(out) :: opmap(:)
+      integer, intent(in) :: verbosity
+      integer :: i,ndof,ncoup,mxpow,ntyp
 
-      rank0 : IF (mpirank.eq.mpi_prnt_rank) THEN
-!      u = LookForFreeUnit()
-!      open(u,status='unknown',file='Hamiltonian.out')
+!     Set parameters
+      ndof=V(1)%nbas(1)
+      ncoup=SIZE(V)
 
-      nlayr=SIZE(H%nterms)
-      write(*,'(/A/)') '********** Hamiltonian operator **********'
-
-      poplen=SIZE(H%pops)
-      write(*,*) '---- Primitive Operators ----'
-      write(*,*) '  ID  Label'
-      DO i=1,poplen
-         write(*,'(I5,2X,A,I0)') i,&
-         TRIM(H%pops(i)%label),H%pops(i)%dof
+!     Determine the max possible power, y, of q^y, from the PES
+      mxpow=0
+      DO i=1,ncoup
+!        Skip if there are no terms for this i
+         IF (SIZE(V(i)%coef).eq.1 .and. V(i)%coef(1).eq.0.d0) CYCLE
+         mxpow=i
       ENDDO
-      write(*,*)
 
-      il=1
-      maxdof=MAXVAL(H%ndof(:,il))
-      write(*,'(A,I2,A/)') '---- Layer ',il,' ---'
-      write(frmt,'(A,I2,A)') '(A,',3*(maxdof-1)+1,'X,A)'
-      write(*,frmt) ' Term |DOF','|    Factor          Operators'
-      DO i=1,H%nterms(il)
-!        Generate the print format 
-         write(frmt,'(A,I0,A,I0,A,I0,A)') &
-           '(I5,X,A,',H%ndof(i,il),'(I2,X),',3*(maxdof-H%ndof(i,il))+1,&
-           'X,A,ES18.10,X,',H%ndof(i,il),'(I4,X))'
-!        Print the line
-         write(*,frmt) &
-           i,'|',(H%dofs(i,j,il),j=1,H%ndof(i,il)),'|',&
-           H%facs(i,1),(H%ops(i,j,1),j=1,H%ndof(i,il))
-!        Loop over grouped terms (which operate on the same dofs)
-         DO k=2,H%nop(i,il)
-            write(frmt,'(A,I0,A,I0,A)') '(6X,A,',&
-            3*maxdof+1,'X,A,ES18.10,X,',H%ndof(i,il),'(I4,X))'
-            write(*,frmt) '|','|',H%facs(i,k),&
-            (H%ops(i,j,k),j=1,H%ndof(i,il))
+!     Determine the opmap array from the transformation type
+      IF (trans .seq. 'none') THEN
+         ntyp=2
+         allocate(opmap(ntyp))
+         opmap=(/-1,0/)
+      ELSEIF (trans .seq. 'poly-tanh') THEN
+         ntyp=3
+         allocate(opmap(ntyp))
+         opmap=(/-1,0,1/)
+      ELSEIF (trans .seq. 'morse-tanh') THEN
+         ntyp=4
+         allocate(opmap(ntyp))
+         opmap=(/-1,0,1,2/)
+      ELSE
+         write(*,*) "Unrecognized coordinate transformation: '",trans,&
+         "' ;allowed values are 'none', 'morse-tanh', and 'poly-tanh'"
+         call AbortWithError("AllocHamilOp(): bad transformation type")
+      ENDIF
+
+      IF (mpirank.eq.mpi_prnt_rank .and. verbosity.ge.1) THEN
+         write(*,'(X,A/)') 'Operator types present:'
+         DO i=1,ntyp
+            select case (opmap(i))
+               case(-1)
+                   write(*,'(X,A,I0,A)') '[',i,'] = (p_i)^n'
+               case(0)
+                   write(*,'(X,A,I0,A)') '[',i,'] = (q_i)^n'
+               case(1)
+                   write(*,'(X,A,I0,A)') &
+                   '[',i,'] = (tanh(alpha_i*q_i))^n'
+               case(2)
+                   write(*,'(X,A,I0,A)') &
+                   '[',i,'] = (1-exp(-alpha_i*q_i))^n'
+            end select
          ENDDO
-      ENDDO
+         write(*,*)
+      ENDIF
 
-      DO il=2,nlayr
-         maxdof=MAXVAL(H%ndof(1:H%nterms(il),il))
-         write(*,'(/A,I2,A)') '---- Layer ',il,' ---'
-         write(frmt,'(A,I2,A)') '(A,',3*(maxdof-1)+1,'X,A)'
-         write(*,frmt) ' Term |Mod','| Previous Layer Operators'
-         DO i=1,H%nterms(il)
-!           Generate the print format 
-            write(frmt,'(A,I0,A,I0,A,I0,A,I0,A)') &
-              '(I5,X,A,',H%ndof(i,il),'(I2,X),',&
-              3*(maxdof-H%ndof(i,il))+1,'X,A,',&
-              H%nop(i,il),'(I0,X))'
-!           Print the line
-            write(*,frmt) &
-              i,'|',(H%dofs(i,j,il),j=1,H%ndof(i,il)),'|',&
-              (H%mops(i,il)%v(k),k=1,H%nop(i,il))
-         ENDDO
-      ENDDO
+      ALLOCATE(Ham%ops(ndof,mxpow,ntyp),Ham%optable(ndof,mxpow,ntyp))
+      Ham%optable(:,:,:)=.FALSE.
 
-!      write(*,'(/A/)') '--- Primitive H matrices ---'
-!      DO i=1,poplen
-!         write(*,'(X,2(A,I0),2A)') 'ID # ',i,', dof = ',H%pops(i)%dof,&
-!              ', label = ',H%pops(i)%label
-!         call PrintVector(H%pops(i)%mat)
-!      ENDDO
-      write(*,'(/A/)') '******************************************'
+!     Set optable true for kinetic energy (p^2) terms
+      Ham%optable(:,2,1)=.TRUE.
 
-      ENDIF rank0
-
-      end subroutine printHamiltonianInfo
+      end subroutine AllocHamilOp
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine sortHamiltonian(H,ML)
+      subroutine ShowPESInfo(Ham,V,vtype,trans,opmap,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Organizes the Hamiltonian by sorting and combining terms for each dof
+! Allocates and sets arrays in Hamiltonian structure
 
       implicit none
-      TYPE (MLtree)        :: ML
-      TYPE (Hamiltonian)   :: H
-      real*8, allocatable  :: facs(:,:)
-      integer, allocatable :: modecnt(:),ndof(:),nop(:),iop(:)
-      integer, allocatable :: dofs(:,:),ops(:,:,:)
-      integer, allocatable :: optyp(:,:,:)
-      integer :: i,j,k,l,pass,ndim,ntrm,inewtrm,nnewtrm,maxdof,maxop,ip
-      integer :: il,mil,nm,nlayr,thismode
-      logical :: unique
+      TYPE (Hamiltonian), INTENT(IN) :: Ham
+      TYPE (Configs), INTENT(IN) :: V(:),vtype(:)
+      character(len=64), intent(in) :: trans
+      integer, intent(in) :: opmap(:)
+      integer, intent(in) :: verbosity
+      integer, allocatable :: modpowr(:,:)
+      integer :: i,j,k,mjk,ndof,npow,nopt,ndf,ncoup
+      integer, allocatable :: maptag(:,:)
+      character(len=64) :: frmt
+      character(len=64), allocatable, dimension(:) :: labl
+      character(len=3), dimension(2) :: tag=(/' X ','   '/)
 
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(/X,A)') "--> Sorting Hamiltonian terms into layers"
+      IF (mpirank.eq.mpi_prnt_rank) THEN
 
-      nlayr=ML%nlayr
-      maxdof=MAXVAL(H%ndof(:,1))  ! Max # coupled DOF in H
+         ndof=SIZE(Ham%optable,1)
+         npow=SIZE(Ham%optable,2)
+         nopt=SIZE(Ham%optable,3)
+         ncoup=SIZE(V)
 
-!     Loop over layers in multilayer wavefunction
-      DO il=1,nlayr
+!        Print the operator table
+         IF (verbosity.ge.1) THEN
+            ALLOCATE(maptag(npow,nopt))
 
-         mil=max(il-1,1)
-         ntrm=H%nterms(mil)             ! # terms before sorting
-         maxdof=MAXVAL(H%ndof(1:ntrm,mil))  ! Max # coupled modes in H
-         allocate(dofs(ntrm,maxdof))    ! list of coupled modes per term
-         allocate(ndof(ntrm),nop(ntrm)) ! # modes, # operators per term
-         nop=0
+            write(*,'(/X,2A/)') 'Primitive operator table: ',&
+                                '(X = operator is present)'
+            write(frmt,'(2(A,I0),A)') &
+                  '(X,A,',nopt,'(I2,',3*(npow-1)+1,'X,A))'
+            write(*,frmt) 'Type|',(k,'|',k=1,nopt)
+            write(frmt,'(2(A,I0),A)') &
+                  '(A,',nopt,'(',npow,'(I2,X),A))'
+            write(*,frmt) 'order|',((j,j=1,npow),'|',k=1,nopt)
+            write(frmt,'(2(A,I0),A)') & 
+                  '(X,A,',nopt,'(',npow,'A,A))'
+            write(*,frmt) '-DOF|',(('---',j=1,npow),'|',k=1,nopt)
 
-!        First pass: check terms in H to calc new array dimensions
-!        Second pass: combine terms operating on a common set of modes
-
-         DO pass=1,2
-
-            inewtrm=0
-
-!           Loop over terms in previous layer of Hamiltonian
-            DO i=1,ntrm
-               unique=.TRUE.
-!              Determine the current-layer modes of the i-th term by
-!              examining the previous-layer modes
-               ALLOCATE(modecnt(H%ndof(i,mil)))
-!              Bottom layer: no previous layer to examine, so just
-!              build the mode-count list from the DOF-list
-               IF (il.eq.1) THEN 
-                  modecnt(:)=H%dofs(i,1:H%ndof(i,mil),il)
-                  nm=H%ndof(i,mil)
-!              Higher layers: find the current-layer mode containing
-!              the previous-layer mode
-               ELSE
-                  modecnt(1)=ML%whichmod(mil,H%dofs(i,1,mil))
-                  nm=1
-                  DO k=2,H%ndof(i,mil)
-                     thismode=ML%whichmod(mil,H%dofs(i,k,mil))
-!                    If current-layer mode not duplicated, add to list
-                     IF (.NOT.ANY(modecnt(1:nm).eq.thismode)) THEN
-                        nm=nm+1
-                        modecnt(nm)=thismode
-                     ENDIF
-                  ENDDO
-               ENDIF
-
-!              Loop over stored terms in current layer Hamiltonian to
-!              determine if the i-th term in the previous layer 
-!              Hamiltonian can be summed with one of the existing terms
-!              in the current layer. Otherwise a new term is added to
-!              the current layer
-
-               DO j=1,inewtrm
-                  IF (IntListsRSame(modecnt(1:nm),dofs(j,1:ndof(j)))) &
-                     unique=.FALSE.
-
-!                 For now, all multi-mode operators are unique
-                  IF (ndof(j).gt.1) unique=.TRUE.
-
-!                 Not unique: sum with a previous term in current layer
-                  IF (.not.unique) THEN
-                     IF (pass.eq.1) THEN  ! First pass
-!                       Bottom layer: increment nop by # ops in term
-                        IF (il.eq.1) THEN
-                           nop(j)=nop(j)+H%nop(i,1)
-!                       Higher layers: increment nop by 1 since only the
-!                       pointer to the previous layer is needed
-                        ELSE
-                           nop(j)=nop(j)+1
-                        ENDIF
-                     ELSE  ! Second pass
-                        IF (il.eq.1) THEN  ! add to facs and ops
-                           DO k=1,H%nop(i,1)
-                              facs(j,iop(j))=H%facs(i,k)
-                              DO l=1,H%ndof(i,1)
-                                 ops(j,l,iop(j))=H%ops(i,l,k)
-                                 optyp(j,l,iop(j))=H%optyp(i,l,k)
-                              ENDDO
-                              iop(j)=iop(j)+1
-                           ENDDO
-                        ELSE  ! add the pointer to the previous layer
-                           H%mops(j,il)%v(iop(j))=i
-                           iop(j)=iop(j)+1
-                        ENDIF
-                     ENDIF
-                     EXIT
-                  ENDIF
-               ENDDO  ! loop over j (prev. terms in current layer)
-
-!              Unique combination of DOFs: new term on current layer
-               IF (unique) THEN ! The term is counted in the dofs array
-                  inewtrm=inewtrm+1
-                  IF (pass.eq.1) THEN  ! First pass: fill dofs, ndof, nop
-                     ndof(inewtrm)=nm
-                     dofs(inewtrm,1:nm)=modecnt(1:nm)
-!                    Bottom layer: nop holds number of operators in term
-                     IF (il.eq.1) THEN
-                        nop(inewtrm)=H%nop(i,1)
-!                    Higher layers: nop holds number of pointers to 
-!                    operators on previous layer
+            DO i=1,ndof
+               DO k=1,nopt
+                  DO j=1,npow
+                     mjk=(k-1)*npow+j
+                     IF (Ham%optable(i,j,k)) THEN
+                        maptag(j,k)=1
                      ELSE
-                        nop(inewtrm)=1
+                        maptag(j,k)=2
                      ENDIF
-                  ELSE  ! Second pass
-                     IF (il.eq.1) THEN  ! Bottom layer: fill facs, ops
-                        DO k=1,H%nop(i,1)
-                           facs(inewtrm,iop(inewtrm))=H%facs(i,k)   
-                           DO l=1,nm
-                              ops(inewtrm,l,iop(inewtrm))=H%ops(i,l,k)
-                              optyp(inewtrm,l,iop(inewtrm))=&
-                                   H%optyp(i,l,k)
-                           ENDDO
-                           iop(inewtrm)=iop(inewtrm)+1
-                        ENDDO
-                     ELSE ! Higher layers: just add pointer to mops
-                        H%mops(inewtrm,il)%v(iop(inewtrm))=i
-                        iop(inewtrm)=iop(inewtrm)+1
-                     ENDIF
-                  ENDIF
-               ENDIF
-               DEALLOCATE(modecnt)
-            ENDDO  ! loop over i (terms in H)
-
-!           After the 1st pass, allocate arrays used in the 2nd pass
-!           nnewtrm = number of terms in the 'condensed' H
-!           maxop = number of summed terms for each term in H
-
-            IF (pass.eq.1) THEN
-               maxop=MAXVAL(nop)
-               nnewtrm=inewtrm
-               allocate(iop(nnewtrm))
-               IF (il.eq.1) THEN
-                  allocate(facs(nnewtrm,maxop))
-                  allocate(ops(nnewtrm,maxdof,maxop))
-                  allocate(optyp(nnewtrm,maxdof,maxop))
-               ELSE
-                  IF (il.eq.2) THEN
-                     allocate(H%mops(nnewtrm,2:nlayr))
-                  ENDIF
-                  DO k=1,nnewtrm
-                     call H%mops(k,il)%new(nop(k))
-                  ENDDO
-               ENDIF
-               iop=1
-            ENDIF
-
-         ENDDO  ! loop over pass
-
-!        Allocate arrays in H and fill with contents of temp arrays
-         IF (il.eq.1) THEN
-            deallocate(H%ndof,H%nop,H%dofs,H%facs)
-            deallocate(H%ops,H%optyp,H%nterms)
-            allocate(H%ndof(nnewtrm,nlayr),H%nop(nnewtrm,nlayr))
-            allocate(H%dofs(nnewtrm,maxdof,nlayr),H%facs(nnewtrm,maxop))
-            allocate(H%ops(nnewtrm,maxdof,maxop),H%nterms(nlayr))
-            allocate(H%optyp(nnewtrm,maxdof,maxop))
-
-!           facs and ops apply only to the bottom layer, so fill here
-            DO i=1,nnewtrm
-               DO k=1,nop(i)
-                  H%facs(i,k)=facs(i,k)
-                  DO j=1,ndof(i)
-                     H%ops(i,j,k)=ops(i,j,k)
-                     H%optyp(i,j,k)=optyp(i,j,k)
                   ENDDO
                ENDDO
+               write(frmt,'(2(A,I0),A)') &
+                    '(I4,X,A,',nopt,'(',npow,'A,A))'
+               write(*,frmt) i,'|',((tag(maptag(j,k)),j=1,npow),'|',k=1,nopt)
             ENDDO
-            deallocate(facs,ops)
+            write(*,*)
+            DEALLOCATE(maptag)
          ENDIF
 
-!        Copy temp arrays to Hamiltonian
-         DO i=1,nnewtrm
-            H%ndof(i,il)=ndof(i)
-            H%nop(i,il)=nop(i)
-            DO j=1,ndof(i)
-               H%dofs(i,j,il)=dofs(i,j)
+!        Print the transformed PES
+         IF (verbosity.ge.2) THEN
+!           Loop over quadratic, cubic, quartic, ... terms in the PES
+            DO k=1,ncoup
+
+!              If V(k) is a zero vector, skip
+               IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
+
+               write(*,'(X,2A,X,I0/)') 'Potential energy terms ',&
+                                       '(post-processed), order:',k
+
+               DO i=1,SIZE(V(k)%coef)
+                  call DistribModePower(V(k)%qns(i,:),modpowr)
+                  ndf=SIZE(modpowr,1)
+                  allocate(labl(ndf))
+
+                  do j=1,ndf
+                     write(labl(j),'(3A,2(I0,A))') '(',&
+                     TRIM(ADJUSTL(GetFunctionLabel(opmap(vtype(k)%qns(i,j))))),&
+                     '^',modpowr(j,2),')_',modpowr(j,1)
+                  enddo
+
+                  write(frmt,'(A,I0,A)') '(ES18.10,',ndf,'(X,A,X,A))'
+                  write(*,frmt) V(k)%coef(i),&
+                  ('*',TRIM(ADJUSTL(labl(j))),j=1,ndf)
+
+                  deallocate(labl,modpowr)
+               ENDDO
+               write(*,*)
             ENDDO
-         ENDDO
-         deallocate(ndof,nop,dofs,iop)
-         H%nterms(il)=nnewtrm
 
-      ENDDO  ! loop over il
+         ENDIF
+      ENDIF
 
-!     Allocate the array for storing the eigenvalues
-      ALLOCATE(H%eig(nlayr,ML%nmode(1)))
-
-      end subroutine sortHamiltonian
+      end subroutine ShowPESInfo
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ResortHmodes(H,ML)
+      subroutine FillHamilNodeTree(nt,V,vtype,omega,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Rearranges the modes on the bottom layer of the Hamiltonian
-! This is done to allow arbitrary mode combination schemes
+! Fills nt with terms from configuration array V
 
       implicit none
-      TYPE (MLtree)        :: ML
-      TYPE (Hamiltonian), INTENT(INOUT)   :: H
-      integer, allocatable :: dummy(:,:)
-      integer :: i,j,k,l,ndum
-      logical :: usedummy,resortfound
+      TYPE (TN), INTENT(INOUT) :: nt(:)
+      TYPE (Configs), INTENT(IN) :: V(:),vtype(:)
+      real(kind=8), intent(in) :: omega(:)
+      integer, intent(in)  :: verbosity
+      integer, allocatable :: modpowr(:,:),commonnode(:,:)
+      integer, allocatable :: dofresort(:),opcounts(:),opwidths(:)
+      integer :: nnode,nlayr,thenode,nunassigned
+      integer :: ipass,i,k,l,l2,ndof,ndf,ncoup
 
-      ALLOCATE(dummy(ML%nmode(1),2))
-      ndum=0
+!     Set parameters
+      ncoup=SIZE(V)
+      ndof=V(1)%nbas(1)
+      nnode=SIZE(nt)
 
-      DO k=1,ML%nmode(1)
-         IF (k.ne.ML%resort(k)) THEN
-            resortfound=.FALSE.
-            DO l=1,ndum
-!              resorted index matches the dummy, so replace dummy
-               IF (dummy(l,1).eq.ML%resort(k)) THEN
-                  resortfound=.TRUE.
-                  EXIT
+!     Count layers by traversing the tree upwards from first node
+      nlayr=1
+      thenode=1
+      do
+         thenode=nt(thenode)%supern
+         if (thenode.eq.0) exit
+         nlayr=nlayr+1
+      enddo
+
+!     Get list of bottom-layer nodes for each dof
+      allocate(dofresort(ndof))
+      do i=1,ndof
+         dofresort(nt(i)%dofs(1))=i
+      enddo
+
+      allocate(opcounts(nnode),opwidths(nnode))
+      nunassigned=0
+
+!     Loop over operators and assign to nodes
+!     First pass: count number in each node and allocate arrays
+!     Second pass: fill arrays
+      DO ipass=1,2
+
+         opcounts(:)=0 ! Number of operators in node
+         opwidths(:)=0 ! Max number of product ops in node
+         opcounts(1:ndof)=1 ! Number of operators in node
+         opwidths(1:ndof)=1 ! Max number of product ops in node
+
+!        Loop over potential terms from V
+         DO k=1,ncoup
+!           Skip if there are no terms for this k
+            IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
+
+!           Loop over terms with k multiplied operators
+            DO i=1,SIZE(V(k)%coef)
+               call DistribModePower(V(k)%qns(i,:),modpowr)
+               ndf=SIZE(modpowr,1)
+               allocate(commonnode(ndf,2))
+
+!              Assign each operator to bottom-layer node
+               do l=1,ndf
+                  commonnode(l,1)=dofresort(modpowr(l,1))
+                  commonnode(l,2)=1
+               enddo
+
+!              Migrate upwards through tree until reaching a node which
+!              containing all operators in the term
+               do l2=1,nlayr
+                  if (ALL(commonnode(:,1).eq.commonnode(1,1))) exit
+                  do l=1,ndf
+                     thenode=commonnode(l,1)
+                     commonnode(l,1)=nt(thenode)%supern
+                     commonnode(l,2)=nt(thenode)%superi
+                  enddo
+               enddo
+
+               thenode=commonnode(1,1)
+
+               if (ipass.eq.1) then
+                  if (thenode.gt.0) then
+                     opcounts(thenode)=opcounts(thenode)+1
+                     opwidths(thenode)=max(opwidths(thenode),ndf)
+                  else ! Unassigned operator
+                     nunassigned=nunassigned+1
+                  endif
+               else
+                  if (thenode.gt.0) then ! fill nodetree
+                     opcounts(thenode)=opcounts(thenode)+1
+                     nt(thenode)%Hfacs(opcounts(thenode))=V(k)%coef(i)
+                     nt(thenode)%Hnop(opcounts(thenode))=ndf
+                     nt(thenode)%Hops(opcounts(thenode),1:ndf,1:2)=modpowr(1:ndf,1:2)
+                     nt(thenode)%Hops(opcounts(thenode),1:ndf,3)=vtype(k)%qns(i,1:ndf)
+                     nt(thenode)%Hsubm(opcounts(thenode),1:ndf)=commonnode(1:ndf,2)
+                  endif
+               endif
+
+               deallocate(modpowr,commonnode)
+            ENDDO
+         ENDDO
+
+         IF (ipass.eq.1) THEN
+!           Allocate arrays for storing operators
+            DO i=1,nnode
+               IF (opcounts(i).gt.0) THEN
+                  ALLOCATE(nt(i)%Hfacs(opcounts(i)))
+                  ALLOCATE(nt(i)%Hnop(opcounts(i)))
+                  ALLOCATE(nt(i)%Hops(opcounts(i),opwidths(i),3))
+                  ALLOCATE(nt(i)%Hsubm(opcounts(i),opwidths(i)))
                ENDIF
             ENDDO
-            IF (.NOT.resortfound) THEN
-!              If the k-th DOF is found, replace with a dummy value
-               usedummy=.FALSE.
-               DO i=1,H%nterms(1)
-                  DO j=1,H%ndof(i,1)
-                     IF (H%dofs(i,j,1).eq.k) THEN
-                        H%dofs(i,j,1)=-k
-                        IF (.NOT. usedummy) THEN
-                           usedummy=.TRUE.
-                           ndum=ndum+1
-                           dummy(ndum,1)=k
-                           dummy(ndum,2)=-k
-                        ENDIF
-                     ENDIF
-                  ENDDO
-               ENDDO
-!              Now replace the resorted index with the k-th one
-               DO i=1,H%nterms(1)
-                  DO j=1,H%ndof(i,1)
-                     IF (H%dofs(i,j,1).eq.ML%resort(k)) THEN
-                        H%dofs(i,j,1)=k
-                     ENDIF
-                  ENDDO
-               ENDDO
-            ENDIF
+!           Include KEO terms in first pass
+            DO i=1,ndof
+               thenode=dofresort(i)
+               nt(thenode)%Hfacs(1)=omega(i)
+               nt(thenode)%Hnop(1)=1
+               nt(thenode)%Hops(1,1,1)=i
+               nt(thenode)%Hops(1,1,2)=2
+               nt(thenode)%Hops(1,1,3)=1
+               nt(thenode)%Hsubm(1,1)=1
+            ENDDO
          ENDIF
       ENDDO
 
-!     Resolve indices mapped to dummies
-      DO k=1,ML%nmode(1)
-         DO l=1,ndum
-!           resorted index matches the dummy, so replace dummy
-            IF (dummy(l,1).eq.ML%resort(k)) THEN
-               DO i=1,H%nterms(1)
-                  DO j=1,H%ndof(i,1)
-                     IF (H%dofs(i,j,1).eq.dummy(l,2)) THEN
-                        H%dofs(i,j,1)=k
-                     ENDIF
-                  ENDDO
-               ENDDO
-               EXIT
-            ENDIF
+      IF (nunassigned.gt.0) THEN
+         write(*,*) 'WARNING: ',nunassigned,&
+         'operators not assigned to a node in the tree!'
+      ENDIF
+
+      IF (mpirank.eq.mpi_prnt_rank .and. verbosity.ge.2) THEN
+         DO i=1,nnode
+            call nt(i)%showstats()
+            call nt(i)%showhamil()
          ENDDO
-      ENDDO
+      ENDIF
 
-      DEALLOCATE(dummy)
+      deallocate(dofresort,opcounts)
 
-      end subroutine ResortHmodes
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine ResortAlphas(alpha,ML)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Resorts the alpha parameters according to mode ordering in ML-tree
-
-      implicit none
-      TYPE (MLtree), intent(in) :: ML
-      real*8, intent(inout) :: alpha(:)
-      real*8, allocatable   :: atmp(:)
-      integer :: i,n
-
-      n=SIZE(alpha)
-      ALLOCATE(atmp(n))
-
-!     Resort alphas into atmp array
-      DO i=1,n
-         atmp(resortedmode(i,ML))=alpha(i)
-      ENDDO
-
-!     Overwrite original alpha array
-      alpha(:)=atmp(:)
-
-      DEALLOCATE(atmp)
-
-      end subroutine ResortAlphas
+      end subroutine FillHamilNodeTree
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine FindUniqueOperators(H,ML,alpha)
+      subroutine GetPrimitiveOperators(Ham,ML,V,alpha,opmap,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Determines which operators are unique in the Hamiltonian and gets
 ! their operator matrices
 
       implicit none
-      TYPE (Hamiltonian)   :: H
-      TYPE (MLtree)        :: ML
-      real*8, intent(in)   :: alpha(:)
-      integer, allocatable :: opid(:,:,:),udof(:),uop(:),utyp(:)
-      integer :: il,pass,i,j,k,l,opct,maxops
-      logical :: unique
+      TYPE (Hamiltonian), INTENT(INOUT) :: Ham
+      TYPE (MLtree), INTENT(IN)  :: ML
+      TYPE (Configs), INTENT(IN) :: V(:)
+      real(kind=8), intent(in)   :: alpha(:)
+      integer, intent(in) :: opmap(:)
+      integer, intent(in) :: verbosity
+      integer :: i,j,k,l,m,gdim,ndof,ncoup,oppowmax,noptyp
 
       IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A)') "--> Determining unique primitive operators"
+      write(*,'(X,A)') "--> Generating primitive operators"
 
-!     Find terms for bottom layer only
-      il=1
+!     Set parameters
+      ncoup=SIZE(V)
+      ndof=SIZE(Ham%ops,1)
+      oppowmax=SIZE(Ham%ops,2)
+      noptyp=SIZE(Ham%ops,3)
 
-!     Array for operator ID numbers
-      ALLOCATE(opid(SIZE(H%ops,1),SIZE(H%ops,2),SIZE(H%ops,3)))
+!     Determine the max possible power, y, of q^y, from the PES
+      oppowmax=0
+      DO i=1,ncoup
+!        Skip if there are no terms for this i
+         IF (SIZE(V(i)%coef).eq.1 .and. V(i)%coef(1).eq.0.d0) CYCLE
+         oppowmax=i
+      ENDDO
 
-      maxops=0
-      DO pass=1,2
-         opct=0
-         DO i=1,H%nterms(il)
-            DO j=1,H%ndof(i,il)
-               DO k=1,H%nop(i,il)
-!                 First pass: count max possible # operators
-                  IF (pass.eq.1) THEN
-                     maxops=maxops+1
-!                 Second pass: make list of unique operators
-                  ELSEIF (pass.eq.2) THEN
-                     unique=.TRUE.
-                     DO l=1,opct
-                        IF (H%dofs(i,j,il).eq.udof(l) .and. &
-                            H%ops(i,j,k).eq.uop(l) .and. &
-                            H%optyp(i,j,k).eq.utyp(l)) THEN
-                           unique=.FALSE.
-                           opid(i,j,k)=l
-                        ENDIF
-                     ENDDO
-!                    Add the unique operator to the list
-                     IF (unique) THEN
-                        opct=opct+1
-                        udof(opct)=H%dofs(i,j,il)
-                        uop(opct)=H%ops(i,j,k)
-                        utyp(opct)=H%optyp(i,j,k)
-                        opid(i,j,k)=opct
-                     ENDIF
+      ALLOCATE(Ham%ops(ndof,oppowmax,noptyp))
+
+!     Generate operator matrices for this mode
+      DO i=1,ndof
+         m=ML%resort(i)
+         gdim=ML%gdim(1,i)
+         DO k=1,noptyp
+            l=opmap(k)
+            DO j=1,oppowmax
+               if (Ham%optable(m,j,k)) &
+               Ham%ops(m,j,k)=GetPrimitiveOperMat(m,gdim,j,l,alpha(m))
+            ENDDO
+         ENDDO
+      ENDDO
+
+      IF (mpirank.eq.mpi_prnt_rank .and. verbosity.ge.1) THEN
+         write(*,'(/X,A/)') '--- Primitive H Operators ---'
+         DO i=1,ndof
+            m=ML%resort(i)
+            DO k=1,noptyp
+               l=opmap(k)
+               DO j=1,oppowmax
+                  IF (Ham%optable(m,j,k)) THEN
+                     write(*,'(X,A)') Ham%ops(m,j,k)%label
+                     if (verbosity.ge.2) &
+                        call PrintVector(Ham%ops(m,j,k)%mat)
                   ENDIF
                ENDDO
             ENDDO
          ENDDO
+         if (verbosity.eq.1) write(*,*)
+      ENDIF
 
-         IF (pass.eq.1) THEN
-            ALLOCATE(udof(maxops),uop(maxops),utyp(maxops))
-         ELSEIF (pass.eq.2) THEN
-            ALLOCATE(H%pops(opct))
-         ENDIF
-
-      ENDDO
-
-!     Now fill the unique primitive operators array
-      DO l=1,opct
-         H%pops(l)=&
-         GetPrimitiveOperMat(udof(l),ML%gdim(il,udof(l)),uop(l),&
-                             utyp(l),alpha(udof(l)))
-      ENDDO
-
-!     Copy opid array to H
-      H%ops=opid
-      DEALLOCATE(udof,uop,opid,utyp)
-
-      end subroutine FindUniqueOperators
+      end subroutine GetPrimitiveOperators
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolveandUpdateFirstLayer(H)
+      subroutine SolveandUpdateFirstLayer(Ham)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Assembles terms in the bottom-layer Hamiltonian by summing primitive
 ! operator matrices.
 
       implicit none
-      TYPE (Hamiltonian)  :: H
-      TYPE (OperMat)      :: OM
-      real*8, allocatable :: Tmati(:,:),Tmatj(:,:),S(:,:)
-      real*8, allocatable :: eigvals(:)
-      integer :: i,j,k,colsi,symi,dofi,symj,dofj
-      real*8  :: fac
+      TYPE (Hamiltonian) :: Ham
+      TYPE (OperMat)     :: OM
+      real(kind=8), allocatable :: Tmati(:,:),Tmatj(:,:),S(:,:)
+      real(kind=8), allocatable :: eigv(:)
+      integer, allocatable :: qns(:,:)
+      integer :: i,j,k,n,dofi,nnodes,pow,maxpow,typ,maxtyp
+      real(kind=8) :: fac
 
       IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A)') "--> Solving layer 1 Hamiltonian..."
 
-!     Loop over terms in Hamiltonian
-      DO i=1,H%nterms(1)
+      nnodes=SIZE(Ham%nt)
+      maxpow=SIZE(Ham%ops,2)
+      maxtyp=SIZE(Ham%ops,3)
 
-!        If term is a single-dof operator, assemble and diagonalize
-         IF (H%ndof(i,1).eq.1) THEN
+!     Loop over bottom layer nodes
+      DO i=1,nnodes
 
-!           Sum the operators which act only on this DOF
-            fac=H%facs(i,1)
-            call SumOperMats(OM,H%pops(H%ops(i,1,1)),fac)
-            DO k=2,H%nop(i,1)
-               fac=H%facs(i,k)
-               call SumOperMats(OM,1.d0,H%pops(H%ops(i,1,k)),fac)
-            ENDDO
+!        Exit upon encountering the first non-bottom-layer node
+         IF (Ham%nt(i)%nsubm().gt.0) EXIT
 
-            dofi=OM%dof
+         dofi=Ham%nt(i)%dofs(1)
 
-!           Convert summed operator matrix to upper triangular form
-            call Vec2SymPackMat(OM%mat,Tmati)
+!        Assemble the single-mode Hamiltonian
+         DO j=1,Ham%nt(i)%nHterm()
+            fac=Ham%nt(i)%Hfacs(j)
+            pow=Ham%nt(i)%Hops(j,1,2)
+            typ=Ham%nt(i)%Hops(j,1,3)
+            call SumOperMats(OM,1.d0,Ham%ops(dofi,pow,typ),fac)
+         ENDDO
 
-!           Solve generalzed eigenvalue problem
-            ALLOCATE(eigvals(SIZE(Tmati,1)))
-            ALLOCATE(S(SIZE(Tmati,1),SIZE(Tmati,1)))
-            S=0.d0
-            DO j=1,SIZE(Tmati,1)
-               S(j,j)=1.d0
-            ENDDO
-            call SolveGenEigval(eigvals,S,Tmati,'V')
+!        Convert summed operator matrix to upper triangular form
+         call Vec2SymPackMat(OM%mat,Tmati)
 
-!           Store eigenvalues/assignments in Hamiltonian type
-            ALLOCATE(H%eig(1,dofi)%evals(SIZE(Tmati,1)))
-            ALLOCATE(H%eig(1,dofi)%assgn(SIZE(Tmati,1),1))
-            DO j=1,SIZE(Tmati,1)
-               H%eig(1,dofi)%assgn(j,1)=j
-            ENDDO
-            H%eig(1,dofi)%evals(:)=eigvals(:)
-            DEALLOCATE(eigvals,S)
+!        Solve generalzed eigenvalue problem
+         n=SIZE(Tmati,1)
+         ALLOCATE(eigv(n),S(n,n),qns(n,1))
+         S=0.d0
+         DO j=1,n
+            S(j,j)=1.d0
+            qns(j,1)=j
+         ENDDO
+         call SolveGenEigval(eigv,S,Tmati,'V')
 
-!           Use the eigenvector matrix to transform the primitive
-!           operators for the same DOF/mode
-            DO j=1,SIZE(H%pops)
-               dofj=H%pops(j)%dof
-               IF (dofj.eq.dofi) THEN  ! Transform the matrix
-!                 Convert operator matrix to regular form and
-!                 transform using the eigenbasis
-                  call Vec2SymPackMat(H%pops(j)%mat,Tmatj)
+!        Store eigenvalues/assignments in Hamiltonian type
+         call SetEigenbasis(Ham%nt,i,qns,eigv)
+
+!        Transform operators on this mode into eigen-basis
+         DO k=1,maxtyp
+            DO j=1,maxpow
+               IF (Ham%optable(dofi,j,k)) THEN
+                  call Vec2SymPackMat(Ham%ops(dofi,j,k)%mat,Tmatj)
                   call UnitaryTFM(Tmati,Tmatj)
 
 !                 Replace operator matrix with transformed one
-                  DEALLOCATE(H%pops(j)%mat)
-                  call SymPackMat2Vec(H%pops(j)%mat,Tmatj)
+                  DEALLOCATE(Ham%ops(dofi,j,k)%mat)
+                  call SymPackMat2Vec(Ham%ops(dofi,j,k)%mat,Tmatj)
                   DEALLOCATE(Tmatj)
-               ENDIF
+              ENDIF
             ENDDO
-            DEALLOCATE(Tmati)
-            DEALLOCATE(OM%mat)
+          ENDDO
+
+         DEALLOCATE(Tmati,OM%mat,eigv,S,qns)
+
+         IF (mpirank.eq.mpi_prnt_rank) THEN
+            write(*,'(/,X,A,I0,X,A)') '--- NODE ',i,'---'
+            write(*,'(/X,2A/)') 'Eigenvalues and assignments from ',&
+                                'diagonalizing the 1-mode Hamiltonian:'
+
+            call Ham%nt(i)%showeigen()
          ENDIF
       ENDDO
 
       end subroutine SolveandUpdateFirstLayer
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine PrintFirstLayerEnergies(H,ML)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Assembles terms in the bottom-layer Hamiltonian by summing primitive
-! operator matrices.
-
-      implicit none
-      TYPE (Hamiltonian), intent(in) :: H
-      TYPE (MLtree), intent(in)      :: ML
-      integer :: im,j
-
-      IF (mpirank.eq.mpi_prnt_rank) THEN
-         DO im=1,ML%nmode(1)
-            write(*,'(/,X,A,I0,A,I0,/)') 'LAYER-MODE: ',1,'-',im
-            write(*,*) 'Eigenvalues   : ',0,&
-            (H%eig(1,im)%evals(j),j=1,SIZE(H%eig(1,im)%evals))
-            write(*,*)
-            DO j=1,SIZE(H%eig(1,im)%evals)
-               write(*,'(I4,A,X,I2,X,f19.12)') j,')',j-1,&
-                   H%eig(1,im)%evals(j)-H%eig(1,im)%evals(1)
-            ENDDO
-         ENDDO
-      ENDIF
-
-      end subroutine PrintFirstLayerEnergies
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function GetModeHNr(il,im,H)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Find the single-mode term in the Hamiltonian corresponding to mode im
-! in layer il
-
-      implicit none
-      TYPE (Hamiltonian)   :: H
-      integer, intent(in)  :: il,im
-      integer :: i,GetModeHNr
-
-      GetModeHNr=-1
-
-      DO i=1,H%nterms(il)
-         IF (H%ndof(i,il).eq.1 .and. H%dofs(i,1,il).eq.im) GetModeHNr=i
-      ENDDO
-
-      end function GetModeHNr
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine FillHamilType(V,vtype,H,omega)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Fills TYPE (Hamiltonian) with terms from configuration array V
-
-      implicit none
-      TYPE (Hamiltonian), INTENT(INOUT) :: H
-      TYPE (Configs), INTENT(IN) :: V(:)
-      integer, intent(in)  :: vtype(:,:)
-      real*8, intent(in)   :: omega(:)
-      integer, allocatable :: modpowr(:,:)
-      integer :: i,k,l,l2,ndof,ndf,ncoup,hterms
-
-!     Set parameters
-      ncoup=SIZE(V)
-      ndof=V(1)%nbas(1)
-
-!     Start with ndof terms for the KEO
-      hterms=ndof
-
-!     Count the potential terms from V
-      DO k=1,ncoup
-!        Skip if there are no terms for this k
-         IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
-         hterms=hterms+SIZE(V(k)%coef)
-      ENDDO
-
-      allocate(H%nterms(1),H%facs(hterms,1))
-      allocate(H%dofs(hterms,ndof,1),H%ops(hterms,ndof,1))
-      allocate(H%ndof(hterms,1),H%nop(hterms,1),H%optyp(hterms,ndof,1))
-      H%nterms(1)=hterms
-
-      l=1
-      l2=1
-      DO k=1,ncoup
-
-!        If V(k) is a zero vector, skip
-         IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
-
-         DO i=1,SIZE(V(k)%coef)
-            call DistribModePower(V(k)%qns(i,:),modpowr)
-            ndf=SIZE(modpowr,1)
-
-!           KEO: duplicate quadratic terms, but with KEO operator flag
-            IF (k.eq.2 .and. ndf.eq.1) THEN
-!               H%facs(l,1)=V(k)%coef(i)
-               H%facs(l,1)=omega(modpowr(1,1)) ! harmonic constants
-               H%ndof(l,1)=1
-               H%nop(l,1)=1
-               H%dofs(l,1,1)=modpowr(1,1)
-               H%ops(l,1,1)=-2 ! Flag for KEO
-               H%optyp(l,1,1)=0
-               l=l+1
-            ENDIF
-
-            H%facs(l,1)=V(k)%coef(i)
-            H%ndof(l,1)=ndf
-            H%nop(l,1)=1
-            H%dofs(l,1:ndf,1)=modpowr(1:ndf,1)
-            H%ops(l,1:ndf,1)=modpowr(1:ndf,2)
-!!! UNDER CONSTRUCTION
-            H%optyp(l,1:ndf,1)=vtype(l2,1:ndf)
-!!! END CONSTRUCTION
-            l=l+1
-            l2=l2+1
-            deallocate(modpowr)
-         ENDDO
-      ENDDO
-
-      end subroutine FillHamilType
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine GetFullAssignment(il,im,Ham,ML,qns,qnfull)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      implicit none
-      TYPE (MLtree), INTENT(IN)      :: ML
-      TYPE (Hamiltonian), INTENT(IN) :: Ham
-      integer, intent(in)    :: qns(:)
-      integer, allocatable, intent(out) :: qnfull(:)
-      integer, intent(in)    :: il,im
-      integer, allocatable   :: modind(:),qntmp(:)
-      integer :: i,j,eigind,imn,nsubm,mst,nagn
-
-!     Get the full assignment in terms of primitive DOFs
-      ALLOCATE(modind(il),qntmp(ML%nmode(1)))
-
-      qntmp=0
-      nagn=0
-      modind=1
-      DO
-         imn=im
-
-         IF (modind(1).gt.1) EXIT
-
-!        Trace each assignment to the bottom layer
-         DO j=il,2,-1
-            mst=ML%modstart(j,imn)
-
-!           Take number of sub-modes from input array on first pass,
-!           then extract the number from stored assignment array
-            IF (j.eq.il) THEN
-               nsubm=SIZE(qns)
-            ELSE
-               nsubm=SIZE(Ham%eig(j,imn)%assgn,2)
-            ENDIF
-
-            IF (modind(il-j+2).gt.nsubm) THEN
-               modind(il-j+1)=modind(il-j+1)+1
-               modind(il-j+2:)=1
-               EXIT
-            ENDIF
-
-!           Use input array to get 'eigind' on first pass here, too
-            IF (j.eq.il) THEN
-               eigind=qns(modind(2))
-            ELSE
-               eigind=Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
-            ENDIF
-
-            imn=mst+modind(il-j+2)-1
-
-            IF (j.eq.2) THEN
-               nagn=nagn+1
-               qntmp(nagn)=eigind
-               modind(il-j+2)=modind(il-j+2)+1
-            ENDIF
-         ENDDO
-      ENDDO
-
-!     Copy qntmp to qnfull
-      ALLOCATE(qnfull(nagn))
-      qnfull(:)=qntmp(:nagn)
-      DEALLOCATE(modind,qntmp)
-
-      end subroutine GetFullAssignment
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine GetPartialAssignment(il,im,Ham,ML,jmode,ibas,qnfull)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      implicit none
-      TYPE (MLtree), INTENT(IN)      :: ML
-      TYPE (Hamiltonian), INTENT(IN) :: Ham
-      integer, intent(in)    :: jmode,ibas
-!      integer, intent(in)    :: qns(:)
-      integer, allocatable, intent(out) :: qnfull(:)
-      integer, intent(in)    :: il,im
-      integer, allocatable   :: modind(:),qntmp(:)
-      integer :: i,j,eigind,imn,nsubm,mst,nagn
-
-!     Get the full assignment in terms of primitive DOFs
-      ALLOCATE(modind(il),qntmp(ML%nmode(1)))
-
-      qntmp=0
-      nagn=0
-      modind=1
-      modind(2)=jmode
-      DO
-         imn=im
-
-         IF (modind(2).gt.jmode) EXIT        
-
-!        Trace each assignment to the bottom layer
-         DO j=il,2,-1
-            mst=ML%modstart(j,imn)
-
-!           Take number of sub-modes from input array on first pass,
-!           then extract the number from stored assignment array
-            IF (j.eq.il) THEN
-               nsubm=jmode!SIZE(qns)
-            ELSE
-               nsubm=SIZE(Ham%eig(j,imn)%assgn,2)
-            ENDIF
-
-            IF (modind(il-j+2).gt.nsubm) THEN
-               modind(il-j+1)=modind(il-j+1)+1
-               modind(il-j+2:)=1
-               EXIT
-            ENDIF
-
-!           Use input array to get 'eigind' on first pass here, too
-            IF (j.eq.il) THEN
-               eigind=ibas
-            ELSE
-               eigind=Ham%eig(j,imn)%assgn(eigind,modind(il-j+2))
-            ENDIF
-
-            imn=mst+modind(il-j+2)-1
-
-            IF (j.eq.2) THEN
-               nagn=nagn+1
-               qntmp(nagn)=eigind
-               modind(il-j+2)=modind(il-j+2)+1
-            ENDIF
-         ENDDO
-      ENDDO
-
-!     Copy qntmp to qnfull
-      ALLOCATE(qnfull(nagn))
-      qnfull(:)=qntmp(:nagn)
-      DEALLOCATE(modind,qntmp)
-
-      end subroutine GetPartialAssignment
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

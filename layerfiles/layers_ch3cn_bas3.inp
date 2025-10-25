@@ -12,10 +12,10 @@ $end-resort
 
 $basis
  9  9  9  9  9  7  7  7  9  9 27 27 /
- 9   16    16    16   7  9  9   64  /
-   16         16       16     40    /
-        40                40        /
-40 /
+ 9   72    72    40   7  9  9  190  /
+  120        198       55    194    /
+       210               179        /
+84 /
 $end-basis
 
 # Layers section: number of DOFs/modes to combine from previous layer

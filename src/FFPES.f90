@@ -17,7 +17,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetPotential(V,sys,ndof)
+      subroutine GetPotential(V,sys,ndof,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Makes a call to the appropriate PES routine or reads potential
@@ -25,101 +25,39 @@
 
       implicit none
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: V(:)
-      integer, intent(in) ::ndof
-      character(5), intent(in) :: sys
+      integer, intent(in) :: ndof,verbosity
+      character(len=*), intent(in) :: sys
 
 !     Get the constants for the PES of choice
 
 !     Dummy PES (always evaluates to 0)
-      IF (sys(1:5).seq.'dummy') THEN
+      IF (trim(adjustl(sys)).seq.'dummy') THEN
          call DummyHamiltonian(V,ndof)
 
 !     d-D bi-linearly coupled oscillators
-      ELSEIF (sys(1:5).seq.'CpOsc') THEN
+      ELSEIF (trim(adjustl(sys)).seq.'CpOsc') THEN
          call CoupledOscillatorHamiltonian(V,ndof)
 
 !     (modified) Henon-Heiles, with quartic terms to enforce boundedness
-      ELSEIF (sys(1:5).seq.'Henon') THEN
+      ELSEIF (trim(adjustl(sys)).seq.'Henon') THEN
          call HenonHeilesHamiltonian(V,ndof)
 
-!     HO2 (X electronic state) UB3LYP/aug-cc-pVTZ QFF
-!     PST (unpublished)
-      ELSEIF (sys(1:5).seq.'HO2gs') THEN
-         call ReadFFHamiltonian(V,'HO2gs',4,.TRUE.)
-
 !     Formaldehyde QFF (level of theory and source uncertain)
-      ELSEIF (sys(1:5).seq.'forma') THEN
-         call ReadFFHamiltonian(V,'forma',4,.FALSE.)
+      ELSEIF (trim(adjustl(sys)).seq.'forma') THEN
+         call ReadFFHamiltonian(V,sys,.FALSE.)
 
 !     CH3CN CCSD(T)/cc-pVTZ harmonic + B3LYP/cc-pVTZ cubic/quartic QFF
 !     Original: Begue et al, JPCA 109 (2005) 4611.
 !     interpreted by: Avila and Carrington, JCP 134 (2011) 054126.
-      ELSEIF (sys(1:5).seq.'ch3cn') THEN
-         call ReadFFHamiltonian(V,'ch3cn',4,.FALSE.)
+      ELSEIF (trim(adjustl(sys)).seq.'ch3cn') THEN
+         call ReadFFHamiltonian(V,sys,.FALSE.)
 
-!     Vinoxy radical (X electronic state) UB3LYP/aug-cc-pVTZ QFF
-!     PST et al, JCP 132 (2010) 114302
-      ELSEIF (sys(1:5).seq.'VinOx') THEN
-         call ReadFFHamiltonian(V,'VinOx',4,.TRUE.)
-
-!     Vinoxy radical (A electronic state) UB3LYP/aug-cc-pVTZ QFF
-!     PST et al, JCP 132 (2010) 114302
-      ELSEIF (sys(1:5).seq.'VinOA') THEN
-         call ReadFFHamiltonian(V,'VinOA',4,.TRUE.)
-
-!     Ethylene oxide CCSD(T)/cc-pVTZ harmonic + B3LYP/cc-pVTZ
-!     cubic/quartic QFF (this version includes the 1 cubic and 7
-!     quartic constants omitted from supporting info)
-!     Begue et al, JCP 127 (2007) 164115
-      ELSEIF (sys(1:5).seq.'EthOx') THEN
-         call ReadFFHamiltonian(V,'EthOx',4,.TRUE.)
-
-!     Propargyl peroxy radical (ace-T conformer, X electronic state)
-!     B3LYP/cc-pVDZ QFF
-!     PST et al, JPCA 114 (2010) 12437
-      ELSEIF (sys(1:5).seq.'PglOO') THEN
-         call ReadFFHamiltonian(V,'PglOO',4,.TRUE.)
-
-!     Ethyl peroxy radical (G conformer, X electronic state)
-!     UB3LYP/aug-cc-pVTZ QFF
-!     Melnik et al, JPCA 115 (2011) 13931
-      ELSEIF (sys(1:5).seq.'EtPGX') THEN
-         call ReadFFHamiltonian(V,'EtPGX',4,.TRUE.)
-
-!     Cyclopentadiene (all proteo) B971/TZ2P QFF
-!     Cane and Trombetti, PCCP 11 (2009) 2428
-      ELSEIF (sys(1:5).seq.'CPDie') THEN
-         call ReadFFHamiltonian(V,'CPDie',4,.TRUE.)
-
-!     Uracil "best estimate" harmonic + MP2/cc-pVTZ cubic/quartic QFF
-!     Harmonic terms from Puzzarini et al, JCTC 7 (2011) 3702
-!     cubic/quartic terms from Krasnoshchekov et al. JPCA 119 (2015) 6723.
-      ELSEIF (sys(1:5).seq.'urSer') THEN
-         call ReadFFHamiltonian(V,'urSer',4,.TRUE.)
-
-!     Napthalene-h8 B971/TZ2P QFF
-!     Cane et al, JPCA 111 (2007) 8218
-      ELSEIF (sys(1:5).seq.'napht') THEN
-         call ReadFFHamiltonian(V,'napht',4,.TRUE.)
-
-!     Napthalene B971/TZ2P QFF
-!     Mackie et al, JCP 143 (2015) 224314
-      ELSEIF (sys(1:5).seq.'nnaph') THEN
-         call ReadFFHamiltonian(V,'nnaph',4,.TRUE.)
-
-!     Anthracene B971/TZ2P QFF
-!     Mackie et al, JCP 143 (2015) 224314
-      ELSEIF (sys(1:5).seq.'anthr') THEN
-         call ReadFFHamiltonian(V,'anthr',4,.TRUE.)
-
-!     Tetracene B971/TZ2P QFF
-!     Mackie et al, JCP 143 (2015) 224314
-      ELSEIF (sys(1:5).seq.'tetra') THEN
-         call ReadFFHamiltonian(V,'tetra',4,.TRUE.)
-
+!     Arbitrary QFF, e.g. Gaussian format
       ELSE
-         call AbortWithError('GetPotential(): PES not recognized')
+         call ReadFFHamiltonian(V,sys,.TRUE.)
       ENDIF
+
+      call PrintPotentialConstants(V,verbosity)
 
       IF (ndof.ne.V(1)%nbas(1)) THEN
          write(*,'(X,A,X,I0)') '# DOF from input:',ndof
@@ -128,6 +66,37 @@
       ENDIF
 
       end subroutine GetPotential
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine PrintPotentialConstants(V,verbosity)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Prints potential constants read from file
+
+      implicit none
+      TYPE (Configs), INTENT(IN) :: V(:)
+      integer, intent(in) :: verbosity
+      integer :: i,j,k,ncoef,ncp
+      character*64 :: frmt
+
+!     Print out potential constants
+      IF (mpirank.eq.mpi_prnt_rank .and. verbosity.ge.1) THEN
+         ncp=SIZE(V)
+         DO k=1,ncp
+            ncoef=SIZE(V(k)%coef)
+            IF (ncoef.gt.1 .or. ANY(V(k)%qns(1,:).gt.0)) THEN
+               write(*,'(/X,A,I0/)') 'Potential constants, order: ',k
+               write(frmt,'(A,I0,A)') '(X,',k,'(I3,X),f26.12)'
+               DO i=1,ncoef
+                  write(*,frmt) (V(k)%qns(i,j),j=1,k),V(k)%coef(i)
+               ENDDO
+            ENDIF
+         ENDDO
+         write(*,*)
+      ENDIF
+
+      end subroutine PrintPotentialConstants
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -156,12 +125,6 @@
       V(1)%coef(1)=1.d0
       V(1)%coef(2)=-1.d0
       DEALLOCATE(nbas)
-
-      IF (mpirank.eq.mpi_prnt_rank) THEN
-         write(*,'(/X,A,I0/)') 'Potential constants, order: ',1
-         call PrintConfigs(V(1))
-         write(*,*)
-      ENDIF
 
       end subroutine DummyHamiltonian
 
@@ -216,12 +179,6 @@
          enddo
       enddo
 
-      IF (mpirank.eq.mpi_prnt_rank) THEN
-         write(*,'(/X,A,I0/)') 'Potential constants, order: ',2
-         call PrintConfigs(V(2))
-         write(*,*)
-      ENDIF
-
       end subroutine CoupledOscillatorHamiltonian
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -235,19 +192,18 @@
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: V(:)
       integer, intent(in)  :: ndof
       integer, allocatable :: nbas(:)
-      real*8, parameter    :: omega=1.d0 ! Harmonic frequencies
-      real*8, parameter    :: beta=0.2   ! Anharmonic constant
+      real(kind=8) :: omega,beta
       integer :: i,k
-      real*8  :: beta2
 
       IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(X,A)') "--> Setting up Henon-Heiles Hamiltonian"
 
 !     Potential constants (same for all DOF)
-      beta2=beta**2/16
+      omega=1.d0             ! Harmonic frequency
+      beta=1.d0/sqrt(80.d0)  ! Anharmonic constant
 
 !     Allocate configs. Generate a zero config for the linear terms
-      ALLOCATE(V(4),nbas(1))
+      ALLOCATE(V(3),nbas(1))
       nbas(:)=ndof
       call NewConfigs(V(1),nbas,1)
       DEALLOCATE(nbas)
@@ -262,18 +218,13 @@
       call NewConfigs(V(3),nbas,2*(ndof-1))
       DEALLOCATE(nbas)
 
-      ALLOCATE(nbas(4))
-      nbas(:)=ndof
-      call NewConfigs(V(4),nbas,3*(ndof-1))
-      DEALLOCATE(nbas)
-
 !     Diagonal Hamiltonian elements: omega values
       do i=1,ndof
          V(2)%qns(i,:)=i
          V(2)%coef(i)=0.5*omega
       enddo
 
-!     Cubic part of Hamiltonian (original HH Hamiltonian)
+!     Cubic part of Hamiltonian
       k=1
       do i=1,ndof-1
 !        q_i^2*q_i+1 term
@@ -286,36 +237,11 @@
          k=k+1
       enddo
 
-!     Quartic part of Hamiltonian (modified HH, to keep PES bound)
-      k=1
-      do i=1,ndof-1
-!        q_i^4 term
-         V(4)%qns(k,:)=i
-         V(4)%coef(k)=beta2
-         k=k+1
-!        q_i+1^4 term
-         V(4)%qns(k,:)=i+1
-         V(4)%coef(k)=beta2
-         k=k+1
-!        q_i^2*q_i+1^2 term
-         V(4)%qns(k,:)=(/i,i,i+1,i+1/)
-         V(4)%coef(k)=2*beta2
-         k=k+1
-      enddo
-
-      IF (mpirank.eq.mpi_prnt_rank) THEN
-         DO i=2,4
-            write(*,'(/X,A,I0/)') 'Potential constants, order: ',i
-            call PrintConfigs(V(i))
-         ENDDO
-         write(*,*)
-      ENDIF
-
       end subroutine HenonHeilesHamiltonian
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ReadFFHamiltonian(W,id,ncp,divide)
+      subroutine ReadFFHamiltonian(W,id,divide)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Reads Quartic Force Field Hamiltonian from files containing harmonic,
@@ -323,18 +249,18 @@
 
       implicit none
       TYPE (Configs), ALLOCATABLE,INTENT(OUT) :: W(:)
-      integer, intent(in) :: ncp
       logical, intent(in) :: divide
-      character(LEN=5), intent(in) :: id
+      character(len=*), intent(in) :: id
       integer, allocatable :: ncoef(:),qns(:),nbas(:),modpowr(:,:)
       integer :: i,j,k,u,ndof,ndf,InpStat,ReadStat
+      integer, parameter :: ncp=99 ! Max number of coupled DOF
       real*8  :: ftmp
-      character(LEN=20) :: fname
+      character(len=128) :: fname
       character*64 :: frmt
 
       IF (mpirank.eq.mpi_prnt_rank) THEN
-         write(*,'(/X,A,A/)')   '--> Reading force field for: ',id
-         write(*,'(X,A,X,I0)') 'Max nr of products per term:',ncp
+         write(*,'(/X,A,A)') '--> Reading force field for: ',&
+                              trim(adjustl(id))
       ENDIF
 
       ALLOCATE(ncoef(ncp),W(ncp))
@@ -347,9 +273,10 @@
          DO k=1,ncp
 
 !           Look for potential file with k coupled DOFs
-            write(fname,'(A5,I0,A5,A4)') 'pes/f',k,id,'.dat'
+            write(fname,'(A,I0,A,A)') 'pes/f',k,&
+                                        trim(adjustl(id)),'.dat'
             u=LookForFreeUnit()
-            open(u,status='old',file=fname,IOSTAT=InpStat)
+            open(u,status='old',file=trim(adjustl(fname)),IOSTAT=InpStat)
 
 !           Next k if file cannot be found
             IF (InpStat /= 0) CYCLE
@@ -376,11 +303,11 @@
       IF (mpirank.eq.mpi_prnt_rank) THEN
           DO k=1,ncp
              IF (ncoef(k).eq.0) CYCLE
-             write(*,'(X,2(A,X,I0,X))') &
+             write(*,'(5X,2(A,X,I0,X))') &
             'Potential constants of order',k,&
             'read from file :',ncoef(k)
           ENDDO
-          write(*,'(X,A,X,I0)') &
+          write(*,'(5X,A,X,I0/)') &
          'Number of DOF detected in force constant files:',ndof
       ENDIF
 
@@ -397,9 +324,10 @@
 
          IF (mpirank.eq.mpi_io_rank) THEN
 
-            write(fname,'(A5,I0,A5,A4)') 'pes/f',k,id,'.dat'
+            write(fname,'(A,I0,A,A)') 'pes/f',k,&
+                                        trim(adjustl(id)),'.dat'
             u=LookForFreeUnit()
-            open(u,status='old',file=fname)
+            open(u,status='old',file=trim(adjustl(fname)))
 
             DO i=1,ncoef(k)
                read(u,*) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
@@ -421,21 +349,6 @@
          call bcast(W(k)%qns,mpi_io_rank)
          call bcast(W(k)%coef,mpi_io_rank)
       ENDDO
-
-!     Print out potential constants
-      IF (mpirank.eq.mpi_prnt_rank) THEN
-
-         DO k=1,ncp
-            IF (ncoef(k).lt.1) CYCLE
-            write(*,'(/X,2A,I0/)') 'Potential constants (.dat file',&
-                                   ' ordering), order: ',k
-            write(frmt,'(A,I0,A)') '(X,',k,'(I3,X),f26.12)'
-            DO i=1,ncoef(k)
-               write(*,frmt) (W(k)%qns(i,j),j=1,k),W(k)%coef(i)
-            ENDDO
-         ENDDO
-
-      ENDIF
 
       end subroutine ReadFFHamiltonian
 
@@ -504,7 +417,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine TransformPES(V,vtype,alpha,omega)
+      subroutine ExtractOmegas(V,omega,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Transforms potential into "Morsified" coordinates with asymptotic long
@@ -512,150 +425,211 @@
 
       implicit none
       TYPE (Configs), INTENT(INOUT) :: V(:)
-      integer, allocatable, intent(out) :: vtype(:,:)
-      real*8, allocatable, intent(out)  :: alpha(:),omega(:)
+      real(kind=8), allocatable, intent(out) :: omega(:)
+      integer, intent(in)  :: verbosity
       integer, allocatable :: modpowr(:,:)
-      integer :: i,j,k,l,ndof,ndf,ncoup,vterms
-      real*8, allocatable  :: v1d(:,:)
+      integer :: i,ndof,ndf,mode
+
+!     Set parameters
+      ndof=V(1)%nbas(1)
+
+      ALLOCATE(omega(ndof))
+      omega=0.d0
+
+!     Extract the harmonic constant from the quadratic terms
+      DO i=1,SIZE(V(2)%coef)
+         call DistribModePower(V(2)%qns(i,:),modpowr)
+         ndf=SIZE(modpowr,1)
+         IF (ndf.eq.1) THEN  ! 1D potential term
+            mode=modpowr(1,1)
+            omega(mode)=omega(mode)+V(2)%coef(i)
+         ENDIF
+         deallocate(modpowr)
+      ENDDO
+
+      IF (mpirank.eq.mpi_prnt_rank .and. verbosity.ge.1) THEN
+         write(*,*) 'Harmonic constants extracted from PES:',&
+                    '(used to construct KEO)'
+         write(*,*)
+         write(*,'(X,A,9X,A))') 'DOF','Omega'
+         DO i=1,ndof
+            write(*,'(X,I3,X,f22.12)') i,2*omega(i)
+         ENDDO
+         write(*,*)
+      ENDIF
+
+      end subroutine ExtractOmegas
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine TransformPES(V,vtype,alpha,trans,afac,opmap,optable)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Transforms potential into "Morsified" coordinates with asymptotic long
+! range behavior
+
+      implicit none
+      TYPE (Configs), INTENT(INOUT) :: V(:)
+      TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: vtype(:)
+      character(len=64), intent(in) :: trans
+      real(kind=8), intent(in) :: afac
+      real(kind=8), allocatable, intent(out) :: alpha(:)
+      integer, intent(in)    :: opmap(:)
+      logical, intent(inout) :: optable(:,:,:)
+      integer, allocatable :: modpowr(:,:)
+      integer :: i,j,k,l,ndof,ndf,ncoup,ot
+      real(kind=8), allocatable  :: v1d(:,:)
       logical, allocatable :: sympes(:)
-      logical :: morsify
-      real*8  :: am1,afac
+      real(kind=8) :: am1
 
 !     Set parameters
       ncoup=SIZE(V)
       ndof=V(1)%nbas(1)
-      morsify=.FALSE.
-      afac=1.d0
 
-      ALLOCATE(v1d(ndof,ncoup),alpha(ndof),sympes(ndof),omega(ndof))
-      v1d=0.d0
+!     Error checking
+      IF ((trans .seq. 'poly-tanh') .or. &
+          (trans .seq. 'morse-tanh')) THEN
+         IF (ncoup.lt.4) THEN
+            write(*,'(A,I0,2A)') "Max order: ",ncoup," for this PES; ",&
+            "must be >= 4 to do 'poly-tanh' or 'morse-tanh' transform"
+         ENDIF
+      ENDIF
+
+      ALLOCATE(v1d(ndof,ncoup),alpha(ndof),sympes(ndof),vtype(ncoup))
+      alpha(:)=1.d0
+      v1d(:,:)=0.d0
+      sympes(:)=.FALSE.
 
 !     Loop over quadratic, cubic, quartic, ... terms in the PES
-      vterms=0
       DO k=1,ncoup
+!        Array for holding transformation types
+!        (note: NewConfigs() initializes this to zero)
+         call NewConfigs(vtype(k),V(k)%nbas,SIZE(V(k)%coef))
 
 !        If V(k) is a zero vector, skip
          IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
 
-!        Keep a tally of the total number of potential terms
-         vterms=vterms+SIZE(V(k)%coef)
-
-!        Extract the 1D potentials
-         DO i=1,SIZE(V(k)%coef)
-            call DistribModePower(V(k)%qns(i,:),modpowr)
-            ndf=SIZE(modpowr,1)
-            IF (ndf.eq.1) THEN  ! 1D potential term
-!              Make sure 1D PES contains no duplicate terms, which will
-!              lead to incorrect transformations
-               IF (v1d(modpowr(1,1),modpowr(1,2)).ne.0.d0) &
-                  call AbortWithError('TransformPES(): duplicate term')
-               v1d(modpowr(1,1),modpowr(1,2))=V(k)%coef(i)
-            ENDIF
-            deallocate(modpowr)
-         ENDDO
-      ENDDO
-
-!     Extract the harmonic constants before transforming the PES
-!     These are needed by FillHamilType() to form the KEO
-      omega(:)=v1d(:,2)
-
-!     Compute the value of the alpha parameter and transform the 1D PES
-      sympes(:)=.FALSE.
-      DO i=1,ndof
-!        No cubic and higher terms: set alpha to 1.0 and be done
-         IF (SIZE(v1d,2).lt.3) THEN
-            sympes(i)=.TRUE.
-            alpha(i)=1.d0
-!        Symmetric potential: compute alpha for coupling terms only
-         ELSEIF (v1d(i,3).eq.0.d0) THEN
-            sympes(i)=.TRUE.
-            alpha(i)=-1.5d0*v1d(i,4)/v1d(i,2)
-            alpha(i)=SIGN(sqrt(abs(alpha(i))),alpha(i))
-
-!        Asymmetric potential: compute alpha and morsify 1D terms
-         ELSE
-            alpha(i)=-v1d(i,3)/v1d(i,2)
-            am1=1.d0/alpha(i)
-!           Morse series reversal defs
-            am1=1.d0/alpha(i)
-            v1d(i,4) = am1*(am1*(am1*(am1*v1d(i,4) + 1.5d0*v1d(i,3)) + &
-                           (11.d0/12.d0)*v1d(i,2)) + 0.25d0*v1d(i,1))
-!           Alpha is chosen to give v1d(i,3) = 0. Enforce v1d(i,3) = 0
-!           here since the expression below may give a nonzero alpha
-!           due to roundoff error
-!            v1d(i,3) = am1*(am1*(am1*v1d(i,3) + v1d(i,2)) + &
-!                           (1.d0/3.d0)*v1d(i,1))
-            v1d(i,3) = 0.d0
-            v1d(i,2) = am1*(am1*v1d(i,2) + 0.5d0*v1d(i,1))
-            v1d(i,1) = am1*v1d(i,1)
+!        Extract the 1D potentials if transformation is to be made
+         IF (.not.(trans .seq. 'none')) THEN
+            DO i=1,SIZE(V(k)%coef)
+               call DistribModePower(V(k)%qns(i,:),modpowr)
+               ndf=SIZE(modpowr,1)
+               IF (ndf.eq.1) THEN  ! 1D potential term
+                  v1d(modpowr(1,1),modpowr(1,2))=&
+                  v1d(modpowr(1,1),modpowr(1,2))+V(k)%coef(i)
+               ENDIF
+               deallocate(modpowr)
+            ENDDO
          ENDIF
-         alpha(i)=abs(afac*alpha(i))  ! Scaled alpha
       ENDDO
 
-!     Assign the type and transform the PES
-!     Set all entries of vtype to zero by default (which forces using
-!     the polynomial potentials). These are modified if morsify=.TRUE.
-      ALLOCATE(vtype(vterms,ncoup))
-      vtype=0
+      IF (.not.(trans .seq. 'none')) THEN
 
-      IF (morsify) THEN
+!        Compute the value of the alpha parameter and transform the 1D PES
+         DO i=1,ndof
+!           Symmetric potential: compute alpha for coupling terms only
+            IF (v1d(i,3).eq.0.d0) THEN
+               sympes(i)=.TRUE.
+               alpha(i)=-1.5d0*v1d(i,4)/v1d(i,2)
+               alpha(i)=SIGN(sqrt(abs(alpha(i))),alpha(i))
 
-         IF (mpirank.eq.mpi_prnt_rank) THEN
-            write(*,'(/X,A,A/)') '--> The PES will be transformed ',&
-                 'into asymptotically-decaying coordinates'
+!           Asymmetric potential: compute alpha and morsify 1D terms
+            ELSE
+               alpha(i)=-v1d(i,3)/v1d(i,2)
+               am1=1.d0/alpha(i)
+!              Morse series reversal defs
+               v1d(i,4) = am1*(am1*(am1*(am1*v1d(i,4) + 1.5d0*v1d(i,3)) + &
+                              (11.d0/12.d0)*v1d(i,2)) + 0.25d0*v1d(i,1))
+!              Alpha is chosen to give v1d(i,3) = 0. Enforce v1d(i,3) = 0
+!              here since the expression below may give a nonzero alpha
+!              due to roundoff error
+!               v1d(i,3) = am1*(am1*(am1*v1d(i,3) + v1d(i,2)) + &
+!                              (1.d0/3.d0)*v1d(i,1))
+               v1d(i,3) = 0.d0
+               v1d(i,2) = am1*(am1*v1d(i,2) + 0.5d0*v1d(i,1))
+               v1d(i,1) = am1*v1d(i,1)
+            ENDIF
+            alpha(i)=abs(afac*alpha(i)) ! Scaled alpha
+         ENDDO
+
+      ENDIF
+
+      IF (mpirank.eq.mpi_prnt_rank .and. &
+          (.not.(trans .seq. 'none'))) THEN
+         write(*,'(/X,A,A/)') '--> The PES will be transformed ',&
+              'into asymptotically-decaying coordinates'
+         IF (trans .seq. 'poly-tanh') THEN 
             write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
-!                               ' y_i = 1-exp(-alpha_i*q_i)'
                                ' y_i = q_i'
             write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
                                ' y_i = q_i' 
             write(*,'(X,A,A)') ' d-D coupling potentials :',&
                                ' y_i = tanh(alpha_i*q_i)'
-            write(*,'(/X,A,f10.6,A)') &
-                           'DOF Sym Alpha-values (scaled by ',afac,')'
-            DO i=1,ndof
-               write(*,'(X,I3,2X,L1,2X,ES15.8)') i,sympes(i),alpha(i)
-            ENDDO
+         ELSEIF (trans .seq. 'morse-tanh') THEN
+            write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
+                               ' y_i = 1-exp(-alpha_i*q_i)'
+            write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
+                               ' y_i = q_i' 
+            write(*,'(X,A,A)') ' d-D coupling potentials :',&
+                               ' y_i = tanh(alpha_i*q_i)'
          ENDIF
+         write(*,'(/X,A,f10.6,A)') &
+                           'DOF Sym Alpha-values (scaled by ',afac,')'
+         DO i=1,ndof
+            write(*,'(X,I3,2X,L1,2X,ES15.8)') i,sympes(i),alpha(i)
+         ENDDO
+         write(*,*)
+      ENDIF
 
-         l=1
-         DO k=1,ncoup
+!     Check which PEO are present and transform the PES, if requested
+      DO k=1,ncoup
 
-!           If V(k) is a zero vector, skip
-            IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
+!        If V(k) is a zero vector, skip
+         IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
 
-!           Transform the PES
-            DO i=1,SIZE(V(k)%coef)
-               call DistribModePower(V(k)%qns(i,:),modpowr)
-               ndf=SIZE(modpowr,1)
+         DO i=1,SIZE(V(k)%coef)
+            call DistribModePower(V(k)%qns(i,:),modpowr)
+            ndf=SIZE(modpowr,1)
 
-!              1D potential term: copy from transformed v1d array
-               IF (ndf.eq.1) THEN
+!           1D potential terms:
+            IF (ndf.eq.1) THEN
 
-!                 Symmetric potential
-                  IF (sympes(modpowr(1,1))) THEN
-                     vtype(l,1)=0  ! Leave as power of q
+!              Symmetric 1D potential or no transformation
+               IF (sympes(modpowr(1,1)).or.(trans .seq. 'none')) THEN
+                  ot=findival(opmap,0) ! Leave as power of q
+!              Asymmetric 1D potential, poly-tanh
+               ELSEIF (trans .seq. 'poly-tanh') THEN
+                  ot=findival(opmap,0) ! Leave as power of q
+!              Asymmetric 1D potential, morse-tanh
+               ELSEIF (trans .seq. 'morse-tanh') THEN
+                  V(k)%coef(i)=v1d(modpowr(1,1),modpowr(1,2))
+                  ot=findival(opmap,2) ! morse
+               ENDIF
 
-!                 Asymmetric potential
-                  ELSE
-!                     V(k)%coef(i)=v1d(modpowr(1,1),modpowr(1,2))
-!                     vtype(l,1)=2  ! morse
-                     vtype(l,1)=0  ! Leave as power of q
-                  ENDIF
-!              Coupling term: transform into tanh series using alphas
+            ELSE
+!              Coupling terms
+               IF (trans .seq. 'none') THEN
+                  ot=findival(opmap,0) ! Leave as power of q
                ELSE
-!                 Transform/assign each factor in the product operator
+                  ot=findival(opmap,1) ! tanh
                   DO j=1,ndf
                      V(k)%coef(i)=V(k)%coef(i)/&
                                   alpha(modpowr(j,1))**modpowr(j,2)
-                     vtype(l,j)=1  ! tanh
                   ENDDO
                ENDIF
 
-               deallocate(modpowr)
-               l=l+1
+            ENDIF
+
+!           Record primitive operator as present
+            DO j=1,ndf
+               IF (.not.optable(modpowr(j,1),modpowr(j,2),ot)) &
+                  optable(modpowr(j,1),modpowr(j,2),ot)=.TRUE.
             ENDDO
+
+            vtype(k)%qns(i,1:ndf)=ot
+            deallocate(modpowr)
          ENDDO
-      ENDIF
+      ENDDO
 
       DEALLOCATE(v1d,sympes)
 

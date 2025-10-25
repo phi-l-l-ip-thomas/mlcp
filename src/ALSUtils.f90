@@ -13,41 +13,66 @@
       USE LINALG
 
       implicit none
-      real*8, private  :: alsutils_time=0.d0
-      logical, private :: ALSUTILS_SETUP=.FALSE.
+      real(kind=8), private :: als_penalty=-1.d0
+      real(kind=8), allocatable, private :: alsortho_time(:)
+      real(kind=8), allocatable, private :: alssumlcvec_time(:)
+      character(len=64), private :: als_solver='uninitialized'
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SetupALSUtils()
+      subroutine Init_ALSUtils_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      alsutils_time=0.d0
-      ALSUTILS_SETUP=.TRUE.
+      allocate(alsortho_time(mpinodes),alssumlcvec_time(mpinodes))
+      alsortho_time(:) = 0.d0
+      alssumlcvec_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine SetupALSUtils
+      end subroutine Init_ALSUtils_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeALSUtils()
+      subroutine Dispose_ALSUtils_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
+      IF (.NOT. MODULE_SETUP) call Init_ALSUtils_Module()
+      call Get_MPI_Timings('ALS orthogonalization',alsortho_time)
+      call Get_MPI_Timings('ALS vector summation',alssumlcvec_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(alsortho_time,alssumlcvec_time)
 
-!     Set up the module if it was not set up already
-      ALSUTILS_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total reduction time (ALSUTILS)   (s)',&
-                            alsutils_time
+      end subroutine Dispose_ALSUtils_Module
 
-      end subroutine DisposeALSUtils
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine set_als_settings_ALSUtils(penalty,solver)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets the ALS regularization penalty for the module
+
+      implicit none
+      real(kind=8), intent(in) :: penalty
+      character(len=64), intent(in) :: solver
+
+      if (penalty.gt.1.d0 .or. penalty.lt.0.d0) then
+         write(*,'(A,ES11.4,A)') 'ALS regularization penalty ',&
+         penalty,' must be in range: 0 <= penalty <= 1'
+         call AbortWithError('set_als_settings_ALSUtils(): wrong value')
+      endif
+
+      als_penalty=penalty
+      als_solver=solver
+
+      end subroutine set_als_settings_ALSUtils
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -59,8 +84,6 @@
       implicit none
       integer, intent(in) :: rG,rF,n,lowmem
       real*8 :: getALSOrthoMem
-
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
 
 !     Calculate memory usage
       IF (lowmem.eq.3) THEN
@@ -75,24 +98,22 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function getALSUpdateMem(rG,rF,n,ncpu,lowmem)
+      function getALSUpdateMem(rG,rF,n,npara,lowmem)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Determines memory needed for ALS
 
       implicit none
-      integer, intent(in) :: rG,rF,n,ncpu,lowmem
+      integer, intent(in) :: rG,rF,n,npara,lowmem
       real*8  :: getALSUpdateMem
-
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
 
 !     Calculate memory usage
       IF (lowmem.eq.3) THEN
 !        Memory allocated for 2 BB, bjk, IPV
-         getALSUpdateMem=REAL(ncpu)*rF*(2*rF+n+1)
+         getALSUpdateMem=REAL(npara)*rF*(2*rF+n+1)
       ELSE
 !        Memory allocated for PS, 2 BB, bjk, IPV
-         getALSUpdateMem=REAL(ncpu)*rF*(rG+2*rF+n+1)
+         getALSUpdateMem=REAL(npara)*rF*(rG+2*rF+n+1)
       ENDIF
 
       end function getALSUpdateMem
@@ -110,8 +131,11 @@
       integer, intent(in)  :: nitn,lowmem
       integer, intent(in), optional :: svec
       integer :: s2
+      real(kind=8) :: ti1,ti2
 
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
+      IF (.NOT. MODULE_SETUP) call Init_ALSUtils_Module()
+
+      call CPU_TIME(ti1)
 
 !     Select the first vector in the block to be orthogonalized
       IF (present(svec)) THEN
@@ -131,6 +155,9 @@
          call ALS_ORTHO_2(Q,nitn,s2)
       ENDIF
 
+      call CPU_TIME(ti2)
+      alsortho_time=alsortho_time+ti2-ti1
+
       end subroutine ALS_ORTHO_alg
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -146,8 +173,11 @@
       TYPE (CP), INTENT(IN)    :: Q(:)
       real*8, intent(in)   :: coefs(:)
       integer, intent(in)  :: nitn,lowmem
+      real(kind=8) :: ti1,ti2
 
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
+      IF (.NOT. MODULE_SETUP) call Init_ALSUtils_Module()
+
+      call CPU_TIME(ti1)
 
       IF (lowmem.ge.0 .and. lowmem.le.2) THEN
          call ALS_SUMLCVEC_2(F,Q,coefs,nitn)
@@ -159,6 +189,9 @@
          write(*,'(X,A/)') 'ALS_SUMLCVEC_2() selected by default...'
          call ALS_SUMLCVEC_2(F,Q,coefs,nitn)
       ENDIF
+
+      call CPU_TIME(ti2)
+      alssumlcvec_time=alssumlcvec_time+ti2-ti1
 
       end subroutine ALS_SUMLCVEC_alg
 
@@ -177,13 +210,12 @@
       integer, intent(in)  :: nitn,svec
       integer, allocatable :: nbas(:),ranks(:,:)
       real*8, allocatable  :: coefs(:),BB(:,:),PS(:,:),bjk(:,:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
+      real*8  :: rnorm,gtmp
       integer :: iv,nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,m,n,gst,itn
       integer :: nr
       character(60) :: frmt
 
       IF (nitn.eq.0) return
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
 
 !     Set parameters
       nbloc=SIZE(Q)
@@ -218,19 +250,13 @@
 
          IF (iv.lt.svec) CYCLE
 
-!        Penalty to avoid bad conditioning
-         valpen=maxval(Q(iv)%coef)*1.d-10
-
          ALLOCATE(PS(rG,rF))
 
 !        PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
 !$omp parallel
-!$omp do private(l,t1,t2)
+!$omp do private(l)
          DO l=1,iv
-            call CPU_TIME(t1)            
             call CONSTPT(Q(iv),Q(l),0,PS(ranks(l,1):ranks(l,2),1:rF))
-            call CPU_TIME(t2)
-            alsutils_time=alsutils_time+t2-t1
          ENDDO
 !$omp enddo
 !$omp end parallel
@@ -241,15 +267,12 @@
 !           Loop over dimension k
             gst=0
             DO k=1,ndim
-               call CPU_TIME(t1)
-
                n=Q(iv)%nbas(k)
 
 !              Compute the Gram-Schmidt expansion coefficients
 !$omp parallel
-!$omp do private(l,rT,i,j,t1,t2)
+!$omp do private(l,rT,i,j)
                DO l=1,iv-1
-                  call CPU_TIME(t1)
                   coefs(l)=0.d0
                   rT=ranks(l,3)
                   DO i=1,rF
@@ -258,8 +281,6 @@
                                  Q(iv)%coef(i)*Q(l)%coef(j)
                      ENDDO
                   ENDDO
-                  call CPU_TIME(t2)
-                  alsutils_time=alsutils_time+t2-t1
                ENDDO
 !$omp enddo
 !$omp end parallel
@@ -267,21 +288,17 @@
 !              Downdate PS (remove the k-th DOF)
                ALLOCATE(BB(rG,rF))
 !$omp parallel
-!$omp do private(l,rT,t1,t2)
+!$omp do private(l,rT)
                DO l=1,iv
-                  call CPU_TIME(t1)
                   rT=ranks(l,3)
                   call CONSTPk(Q(iv),Q(l),k,&
                                 BB(ranks(l,1):ranks(l,2),1:rF))
                   PS(ranks(l,1):ranks(l,2),1:rF)= &
                   PS(ranks(l,1):ranks(l,2),1:rF)/ &
                   BB(ranks(l,1):ranks(l,2),1:rF)
-                  call CPU_TIME(t2)
-                  alsutils_time=alsutils_time+t2-t1
                ENDDO
 !$omp enddo
 !$omp end parallel
-               call CPU_TIME(t1)
                DEALLOCATE(BB)
 
 !              Copy the last rF x rF block of PS into BB
@@ -292,12 +309,9 @@
 !              requires updating the Gram-Schmidt coefficients
                ALLOCATE(bjk(rF,n))
                nr=n*rF
-               call CPU_TIME(t2)
-               alsutils_time=alsutils_time+t2-t1
 !$omp parallel
-!$omp do private(m,i,ir,imod,l,rT,j,t1,t2)
+!$omp do private(m,i,ir,imod,l,rT,j)
                DO m=1,nr
-                  call CPU_TIME(t1)
                   i=(m-1)/n+1
                   ir=mod(m-1,n)+1
                   imod=gst+ir
@@ -309,16 +323,13 @@
                            Q(l)%base(imod,j)*PS(ranks(l,1)+j-1,i)
                      ENDDO
                   ENDDO
-                  call CPU_TIME(t2)
-                  alsutils_time=alsutils_time+t2-t1
                ENDDO
 !$omp enddo
 !$omp end parallel
-               call CPU_TIME(t1)
 
 !              Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !              (B includes all inner products except the kth)
-               call SolveLinSysLU(BB,bjk,valpen)
+               call SolveLinSys(BB,bjk,als_penalty,als_solver)
                DEALLOCATE(BB)
 
 !              Construct improved F
@@ -334,25 +345,19 @@
 
 !              Update PS (calc inner products with new fs for k-th DOF)
                ALLOCATE(BB(rG,rF))
-               call CPU_TIME(t2)
-               alsutils_time=alsutils_time+t2-t1
 
 !$omp parallel
-!$omp do private(l,rT,t1,t2)
+!$omp do private(l,rT)
                DO l=1,iv
-                  call CPU_TIME(t1)
                   rT=ranks(l,3)
                   call CONSTPk(Q(iv),Q(l),k,&
                                 BB(ranks(l,1):ranks(l,2),1:rF))
                   PS(ranks(l,1):ranks(l,2),1:rF)= &
                   PS(ranks(l,1):ranks(l,2),1:rF)* &
                   BB(ranks(l,1):ranks(l,2),1:rF)
-                  call CPU_TIME(t2)
-                  alsutils_time=alsutils_time+t2-t1
                ENDDO
 !$omp enddo
 !$omp end parallel
-               call CPU_TIME(t1)
                DEALLOCATE(BB)
 
 !              Normalization
@@ -366,9 +371,6 @@
                ENDDO
                rnorm=1/sqrt(abs(rnorm))
                Q(iv)%coef=rnorm*Q(iv)%coef
-
-               call CPU_TIME(t2)
-               alsutils_time=alsutils_time+t2-t1
 
                gst=gst+n
             ENDDO  ! loop over k
@@ -397,11 +399,10 @@
       integer, allocatable :: nbas(:),ind(:,:)
       real*8, allocatable  :: coefs(:)
       real*8, allocatable  :: BB(:,:),BBk(:,:),BBmem(:,:),bjk(:,:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
+      real*8  :: rnorm,gtmp
       integer :: iv,nbloc,rF,rT,ndim,i,j,k,l,m,n,itn,gik,gfk
 
       IF (nitn.eq.0) return
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
 
 !     Set parameters
       nbloc=SIZE(Q)
@@ -417,8 +418,6 @@
 !     Normalize the first vector
       call NORMALIZE(Q(1))
 
-      call CPU_TIME(t1)
-
 !     Store pointers for the basis indices for each DOF 
       ALLOCATE(ind(ndim,2),coefs(nbloc))
       ind(1,1)=1
@@ -430,9 +429,6 @@
 
 !     Loop over vectors in the block
       DO iv=svec,nbloc
-
-!        Penalty to avoid bad conditioning
-         valpen=maxval(Q(iv)%coef)*1.d-10
 
          rF=SIZE(Q(iv)%coef)
          ALLOCATE(BBmem(rF,rF))
@@ -500,7 +496,7 @@
 
 !              Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !              (B includes all inner products except the kth)
-               call SolveLinSysLU(BB,bjk,valpen)
+               call SolveLinSys(BB,bjk,als_penalty,als_solver)
                DEALLOCATE(BB)
 
 !              Construct improved F
@@ -535,9 +531,6 @@
 
       DEALLOCATE(coefs)
 
-      call CPU_TIME(t2)
-      alsutils_time=alsutils_time+t2-t1
-
       end subroutine ALS_ORTHO_3
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -555,12 +548,11 @@
       integer, intent(in)  :: nitn,svec
       integer, allocatable :: nbas(:),ranks(:,:)
       real*8, allocatable  :: coefs(:),BB(:,:),PS(:,:),bjk(:,:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
+      real*8  :: rnorm,gtmp
       integer :: iv,nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,m,n,gst,itn
       integer :: nr
 
       IF (nitn.eq.0) return
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
 
 !     Set parameters
       nbloc=SIZE(Q)
@@ -582,8 +574,6 @@
 !     Normalize the first vector
       call NORMALIZE(Q(1))
 
-      call CPU_TIME(t1)
-
 !     Loop over vectors in the block
       DO iv=2,nbloc
 
@@ -596,9 +586,6 @@
          rF=ranks(iv,3)
 
          IF (iv.lt.svec) CYCLE
-
-!        Penalty to avoid bad conditioning
-         valpen=maxval(Q(iv)%coef)*1.d-10
 
          ALLOCATE(PS(rG,rF))
 
@@ -665,7 +652,7 @@
 
 !              Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !              (B includes all inner products except the kth)
-               call SolveLinSysLU(BB,bjk,valpen)
+               call SolveLinSys(BB,bjk,als_penalty,als_solver)
                DEALLOCATE(BB)
 
 !              Construct improved F
@@ -712,9 +699,6 @@
 
       DEALLOCATE(ranks,coefs)
 
-      call CPU_TIME(t2)
-      alsutils_time=alsutils_time+t2-t1
-
       end subroutine ALS_ORTHOb
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -734,21 +718,15 @@
       integer, intent(in)  :: nitn
       integer, allocatable :: nbas(:),ranks(:,:)
       real*8, allocatable  :: BBmem(:,:),BB(:,:),PS(:,:),bjk(:,:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
+      real*8  :: rnorm,gtmp
       integer :: nbloc,rG,rF,rT,ndim,i,j,ir,imod,k,l,n,gst,itn
 
       IF (nitn.eq.0) return
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
-
-      call CPU_TIME(t1)
 
 !     Set parameters
       nbloc=SIZE(Q)
       ndim=SIZE(Q(1)%nbas)
       rF=SIZE(F%coef)
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     Store a pointer for the ranks of the vectors
       ALLOCATE(ranks(nbloc,3))
@@ -815,7 +793,7 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
             DEALLOCATE(BB)
 
 !           Construct improved F
@@ -862,9 +840,6 @@
 
       DEALLOCATE(PS,BBmem,ranks)
 
-      call CPU_TIME(t2)
-      alsutils_time=alsutils_time+t2-t1
-
       end subroutine ALS_SUMLCVEC_2
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -884,22 +859,16 @@
       integer, intent(in)  :: nitn
       integer, allocatable :: nbas(:),ranks(:,:),ind(:,:)
       real*8, allocatable  :: BBmem(:,:),BB(:,:),bjk(:,:),PS(:)
-      real*8  :: valpen,rnorm,gtmp,t1,t2
+      real*8  :: rnorm,gtmp
       integer :: nbloc,rF,rT,ndim,i,j,ir,k,l,m,n,itn
       integer :: mmod,gi,gf,gik,gfk
 
       IF (nitn.eq.0) return
-      IF (.NOT. ALSUTILS_SETUP) call SetupALSUtils()
-
-      call CPU_TIME(t1)
 
 !     Set parameters
       nbloc=SIZE(Q)
       ndim=SIZE(Q(1)%nbas)
       rF=SIZE(F%coef)
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     Store pointers for the ranks of the vectors
       ALLOCATE(ranks(nbloc,3))
@@ -976,7 +945,7 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
             DEALLOCATE(BB)
 
 !           Construct improved F
@@ -1008,9 +977,6 @@
       F%coef=rnorm*F%coef
 
       DEALLOCATE(BBmem,PS,ranks,ind)
-
-      call CPU_TIME(t2)
-      alsutils_time=alsutils_time+t2-t1
 
       end subroutine ALS_SUMLCVEC_3
 

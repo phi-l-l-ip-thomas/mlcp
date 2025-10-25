@@ -17,63 +17,77 @@
       USE CPCONFIG
 
       implicit none
-      real*8, private  :: anal_time=0.d0
-      logical, private :: ANAL_SETUP=.FALSE.
+      real(kind=8), allocatable, private :: module_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine InitializeAnalModule()
+      subroutine Init_Analyzer_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      anal_time = 0.d0
-      ANAL_SETUP = .TRUE.
+      allocate(module_time(mpinodes))
+      module_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine InitializeAnalModule
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine DisposeAnalModule()
+      end subroutine Init_Analyzer_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      implicit none
-
-      IF (.NOT. ANAL_SETUP) call InitializeAnalModule()
-
-      ANAL_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total wave-function analysis time (s)',&
-                             anal_time
-
-      end subroutine DisposeAnalModule
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine AnalyzePsi(il,im,eigv,delta,Q,Ham,ML)
+      subroutine Dispose_Analyzer_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
-      TYPE (MLtree), INTENT(IN) :: ML
-      TYPE (CP), INTENT(IN)  :: Q(:)
+
+      IF (.NOT. MODULE_SETUP) call Init_Analyzer_Module()
+      call Get_MPI_Timings('Analyzer module',module_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(module_time)
+
+      end subroutine Dispose_Analyzer_Module
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine AnalyzePsi(im,eigv,delta,Q,Ham)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      TYPE (CP), INTENT(IN) :: Q(:)
       TYPE (Hamiltonian), INTENT(INOUT) :: Ham
-      integer, intent(in) :: il,im
-      real*8, intent(in)  :: eigv(:),delta(:)
+      integer, intent(in) :: im
+      real(kind=8), intent(in)  :: eigv(:),delta(:)
+      real(kind=8) :: ti1,ti2
+      integer, allocatable :: qns(:,:)
 
-      IF (.NOT. ANAL_SETUP) call InitializeAnalModule()
+      IF (.NOT. MODULE_SETUP) call Init_Analyzer_Module()
 
-      call AnalyzeConfigs(Q,il,im,eigv,Ham,ML)
+      call CPU_TIME(ti1)
+
+      call AnalyzeConfigs(Q,im,eigv,Ham)
 !!! EXPERIMENTAL: use with caution
-!      call AssignConfigs(Q,Ham%eig(il,im)%assgn)
-!      call AssignConfigsPlus(Q,Ham%eig(il,im)%assgn,il,im,Ham,eigv,ML)
+!      call AssignConfigs(Q,qns)
+!      call AssignConfigsPlus(Q,qns,im,Ham,eigv)
 !!! END EXPERIMENTAL
-      call AnalyzeRank1(Q,Ham%eig(il,im)%assgn)
-      call PrintAssignments(il,im,eigv,delta,Ham,ML)
+      call AnalyzeRank1(Q,qns)
+      call SetEigenbasis(Ham%nt,im,qns,eigv,delta)
+      deallocate(qns)
+
+      IF (Ham%nt(im)%nHterm().gt.0) THEN
+         IF (mpirank.eq.mpi_prnt_rank) THEN
+            write(*,'(/X,2A/)') 'Eigenvectors, assignments based on ',&
+                                'rank-1 approximation :'
+            call Ham%nt(im)%showeigen()
+         ENDIF
+      ENDIF
+
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
       end subroutine AnalyzePsi
 
@@ -88,11 +102,10 @@
       TYPE (CP), INTENT(IN)  :: Q(:)
       TYPE (CP) :: v
       integer, allocatable, intent(out) :: qns(:,:)
+      character(len=64), parameter :: solver='LU'
       real*8, parameter   :: redtol=1.d-12
       integer :: i,j,k,ndof,nev,maxind,gst
-      real*8  :: maxcoef,t1,t2
-
-      call CPU_TIME(t1)
+      real*8  :: maxcoef
 
 !     Set parameters
       nev=SIZE(Q)
@@ -100,23 +113,19 @@
 
 !     Extract the assignment from a rank-1 approximation of each
 !     eigenfunction (if > 2 DOFs, use SR1 with many steps since
-!     SR1 exits if the coef converges)
-      call SetReductionParameters(1,100,redtol,.FALSE.,'SVD','SR1')
-
-!     Assignment matrix
-      ALLOCATE(qns(nev,ndof))
+!     SR1 exits if the coef converges; note that als_penalty and
+!     als_solver are irrelevant since SR1 does not use them.)
+      call SetReductionParameters(1,100,redtol,.FALSE.,'SVD','SR1',&
+                                  1.d-10,solver)
 
 !     Loop over eigenstates and reduce each vector to rank-1. Then
 !     extract the index of the most important coefficient for 
 !     each sub-mode basis function
-
+      ALLOCATE(qns(nev,ndof))
       DO i=1,nev
          v=CopyCP(Q(i))
-         call CPU_TIME(t2)
-         anal_time=anal_time+t2-t1
          call reduc(v)
          call NORMALIZE(v)
-         call CPU_TIME(t1)
 
          gst=0
          DO j=1,ndof
@@ -134,50 +143,39 @@
          call FlushCP(v)
       ENDDO
 
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
-
       end subroutine AnalyzeRank1
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine AnalyzeConfigs(Q,il,im,eigv,Ham,ML)
+      subroutine AnalyzeConfigs(Q,im,eigv,Ham)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Computes/prints dominant product configurations of the wavefunction
 
       implicit none
-      TYPE (CP), INTENT(IN)  :: Q(:)
-      TYPE (MLtree), INTENT(IN) :: ML
+      TYPE (CP), INTENT(IN) :: Q(:)
       TYPE (Hamiltonian), INTENT(IN) :: Ham
       TYPE (Configs) :: v
-      real*8, intent(in)   :: eigv(:)
-      integer, intent(in)  :: il,im
+      real(kind=8), intent(in)   :: eigv(:)
+      integer, intent(in)  :: im
       integer, allocatable :: qns(:)
-      integer :: i,j,k,nev,nsubm,nagn,mst,mfi,ncoef
+      integer :: i,j,k,nev,nsubm,ndof,ncoef
       character*64 :: frmt
       integer, parameter :: ncoefmax=16
-      real*8, parameter  :: printtol=5.d-2
-      real*8  :: t1,t2
+      real(kind=8), parameter :: printtol=5.d-2
 
       nev=SIZE(Q)
       nsubm=SIZE(Q(1)%nbas)
+      ndof=Ham%nt(im)%ndof()
 
       IF (nsubm.lt.2) RETURN
-
-      call CPU_TIME(t1)
-
-!     Print mode numbers
-      mst=firstmode(il,1,im,ML)
-      mfi=lastmode(il,1,im,ML)
-      nagn=mfi-mst+1
 
       IF (mpirank.eq.mpi_prnt_rank) THEN
          write(*,'(/X,A,ES11.4,A,I0,A/)') &
          'Eigenvectors: configurations with |c|^2 larger than : ',&
          printtol,' x largest coef, or largest ',ncoefmax,' coefs'
-         write(frmt,*) '(A,X,',nagn,'(I2,X))'
-         write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi)
+         write(frmt,*) '(A,X,',ndof,'(I2,X))'
+         write(*,frmt) 'Mode:',(Ham%nt(im)%dofs(j),j=1,ndof)
       ENDIF
 
       DO i=1,nev
@@ -185,12 +183,12 @@
          call GetConfigList(Q(i),100,v)
 
 !        Get and print the full assignment of the largest coefficient
-         call GetFullAssignment(il,im,Ham,ML,v%qns(1,:),qns)
+         call ConstructAssignment(Ham%nt,im,v%qns(1,:),qns)
          IF (mpirank.eq.mpi_prnt_rank) THEN
-            write(frmt,*) '(I4,A,',3*nagn+1,'X,2(f19.12,X))'
+            write(frmt,*) '(I4,A,',3*ndof+1,'X,2(f19.12,X))'
             write(*,frmt) i,')',eigv(i),eigv(i)-eigv(1)
-            write(frmt,'(A,I0,A)') '(6X,',nagn,'(I2,X),4X,f6.3)'
-            write(*,frmt) (qns(k)-1,k=1,nagn),v%coef(1)**2
+            write(frmt,'(A,I0,A)') '(6X,',ndof,'(I2,X),4X,f6.3)'
+            write(*,frmt) (qns(k),k=1,ndof),v%coef(1)**2
          ENDIF
          DEALLOCATE(qns)
 
@@ -199,18 +197,15 @@
          DO j=2,SIZE(v%coef)
             IF (v%coef(j)**2.gt.printtol*v%coef(1)**2) THEN
                ncoef=ncoef+1
-               call GetFullAssignment(il,im,Ham,ML,v%qns(j,:),qns)
+               call ConstructAssignment(Ham%nt,im,v%qns(j,:),qns)
                IF (mpirank.eq.mpi_prnt_rank) &
-                  write(*,frmt) (qns(k)-1,k=1,nagn),v%coef(j)**2
+                  write(*,frmt) (qns(k),k=1,ndof),v%coef(j)**2
                DEALLOCATE(qns)
                IF (ncoef.eq.ncoefmax) EXIT
             ENDIF
          ENDDO
          call FlushConfigs(v)
       ENDDO
-
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
 
       end subroutine AnalyzeConfigs
 
@@ -230,12 +225,9 @@
       integer :: i,j,k,nev,nsubm,nfound,assgn
       integer, parameter :: cmax=100
       logical :: found,success
-      real*8  :: t1,t2
 
       nev=SIZE(Q)
       nsubm=SIZE(Q(1)%nbas)
-
-      call CPU_TIME(t1)
 
 !!!  TO DO: change below to avoid unnecessarily large arrays
       ALLOCATE(weights(nev,nev*cmax))
@@ -277,10 +269,7 @@
       ALLOCATE(wtmp(nev,nfound))
       wtmp(:,:)=weights(:,:nfound)
       DEALLOCATE(weights)
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
       weights=AssignMatrix(wtmp) ! <--Munkres called here
-      call CPU_TIME(t1)
       DEALLOCATE(wtmp)
 
 !     Extract assignments and store in qns array
@@ -295,29 +284,25 @@
       DEALLOCATE(weights,avec)
       call FlushConfigs(w)
 
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
-
       end subroutine AssignConfigs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine AssignConfigsPlus(Q,qns,il,im,Ham,eigv,ML)
+      subroutine AssignConfigsPlus(Q,qns,im,Ham,eigv)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Assign states via dominant configurations, using Munkres algorithm
 
       implicit none
       TYPE (CP), INTENT(IN)     :: Q(:)
-      TYPE (MLtree), INTENT(IN) :: ML
       TYPE (Hamiltonian), INTENT(IN) :: Ham
       TYPE (Configs) :: v,w
       real*8, intent(in)   :: eigv(:)
-      integer, intent(in)  :: il,im
+      integer, intent(in)  :: im
       integer, allocatable, intent(out) :: qns(:,:)
       integer, allocatable :: avec(:),avec2(:),qtmp(:),ntmp(:)
       real*8, allocatable  :: weights(:,:),wtmp(:,:)
-      integer :: i,j,k,nev,nsubm,vsubm,nfound,assgn,mst,mfi
+      integer :: i,j,k,nev,nsubm,nfound,assgn,ndof
       integer, parameter :: cmax=100
       logical :: found,success
       real*8  :: t1,t2
@@ -325,8 +310,6 @@
 
       nev=SIZE(Q)
       nsubm=SIZE(Q(1)%nbas)
-
-      call CPU_TIME(t1)
 
 !!!  TO DO: change below to avoid unnecessarily large arrays
       ALLOCATE(weights(nev,nev*cmax))
@@ -368,10 +351,7 @@
       ALLOCATE(wtmp(nev,nfound))
       wtmp(:,:)=weights(:,:nfound)
       DEALLOCATE(weights)
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
       weights=AssignMatrix(wtmp) ! <--Munkres called here
-      call CPU_TIME(t1)
 
 !     Extract assignments and store in qns array
       ALLOCATE(qns(nev,nsubm))
@@ -381,9 +361,10 @@
       IF (nsubm.gt.1) THEN
               
 !        Instead of w, need configs corresponding to 1D functions from
-!        GetFullAssignment(). Call using the 1st one to get correct
+!        ConstructAssignment(). Call using the 1st one to get correct
 !        width, then fill the rest
-         call GetFullAssignment(il,im,Ham,ML,w%qns(1,:),qtmp)
+         ndof=Ham%nt(im)%ndof()
+         call ConstructAssignment(Ham%nt,im,w%qns(1,:),qtmp)
          ALLOCATE(ntmp(SIZE(qtmp)))
          ntmp(:)=16384
          call NewConfigs(v,ntmp,nfound)
@@ -391,7 +372,7 @@
          v%qns(1,:)=qtmp(:)
          DEALLOCATE(ntmp,qtmp)
          DO i=2,nfound
-            call GetFullAssignment(il,im,Ham,ML,w%qns(i,:),qtmp)
+            call ConstructAssignment(Ham%nt,im,w%qns(i,:),qtmp)
             v%qns(i,:)=qtmp(:)
             DEALLOCATE(qtmp)
          ENDDO
@@ -402,22 +383,17 @@
          IF (success) THEN
             IF (.not.ALL(avec(:).eq.avec2(:))) THEN
                write(*,'(/X,A/)') 'States reassigned using energies:'
-               mst=firstmode(il,1,im,ML)
-               mfi=lastmode(il,1,im,ML)
-               vsubm=SIZE(v%qns,2)
-
-               write(frmt,*) '(A,X,',vsubm,'(I2,X),3X,',vsubm,&
+               write(frmt,*) '(A,X,',ndof,'(I2,X),3X,',ndof,&
                              '(I2,X),5X,A)'
-               write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi),&
-                             (ML%resort(j),j=mst,mfi),'Energy'
-
-               write(frmt,*) '(I4,A,X,',vsubm,'(I2,X),A,X,',&
-                             vsubm,'(I2,X),f19.12)'
+               write(*,frmt) 'Mode:',(Ham%nt(im)%dofs(j),j=1,ndof),&
+                             (Ham%nt(im)%dofs(j),j=1,ndof),'Energy'
+               write(frmt,*) '(I4,A,X,',ndof,'(I2,X),A,X,',&
+                             ndof,'(I2,X),f19.12)'
                DO i=1,nev
                   IF (avec2(i).ne.avec(i)) &
                      write(*,frmt) i,')',&
-                     (v%qns(avec(i),j)-1,j=1,vsubm),'->',&
-                     (v%qns(avec2(i),j)-1,j=1,vsubm),eigv(i)
+                     (v%qns(avec(i),j),j=1,ndof),'->',&
+                     (v%qns(avec2(i),j),j=1,ndof),eigv(i)
                ENDDO
                avec(:)=avec2(:)
             ENDIF
@@ -438,9 +414,6 @@
 
       DEALLOCATE(weights,wtmp,avec)
       call FlushConfigs(w)
-
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
 
       end subroutine AssignConfigsPlus
 
@@ -827,95 +800,6 @@
       DEALLOCATE(rowperm,colperm,tmpcfg)
 
       end subroutine PermuteArrays
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine PrintAssignments(il,im,eigv,delta,Ham,ML)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      implicit none
-      TYPE (MLtree), INTENT(IN) :: ML
-      TYPE (Hamiltonian), INTENT(IN) :: Ham
-      integer, intent(in)  :: il,im
-      real*8, intent(in)   :: eigv(:),delta(:)
-      integer, allocatable :: qns(:)
-      integer :: i,j,ndof,nev,nagn,sp
-      integer :: iexc,jexc,nexc,mst,mfi
-      character*72 :: frmt
-      character*8  :: labl
-      real*8 :: t1,t2
-
-!     Set parameters
-      nev=SIZE(Ham%eig(il,im)%assgn,1)
-      ndof=SIZE(Ham%eig(il,im)%assgn,2)
-
-!     Print output only if > 1 submode
-      IF (ndof.lt.2) RETURN
-
-      call CPU_TIME(t1)
-
-!     Print mode numbers
-      mst=firstmode(il,1,im,ML)
-      mfi=lastmode(il,1,im,ML)
-      nagn=mfi-mst+1
-
-      IF (mpirank.eq.mpi_prnt_rank) THEN
-         write(*,'(/X,2A/)') 'Eigenvectors, assignments based on ',&
-                             'rank-1 approximation :'
-         write(frmt,*) '(A,X,',nagn,'(I2,X),5X,A,14X,A,11X,A,5X,A)'
-         write(*,frmt) 'Mode:',(ML%resort(j),j=mst,mfi),'Energy',&
-                       'E-E0','Assignment','delta'
-      ENDIF
-
-      DO i=1,nev
-!        Get the full assignment
-         call GetFullAssignment(il,im,Ham,ML,Ham%eig(il,im)%assgn(i,:),&
-                                qns)
-
-!        Label vibration if only 1 DOF is excited
-         nexc=0
-         iexc=0
-         jexc=0
-         DO j=1,nagn
-            IF (qns(j).gt.1) THEN
-               nexc=nexc+1
-               iexc=qns(j)
-               jexc=j
-               IF (nexc.eq.2) EXIT
-            ENDIF
-         ENDDO
-         IF (nexc.eq.0) THEN
-            labl='ZPVE'
-         ELSEIF (nexc.eq.1 .and. iexc.eq.2) THEN
-            labl='FUND nu_'
-         ELSEIF (nexc.eq.1 .and. iexc.gt.2) THEN
-            labl=' OT '
-         ELSE
-            labl='    '
-         ENDIF
-
-         IF (mpirank.eq.mpi_prnt_rank) THEN
-            IF (nexc.ne.1 .or. iexc.ne.2) THEN
-               write(frmt,*) '(I4,A,X,',nagn,&
-                          '(I2,X),2(f19.12,X),A,5X,ES11.3)'
-               write(*,frmt) i,')',(qns(j)-1,j=1,nagn),eigv(i),&
-                           eigv(i)-eigv(1),labl,delta(i)
-            ELSE
-               sp=3-int(log10(REAL(ML%resort(mst+jexc-1))))+1
-               write(frmt,*) '(I4,A,X,',nagn,&
-                  '(I2,X),2(f19.12,X),A,I0,',sp,'X,ES11.3)'
-               write(*,frmt) i,')',(qns(j)-1,j=1,nagn),eigv(i),&
-                    eigv(i)-eigv(1),labl,ML%resort(mst+jexc-1),delta(i)
-            ENDIF
-         ENDIF
-         DEALLOCATE(qns)
-      ENDDO
-
-      call CPU_TIME(t2)
-      anal_time=anal_time+t2-t1
-
-      end subroutine PrintAssignments
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

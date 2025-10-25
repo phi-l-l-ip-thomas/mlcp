@@ -13,46 +13,46 @@
       USE HAMILSETUP
       USE MODECOMB
       USE MODVECVEC
+      USE BLOCKUTILS
 
       implicit none
-      real*8, private  :: update_time=0.d0
-      logical, private :: UPDATE_SETUP=.FALSE.
+      real(kind=8), allocatable, private :: module_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine InitializeUpdateModule()
+      subroutine Init_Updater_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      update_time = 0.d0
-      UPDATE_SETUP = .TRUE.
+      allocate(module_time(mpinodes))
+      module_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine InitializeUpdateModule
+      end subroutine Init_Updater_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeUpdateModule()
+      subroutine Dispose_Updater_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. UPDATE_SETUP) call InitializeUpdateModule()
+      IF (.NOT. MODULE_SETUP) call Init_Updater_Module()
+      call Get_MPI_Timings('Updater module',module_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(module_time)
 
-      UPDATE_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total operator update time        (s)',&
-                             update_time
-
-      end subroutine DisposeUpdateModule
+      end subroutine Dispose_Updater_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine UpdateH(il,im,eigv,Q,H,ML,cpp)
+      subroutine UpdateH(im,Q,Ham,cpp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Updates H by building the operator matrices for the upper layers 
@@ -60,63 +60,67 @@
 
       implicit none
       TYPE (CPpar)       :: cpp
-      TYPE (MLtree)      :: ML
-      TYPE (Hamiltonian) :: H
+      TYPE (Hamiltonian) :: Ham
       TYPE (CP), INTENT(IN) :: Q(:)
-      real*8, allocatable, intent(in) :: eigv(:)
-      integer, intent(in) :: il,im
-      integer :: i,j,imode,nev,mpl,mstart,trm
-      real*8  :: t1,t2
+      integer, intent(in) :: im
+      integer :: i,j,k,l,nev,nop,nsubm,sm,nsubdof,subdof,noptyp
+      real(kind=8) :: ti1,ti2
 
-      IF (.NOT. UPDATE_SETUP) call InitializeUpdateModule()
-
-      call CPU_TIME(t1)
+      IF (.NOT. MODULE_SETUP) call Init_Updater_Module()
 
       nev=SIZE(Q)
-      mstart=ML%modstart(il,im)
-      trm=GetModeHNr(il,im,H)  ! mode term
 
-!     Store the eigenvalues for mode 'im' that were computed in
-!     the previous call to the solver
-      ALLOCATE(H%eig(il,im)%evals(SIZE(eigv)))
-      H%eig(il,im)%evals(:)=eigv(:)
+!     No operator update necessary for the following cases:
+!     - memory check run
+!     - last layer
+!     - node has only one sub-node (without truncation)
+      IF (cpp%ncycle.eq.0 .or. im.eq.SIZE(Ham%nt) .or. &
+          (Ham%nt(im)%nHterm().eq.0 .and. &  ! Presolved
+           Ham%nt(im)%nsubm() .eq. 1 .and. &
+           Ham%nt(Ham%nt(im)%subm(1))%nbas().eq.nev)) RETURN
 
-!     No operator update necessary for the last layer
-      IF (il.eq.ML%nlayr) RETURN
+      call CPU_TIME(ti1)
 
-!     Update operators if mode is not pre-solved or if mode is 
-!     presolved and the basis is truncated in the current layer
+      nsubm=max(1,Ham%nt(im)%nsubm())  ! Nr of sub-nodes in this node
+      nop=SIZE(Ham%ops,2)
+      noptyp=SIZE(Ham%ops,3)
 
-      IF ((H%ndof(trm,il).gt.1 .or. H%nop(trm,il).gt.1 .or. &
-          SIZE(H%eig(il-1,mstart)%evals).gt.nev) .and. &
-          cpp%ncycle.gt.0) THEN
-
-!        Transform primitive operators with mode 'im' into the eigenbasis
-         DO i=1,SIZE(H%pops)
-            IF (uppermodenr(il,1,H%pops(i)%dof,ML).eq.im) THEN
-!              Determine imode
-               imode=uppermodenr(il-1,1,H%pops(i)%dof,ML)-mstart+1
-!              Update operator
-               call UpdateOperMat(imode,Q,H%pops(i))
-            ENDIF
+!     Transform primitive operators with mode 'im' into the eigenbasis
+      DO i=1,nsubm
+         sm=Ham%nt(im)%subm(i)  ! Sub-node index
+         nsubdof=Ham%nt(sm)%ndof() ! Nr of DOFs in this sub-node
+         DO j=1,nsubdof
+            subdof=Ham%nt(sm)%dofs(j) ! DOF index
+            DO l=1,noptyp
+               DO k=1,nop          ! Nr of potential ops for this DOF
+                  IF (Ham%optable(subdof,k,l)) THEN
+!                    Transform primitive operators into basis in Q
+                     IF (cpp%algo.lt.0) then
+                        call UpdateOperMat(i,Q,Ham%ops(subdof,k,l)%mat)
+                     ELSE
+                        call UpdateOperMat_CP8(i,Q,Ham%ops(subdof,k,l)%mat,cpp%algo)
+                     ENDIF
+                  ENDIF
+               ENDDO
+            ENDDO
          ENDDO
-      ENDIF
+      ENDDO
 
-      call CPU_TIME(t2)
-      update_time=update_time+t2-t1
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
       end subroutine UpdateH
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine UpdateOperMat(imode,Q,X)
+      subroutine UpdateOperMat(imode,Q,mat)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Computes Q^T X Q, where X is primitive operator matrix applying to
 ! imode of Q
 
       implicit none
-      TYPE (OperMat), INTENT(INOUT) :: X
+      real(kind=8), allocatable, intent(inout) :: mat(:)
       TYPE (CP), INTENT(IN) :: Q(:)
       TYPE (CP) :: XQ
       real*8, allocatable :: QXQ(:,:)
@@ -130,7 +134,7 @@
 
       DO i=1,nbloc
 !        XQ=X*Q(i)
-         call PRODXV(imode,Q(i),XQ,X)
+         call PRODXV(imode,Q(i),XQ,mat)
 !$omp parallel
 !$omp do private(j)
          DO j=i,nbloc
@@ -142,16 +146,82 @@
          call FlushCP(XQ)
       ENDDO
 
-!     Replace the operator matrix
-      DEALLOCATE(X%mat)
-      call SymPackMat2Vec(X%mat,QXQ)
+      DEALLOCATE(mat)
+      call SymPackMat2Vec(mat,QXQ)
       DEALLOCATE(QXQ)
 
       end subroutine UpdateOperMat
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine PRODXV(imode,F,G,X)
+      subroutine UpdateOperMat_CP8(imode,Q,mat,algo)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Computes Q^T X Q, where X is primitive operator matrix applying to
+! imode of Q
+
+      implicit none
+      real(kind=8), allocatable, intent(inout) :: mat(:)
+      TYPE (CP), INTENT(IN) :: Q(:)
+      TYPE (CP8), allocatable :: Qmode(:)
+      TYPE (CP8) :: X8
+      real(kind=8), allocatable :: QXQ(:,:),tmat(:,:),tvec(:)
+      integer, allocatable :: rows(:),cols(:)
+      integer, intent(in)  :: imode,algo
+      integer :: i,k,nbloc,rk,gi,gf,bs,bf
+
+      nbloc=SIZE(Q)
+
+      ALLOCATE(QXQ(nbloc,nbloc),Qmode(nbloc))
+      QXQ=0.d0
+
+!     Put the operator matrix into CP8 structure
+      call Vec2SymPackMat(mat,tmat)
+      call Mat2Vec(tvec,tmat,.FALSE.)
+      call X8%identity(Q(1)%rows,Q(1)%rows)
+      X8%base(X8%BS(1,imode):X8%BF(1,imode))=tvec(:)
+      DEALLOCATE(mat,tmat,tvec)
+
+!     Put Q into CP8 structure
+      gi=1
+      DO i=2,imode
+         gi=gi+Q(1)%nbas(i-1)
+      ENDDO
+      gf=gi+Q(1)%nbas(imode)-1
+
+      do i=1,nbloc
+         call Qmode(i)%fromCP(Q(i))
+         rk=Qmode(i)%R()
+         do k=1,rk
+            bs=Qmode(i)%BS(k,imode)
+            bf=Qmode(i)%BF(k,imode)
+            Qmode(i)%base(bs:bf)=Q(i)%base(gi:gf,k)
+         enddo
+      enddo
+
+      if (algo.eq.1) then
+         call X8%copyintodevice()
+         do i=1,nbloc
+            call Qmode(i)%copyintodevice()
+         enddo
+      endif
+
+!     Use the block MPI code to construct QXQ
+      call GetQXQ_CP8(Qmode,X8,QXQ,algo,imode)
+
+!     Replace the operator matrix
+      call SymPackMat2Vec(mat,QXQ)
+      call X8%flush()
+      do i=1,nbloc
+         call Qmode(i)%flush()
+      enddo
+      DEALLOCATE(QXQ,Qmode)
+
+      end subroutine UpdateOperMat_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine PRODXV(imode,F,G,mat)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Applies matrix-vector product X*F = G, where X is an individual term
@@ -159,9 +229,9 @@
 ! imode = the mode in F to which X applies
 
       implicit none
-      TYPE (OperMat), INTENT(IN) :: X
-      TYPE (CP), INTENT(IN)   :: F
-      TYPE (CP), INTENT(OUT)  :: G
+      TYPE (CP), INTENT(IN)    :: F
+      TYPE (CP), INTENT(OUT)   :: G
+      real(kind=8), intent(in) :: mat(:)
       integer, intent(in) :: imode
       integer :: i,rF,gdim,gst,gi,gf
 
@@ -181,7 +251,7 @@
 
 !     Operation X*V
       DO i=1,rF
-         call dspmv('U',gdim,1.d0,X%mat,F%base(gi:gf,i),1,0.d0,&
+         call dspmv('U',gdim,1.d0,mat,F%base(gi:gf,i),1,0.d0,&
                     G%base(gi:gf,i),1)
       ENDDO
 

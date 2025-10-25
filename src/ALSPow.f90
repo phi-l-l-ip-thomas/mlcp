@@ -14,68 +14,91 @@
       USE CPMMM
 
       implicit none
-      real*8, private  :: alspow_time=0.d0
-      logical, private :: ALSPOW_SETUP=.FALSE.
+      real(kind=8), private :: als_penalty=-1.d0
+      real(kind=8), allocatable, private :: alspow_time(:)
+      real(kind=8), allocatable, private :: prodhvals_time(:)
+      character(len=64), private :: als_solver='uninitialized'
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SetupALSPow()
+      subroutine Init_ALSPOW_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      alspow_time=0.d0
-      ALSPOW_SETUP=.TRUE.
+      allocate(alspow_time(mpinodes),prodhvals_time(mpinodes))
+      alspow_time(:) = 0.d0
+      prodhvals_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine SetupALSPow
+      end subroutine Init_ALSPOW_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeALSPow()
+      subroutine Dispose_ALSPOW_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. ALSPOW_SETUP) call SetupALSPow()
+      IF (.NOT. MODULE_SETUP) call Init_ALSPOW_Module()
+      call Get_MPI_Timings('ALSPOW     iterations',alspow_time)
+      call Get_MPI_Timings('PRODHV_ALS iterations',prodhvals_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(alspow_time,prodhvals_time)
 
-!     Set up the module if it was not set up already
-      ALSPOW_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total reduction time (ALSPOW)     (s)',&
-                            alspow_time
-
-      end subroutine DisposeALSPow
+      end subroutine Dispose_ALSPOW_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function getALSPOWmem(rG,rF,n,ndof,ncpu,lowmem)
+      subroutine set_als_settings_ALSPow(penalty,solver)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets the ALS regularization penalty for the module
+
+      implicit none
+      real(kind=8), intent(in) :: penalty
+      character(len=64), intent(in) :: solver
+
+      if (penalty.gt.1.d0 .or. penalty.lt.0.d0) then
+         write(*,'(A,ES11.4,A)') 'ALS regularization penalty ',&
+         penalty,' must be in range: 0 <= penalty <= 1'
+         call AbortWithError('set_als_settings_ALSPow(): wrong value')
+      endif
+
+      als_penalty=penalty
+      als_solver=solver
+
+      end subroutine set_als_settings_ALSPow
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function getALSPOWmem(rG,rF,n,ndof,npara,lowmem)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Determines memory needed for ALS
 
       implicit none
-      integer, intent(in) :: rG,rF,n,ndof,ncpu,lowmem
+      integer, intent(in) :: rG,rF,n,ndof,npara,lowmem
       real*8 :: getALSPOWmem
-
-      IF (.NOT. ALSPOW_SETUP) call SetupALSPow()
 
 !     Calculate memory usage depending on algorithm
       IF (lowmem.eq.0) THEN
 !        Memory allocated for ndof PS, ndof BB matrices, bjk+IPV
-         getALSPOWmem=REAL(ncpu)*rF*(ndof*(rG+rF)+n+1)
+         getALSPOWmem=REAL(npara)*rF*(ndof*(rG+rF)+n+1)
       ELSEIF (lowmem.eq.2) THEN
 !        Memory allocated for PS, 2 BB matrices, bjk, IPV
-         getALSPOWmem=REAL(ncpu)*rF*(rG+2*rF+n+1)
+         getALSPOWmem=REAL(npara)*rF*(rG+2*rF+n+1)
       ELSEIF (lowmem.eq.3) THEN
 !        Memory allocated for BB, bjk, IPV
-         getALSPOWmem=REAL(ncpu)*rF*(rF+n+1)
+         getALSPOWmem=REAL(npara)*rF*(rF+n+1)
       ELSE ! lowmem=1 or invalid choice of lowmem
 !        Memory allocated for PS, 2 BB, and either PS or bjk+IPV
-         getALSPOWmem=REAL(ncpu)*rF*(rG+2*rF+n+1)
+         getALSPOWmem=REAL(npara)*rF*(rG+2*rF+n+1)
       ENDIF
 
       end function getALSPOWmem
@@ -93,8 +116,11 @@
       TYPE (CP), INTENT(INOUT) :: F
       integer, intent(in) :: nitn,ishift,lowmem
       real*8, intent(in)  :: Eshift
+      real(kind=8) :: ti1,ti2
 
-      IF (.NOT. ALSPOW_SETUP) call SetupALSPow()
+      IF (.NOT. MODULE_SETUP) call Init_ALSPOW_Module()
+
+      call CPU_TIME(ti1)
 
       IF (lowmem.eq.0) THEN
          call ALS_POW0(H,F,nitn,ishift,Eshift)
@@ -110,6 +136,9 @@
          write(*,'(X,A/)') 'ALS_POW1() selected by default...'
          call ALS_POW1(H,F,nitn,ishift,Eshift)
       ENDIF
+
+      call CPU_TIME(ti2)
+      alspow_time=alspow_time+ti2-ti1
 
       end subroutine ALS_POW_alg
 
@@ -127,8 +156,11 @@
       TYPE (CP), INTENT(OUT) :: F
       integer, intent(in) :: nitn,ishift,lowmem
       real*8, intent(in)  :: Eshift
+      real(kind=8) :: ti1,ti2
 
-      IF (.NOT. ALSPOW_SETUP) call SetupALSPow()
+      IF (.NOT. MODULE_SETUP) call Init_ALSPOW_Module()
+
+      call CPU_TIME(ti1)
 
       IF (lowmem.ge.0 .and. lowmem.le.2) THEN
          call PRODHV_ALS2(Fold,F,H,ishift,Eshift,nitn)
@@ -140,6 +172,9 @@
          write(*,'(X,A/)') 'PRODHV_ALS2() selected by default...'
          call PRODHV_ALS2(Fold,F,H,ishift,Eshift,nitn)
       ENDIF
+
+      call CPU_TIME(ti2)
+      prodhvals_time=prodhvals_time+ti2-ti1
 
       end subroutine PRODHV_ALS_alg
 
@@ -162,7 +197,7 @@
       real*8, intent(in)   :: Eshift
       real*8, allocatable  :: bjk(:,:),BBmem(:,:)
       real*8, allocatable  :: BB(:,:,:),PS(:,:,:)
-      real*8  :: valpen,gtmp,t1,t2
+      real*8  :: gtmp
       integer :: rG,rF,ndim,i,j,ir,imod,k,l,n,gst,itn,kp
 
       IF (nitn.eq.0) return
@@ -170,17 +205,12 @@
 !     First, generate G using a matrix-vector product
       call CPMM(H,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,G)
 
-      call CPU_TIME(t1)
-
 !     Set parameters
       rG=SIZE(G%coef)
       rF=SIZE(F%coef)
       ndim=SIZE(G%nbas)
 
       allocate(BB(rF,rF,ndim),PS(rG,rF,ndim))
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     BB(l,l',k) = < F_i^l , F_i^l' > for all but 1st DOF
 !     PS(l,l',k) = < G_i^l , F_i^l' > for all but 1st DOF
@@ -224,20 +254,15 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB(:,:,k),bjk,valpen)
+            call SolveLinSys(BB(:,:,k),bjk,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
-            call CPU_TIME(t2)
-            alspow_time=alspow_time+t2-t1
-
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
             IF (k.eq.ndim) call NORMCOEF(F)
-
-            call CPU_TIME(t1)
 
 !           Matrix-vector product on the k-th DOF
             IF (itn.lt.nitn .or. k.lt.ndim) &
@@ -256,9 +281,6 @@
 
       deallocate(BB,PS)
       call FlushCP(G)
-
-      call CPU_TIME(t2)
-      alspow_time=alspow_time+t2-t1
 
       end subroutine ALS_POW0
 
@@ -279,7 +301,7 @@
       integer, intent(in)  :: nitn,ishift
       real*8, intent(in)   :: Eshift
       real*8, dimension (:,:), allocatable :: BB,PS,bjk,BBmem
-      real*8  :: valpen,gtmp,t1,t2
+      real*8  :: gtmp
       integer :: rG,rF,ndim,i,j,ir,imod,k,l,n,gst,itn,kp
       logical :: update
 
@@ -287,8 +309,6 @@
 
 !     First, generate G using a matrix-vector product
       call CPMM(H,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,G)
-
-      call CPU_TIME(t1)
 
 !     Set parameters
       rG=SIZE(G%coef)
@@ -302,9 +322,6 @@
       IF (ndim.le.3)  update=.FALSE.
 
       allocate(BB(rF,rF),BBmem(rF,rF),PS(rG,rF))
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     BB(l,l') = Pi_{i=2}^ndim < F_i^l , F_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
@@ -354,20 +371,15 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
-            call CPU_TIME(t2)
-            alspow_time=alspow_time+t2-t1
-
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
             IF (k.eq.ndim) call NORMCOEF(F)
-
-            call CPU_TIME(t1)
 
 !           Matrix-vector product on the k-th DOF
             call CPMM(H,ishift,Eshift,.FALSE.,F,0,0.d0,.FALSE.,G,k)
@@ -395,9 +407,6 @@
       deallocate(BB,BBmem,PS)
       call FlushCP(G)
 
-      call CPU_TIME(t2)
-      alspow_time=alspow_time+t2-t1
-
       end subroutine ALS_POW1
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -418,12 +427,10 @@
       real*8, intent(in)   :: Eshift
       real*8, dimension (:,:), allocatable :: BB,PS,bjk,BBmem
       integer, allocatable :: nbas(:)
-      real*8  :: valpen,gtmp,t1,t2
+      real*8  :: gtmp
       integer :: rG,rF,ndim,i,j,ir,k,l,n,itn,kp
 
       IF (nitn.eq.0) return
-
-      call CPU_TIME(t1)
 
 !     Set parameters
       ndim=SIZE(F%nbas)
@@ -432,9 +439,6 @@
       IF (ishift.ne.0) rG=rG+rF
 
       allocate(BB(rF,rF),BBmem(rF,rF),PS(rG,rF))
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     BB(l,l') = Pi_{i=2}^ndim < F_i^l , F_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
@@ -469,20 +473,15 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
-            call CPU_TIME(t2)
-            alspow_time=alspow_time+t2-t1
-
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
             IF (k.eq.ndim) call NORMCOEF(F)
-
-            call CPU_TIME(t1)
 
 !           Check coefs for NaN values resulting from zero division.
             IF (.NOT. CHECKCOEFS(F)) THEN
@@ -502,9 +501,6 @@
       ENDDO  ! loop over iterations
 
       deallocate(BB,BBmem,PS)
-
-      call CPU_TIME(t2)
-      alspow_time=alspow_time+t2-t1
 
       end subroutine ALS_POW2
 
@@ -527,19 +523,14 @@
       real*8, intent(in)   :: Eshift
       real*8, allocatable  :: BB(:,:),bjk(:,:)
       integer, allocatable :: nbas(:)
-      real*8  :: valpen,gtmp,t1,t2
+      real*8  :: gtmp
       integer :: rF,ndim,i,j,k,ir,l,n,itn
 
       IF (nitn.eq.0) return
 
-      call CPU_TIME(t1)
-
 !     Set parameters
       ndim=SIZE(F%nbas)
       rF=SIZE(F%coef)
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     Main loop over ALS iterations
       DO itn=1,nitn
@@ -553,21 +544,16 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
             deallocate(BB)
 
 !           Construct improved F
             call UpdateFfromSoln(F,bjk,k)
             deallocate(bjk)
 
-            call CPU_TIME(t2)
-            alspow_time=alspow_time+t2-t1
-
 !           Normalize the coefficients of F after each complete mat-vec
 !           to avoid overflow, which can occur after several iterations
             IF (k.eq.ndim) call NORMCOEF(F)
-
-            call CPU_TIME(t1)
 
 !           Check coefs for NaN values resulting from zero division.
             IF (.NOT. CHECKCOEFS(F)) THEN
@@ -578,9 +564,6 @@
 
          enddo  ! loop over k
       ENDDO  ! loop over iterations
-
-      call CPU_TIME(t2)
-      alspow_time=alspow_time+t2-t1
 
       end subroutine ALS_POW3
 
@@ -603,12 +586,10 @@
       real*8, intent(in)   :: Eshift
       real*8, dimension (:,:), allocatable :: BB,PS,bjk,BBmem
       integer, allocatable :: nbas(:)
-      real*8  :: valpen,gtmp,t1,t2
+      real*8  :: gtmp
       integer :: rG,rF,ndim,i,ir,k,l,n,itn,kp
 
       IF (nitn.eq.0) return
-
-      call CPU_TIME(t1)
 
       F=CopyCP(Fold)
 
@@ -619,9 +600,6 @@
       IF (ishift.ne.0) rG=rG+rF
 
       allocate(BB(rF,rF),BBmem(rF,rF),PS(rG,rF))
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     BB(l,l') = Pi_{i=2}^ndim < F_i^l , F_i^l' >
 !     PS(l,l') = Pi_{i=2}^ndim < G_i^l , F_i^l' >
@@ -657,7 +635,7 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
 
 !           Construct improved F
             call UpdateFfromSoln(F,bjk,k)
@@ -682,9 +660,6 @@
 
       deallocate(BB,BBmem,PS)
 
-      call CPU_TIME(t2)
-      alspow_time=alspow_time+t2-t1
-
       end subroutine PRODHV_ALS2
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -706,21 +681,16 @@
       real*8, intent(in)   :: Eshift
       real*8, allocatable  :: BB(:,:),bjk(:,:)
       integer, allocatable :: nbas(:)
-      real*8  :: valpen,gtmp,t1,t2
+      real*8  :: gtmp
       integer :: rF,ndim,i,j,k,ir,l,n,itn
 
       IF (nitn.eq.0) return
-
-      call CPU_TIME(t1)
 
       F=CopyCP(Fold)
 
 !     Set parameters
       ndim=SIZE(F%nbas)
       rF=SIZE(F%coef)
-
-!     Penalty to avoid bad conditioning
-      valpen=maxval(F%coef)*1.d-10
 
 !     Main loop over ALS iterations
       DO itn=1,nitn
@@ -734,7 +704,7 @@
 
 !           Solve linear system B*c_j_k = b_j_k (eq 3.5)
 !           (B includes all inner products except the kth)
-            call SolveLinSysLU(BB,bjk,valpen)
+            call SolveLinSys(BB,bjk,als_penalty,als_solver)
             deallocate(BB)
 
 !           Construct improved F
@@ -750,9 +720,6 @@
 
          enddo  ! loop over k
       ENDDO  ! loop over iterations
-
-      call CPU_TIME(t2)
-      alspow_time=alspow_time+t2-t1
 
       end subroutine PRODHV_ALS3
 

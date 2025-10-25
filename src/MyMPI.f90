@@ -28,7 +28,7 @@
       integer, parameter :: mpi_sm=MPI_SUM
       integer, parameter :: mpi_prnt_rank = 0
       integer, parameter :: mpi_io_rank = 0
-      integer :: mpirank, mpinodes, mpierr
+      integer :: mpirank, mpinodes, mpierr, nomp_threads
 
       CONTAINS
 
@@ -39,6 +39,9 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
+#if OMP_ENABLED
+      integer, external :: omp_get_max_threads
+#endif
 
       call mpi_init(mpierr)
       if (mpierr.ne.0) &
@@ -51,6 +54,17 @@
       call mpi_comm_size(mpi_comm_wd, mpinodes, mpierr)
       if (mpierr.ne.0) &
          call AbortWithError('prepare_mpi(): mpi_comm_size failed')
+
+      if (mpirank.eq.mpi_prnt_rank) then
+         write(*,'(X,A,I0,A)') 'MLCP runs on ',mpinodes,' MPI processes'
+#if OMP_ENABLED
+         nomp_threads=omp_get_max_threads()
+         write(*,'(X,A,X,I0,X,A)') 'with',nomp_threads,&
+          'OpenMP threads/process'
+#else
+         nomp_threads=1
+#endif
+      endif
 
       end subroutine prepare_mpi
 
@@ -501,7 +515,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine calc_mpi_partition(b,sz,os)
+      subroutine calc_mpi_partition(b,sz,os,szmx)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Helper function for computing size and offset of b objects partitioned
@@ -509,17 +523,57 @@
 
       implicit none
       integer, intent(in)  :: b
-      integer, intent(out) :: sz,os
+      integer, intent(out) :: sz,os,szmx
       integer :: bp,mp
 
       bp=b/mpinodes
       mp=mod(b,mpinodes)
 
+      szmx=bp
+      if (mp.gt.0) szmx=szmx+1
+
       sz=bp
       if (mpirank.lt.mp) sz=sz+1
+
       os=mpirank*bp+min(mpirank,mp)
 
       end subroutine calc_mpi_partition
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Get_MPI_Timings(tag,timings)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+      character(*), intent(in) :: tag
+      character(LEN=36) :: ftag
+      real(kind=8) :: timings(:)
+      real(kind=8) :: maxtime,mintime,avetime
+      integer, allocatable :: mstarts(:), mwidths(:)
+      integer :: i,ierr
+
+      allocate(mstarts(mpinodes),mwidths(mpinodes))
+      do i=1,mpinodes
+         mstarts(i)=i-1
+         mwidths(i)=1
+      enddo
+
+!     Gather the timings from the MPI ranks
+      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,timings,&
+                          mwidths,mstarts,mpi_r8,mpi_comm_wd,ierr)
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         mintime=MINVAL(timings)
+         maxtime=MAXVAL(timings)
+         avetime=SUM(timings)/mpinodes
+         write(ftag,*) TRIM(ADJUSTL(tag))
+         write(*,'(X,A,A,3(X,f14.3))') &
+         ftag,':',mintime,maxtime,avetime
+      ENDIF
+      deallocate(mstarts,mwidths)
+
+      end subroutine Get_MPI_Timings
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

@@ -18,6 +18,7 @@
          LOGICAL, ALLOCATABLE :: dofincluded(:)
          REAL*8  :: FF,FG,GG,CN,conver,del
          CHARACTER(LEN=64) :: alsnm
+         CHARACTER(LEN=64) :: solver
          ! Options
          REAL*8  :: penalty ! penalty on LHS to prevent ill-conditioning
          REAL*8  :: thresh  ! fractional tolerance for convergence
@@ -25,7 +26,6 @@
          LOGICAL :: AisI    ! .T. for ALS, .F. for linear solver
          LOGICAL :: weights ! .T. weights rows by weights matrix
          LOGICAL :: update  ! .T. up/downdates B,P; .F. always builds
-         LOGICAL :: useSVD  ! .T. for SVD solver, .F. for LU solver
          LOGICAL :: parall  ! .T. for OpenMP code (not yet implemented)
          LOGICAL :: chkconv ! .T. to check convergence after each update
          LOGICAL :: prtconv ! .T. to print convergence after each update
@@ -36,6 +36,7 @@
             PROCEDURE :: setname => ALSSetName
             PROCEDURE :: setoption => ALSSetOption_logical
             PROCEDURE :: setvalue => ALSSetOption_real
+            PROCEDURE :: setstringval => ALSSetOption_string
             PROCEDURE :: show => ShowALSParameters
             PROCEDURE :: showconv => PrintALSConvergence 
             PROCEDURE :: flush => FlushALS
@@ -303,24 +304,26 @@
       implicit none
       TYPE (ALS), intent(inout) :: X
       integer, intent(in) :: ndof
-      logical :: update,useSVD,parall,chkconv
+      logical :: update,parall,chkconv
 
       X%alsnm=''
       X%GG=-1.d0
       X%conver=1.d99
-      X%penalty=1.d-15
       X%thresh=8.d-8
       X%dthresh=1.d-5
 
 !     Updating risks zero division, but is cheaper for ndof > 3
       update=(ndof.gt.3)
-      usesvd=.TRUE.
+
+!     Solver parameters should be set by values in input file
+      X%solver='uninitialized'
+      X%penalty=-1.d0
 
 !     For now, parallel code not implemented
       parall=.FALSE.
       chkconv=.FALSE.
 
-      call ALSSetOptions(X,update,usesvd,parall,chkconv)
+      call ALSSetOptions(X,update,parall,chkconv)
 
       end subroutine ALSOptionDefaults
 
@@ -353,8 +356,6 @@
 
       IF (TRIM(ADJUSTL(opt)).eq.'update') THEN
          X%update=val
-      ELSEIF (TRIM(ADJUSTL(opt)).eq.'usesvd') THEN
-         X%useSVD=val
       ELSEIF (TRIM(ADJUSTL(opt)).eq.'parall') THEN
          X%parall=val
          call WARN(val,'Parallel ALS not yet implemented')
@@ -364,7 +365,7 @@
          X%prtconv=val
       ELSE
          write(*,*) "Unrecognized logical option: '",opt,"'"
-         write(*,*) "Choose from 'update', 'usesvd', "&
+         write(*,*) "Choose from 'update', "&
                     "'parall', 'chkconv','prtconv'"
          call AbortWithError('ALSSetOption(): unrecognized option')
       ENDIF
@@ -399,17 +400,38 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ALSSetOptions(X,update,usesvd,parall,chkconv)
+      subroutine ALSSetOption_string(X,opt,val)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets options for TYPE ALS
+
+      implicit none
+      CLASS (ALS), intent(inout)  :: X
+      character(len=*), intent(in) :: opt,val
+
+      IF (TRIM(ADJUSTL(opt)).seq.'solver') THEN
+         X%solver=val
+      ELSE
+         write(*,*) "Unrecognized string option: '",&
+                    TRIM(ADJUSTL(opt)),"'"
+         write(*,*) "Choose from 'solver' "
+         call AbortWithError('ALSSetOption(): unrecognized option')
+      ENDIF
+
+      end subroutine ALSSetOption_string
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine ALSSetOptions(X,update,parall,chkconv)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sets options for TYPE ALS
 
       implicit none
       TYPE (ALS), intent(inout) :: X
-      logical, intent(in) :: update,usesvd,parall,chkconv
+      logical, intent(in) :: update,parall,chkconv
 
       X%update=update
-      X%useSVD=usesvd
       X%parall=parall
       X%chkconv=chkconv
       X%prtconv=chkconv ! Init same as chkconv
@@ -441,8 +463,8 @@
       write(*,*) 'Parameter  Value  Description'
       write(*,*) 'update  :',X%update,&
       ' (.T. downdates/updates P,B matrices, .F. builds each iteration)'
-      write(*,*) 'useSVD  :',X%useSVD,&
-      ' (.T. for Moore-Penrose pseudoinverse, .F. for LU decomposition)'
+      write(*,*) 'solver  :',TRIM(ADJUSTL(X%solver)),&
+      "('SVD' ,Moore-Penrose pseudoinverse); or 'LU', LU decomposition)"
       write(*,*) 'parall  :',X%parall,&
       ' (.T. for OpenMP M*v, v*v products and LHS, RHS building)'
       write(*,*) 'chkconv :',X%chkconv,&
@@ -455,8 +477,8 @@
       ' (.T. if G changes each iteration, .F. for constant G)'
       if (X%weights) write(*,*) 'Wchange :',X%Wchange,&
       ' (.T. if W changes each iteration, .F. for constant W)'
-      if (.not.X%useSVD) write(*,*) 'penalty :',X%penalty,&
-      ' (value added to LHS diagonal to prevent ill-conditioning)'
+      write(*,*) 'penalty :',X%penalty,&
+      ' (regularization value to prevent ill-conditioning)'
       if (X%chkconv) then
          write(*,*) 'thresh  :',X%thresh,&
          ' (convergence threshold for ||F-G||/||G||)'
@@ -757,7 +779,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function GetLHSforALS_weights(X,F,W,d) result(LHS)
+      function GetLHSforALS_weights(X,W,d) result(LHS)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Calculates left hand side of CP-format linear system normal equations 
@@ -765,25 +787,24 @@
 
       implicit none
       TYPE (ALS), intent(in) :: X
-      TYPE (CP), intent(in) :: F,W
+      TYPE (CP), intent(in) :: W
       integer, intent(in) :: d
       real*8, allocatable :: LHS(:,:)
-      integer :: rF,M,N
+      integer :: rF,N
 
       rF=SIZE(X%B,1)
       N=W%rows(d) ! Also equals cols-of-W and rows-of-F
-      M=F%cols(d)
-      allocate(LHS(rF,rF*M*N))
+      allocate(LHS(rF,rF*N))
 
 !     Accumulate left-hand sides of the linear system using weights
       LHS=0.d0
-      call AccumulateLHSforALS(X,F,W,d,LHS)
+      call AccumulateLHSforALS(X,W,d,LHS)
 
       end function GetLHSforALS_weights
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine AccumulateLHSforALS(X,F,W,d,LHS)
+      subroutine AccumulateLHSforALS(X,W,d,LHS)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Calculates left hand side of CP-format linear system normal equations 
@@ -791,20 +812,19 @@
 
       implicit none
       TYPE (ALS), intent(in) :: X
-      TYPE (CP), intent(in)  :: F,W
+      TYPE (CP), intent(in)  :: W
       real*8, intent(inout)  :: LHS(:,:)
       integer, intent(in) :: d
-      integer :: i,j,k,l,p,rW,rF,M,N,wind
+      integer :: i,j,k,l,rW,rF,N,wind
       integer :: bcola,bcol,lcola,lcola2,lcol
       real*8  :: tmp
 
       rW=W%R()
       rF=SIZE(X%B,1) ! Also equals cols-of-W and rows-of-F
       N=W%rows(d)
-      M=F%cols(d)
 
 !     Error checking
-      if ((SIZE(LHS,1).ne.rF).or.(SIZE(LHS,2).ne.(rF*M*N))) then
+      if ((SIZE(LHS,1).ne.rF).or.(SIZE(LHS,2).ne.(rF*N))) then
          write(*,*) 'LHS is [',SIZE(LHS,1),' x ',SIZE(LHS,2),&
                  '] but must be [',rF,' x ',rF,'*',N,']'
          call AbortWithError('AccumulateLHSforALS(): bad dimensions')
@@ -816,14 +836,12 @@
          do l=1,N
             wind=W%ibas(d)+(l-1)*(N+1)
             tmp=W%coef(k)*W%base(wind,k)
-            do p=1,M
-               lcola=((l-1)+(p-1)*N)*rF ! col group of lhs from basis
-               do i=1,rF
-                  do j=1,rF
-                     bcol=bcola+j ! col of B from W and F
-                     lcol=lcola+j ! col of lhs from W and F
-                     LHS(i,lcol)=LHS(i,lcol)+tmp*X%B(i,bcol)
-                  enddo
+            lcola=(l-1)*rF ! col group of lhs from basis
+            do i=1,rF
+               do j=1,rF
+                  bcol=bcola+j ! col of B from W and F
+                  lcol=lcola+j ! col of lhs from W and F
+                  LHS(i,lcol)=LHS(i,lcol)+tmp*X%B(i,bcol)
                enddo
             enddo
          enddo
@@ -1034,11 +1052,7 @@
       ENDIF
 
 !     Solve linear system
-      IF (X%useSVD) THEN
-         call SolveLinSysSVD(LHS,RHS,X%penalty)
-      ELSE
-         call SolveLinSysLU(LHS,RHS,X%penalty)
-      ENDIF
+      call SolveLinSys(LHS,RHS,X%penalty,X%solver)
       deallocate(LHS)
 
 !     Put solution into F
@@ -1089,20 +1103,16 @@
 
 !     Calculate LHS and RHS of linear system
       IF (X%AisI) THEN
-         LHS=GetLHSforALS(X,F,W,d)
+         LHS=GetLHSforALS(X,W,d)
          RHS=GetRHSforALS(X,WG,d)
-         call SolveWeightedLS(LHS,RHS,X%useSVD,X%penalty)
+         call SolveWeightedLS(LHS,RHS,X%solver,X%penalty)
       ELSE
          LHS=GetLHSforLinSys(X,F,d)
          RHS=GetRHSforLinSys(X,d)
          call X%FlushNormalEquations
 
 !        Solve linear system
-         IF (X%useSVD) THEN
-            call SolveLinSysSVD(LHS,RHS,X%penalty)
-         ELSE
-            call SolveLinSysLU(LHS,RHS,X%penalty)
-         ENDIF
+         call SolveLinSys(LHS,RHS,X%penalty,X%solver)
       ENDIF
 
       deallocate(LHS)
@@ -1121,7 +1131,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolveWeightedLS(LHS,RHS,useSVD,valpen)
+      subroutine SolveWeightedLS(LHS,RHS,solver,valpen)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Solves N rhs linear system (ALS case with weights) 
@@ -1129,31 +1139,34 @@
       implicit none
       real*8, intent(inout) :: LHS(:,:),RHS(:,:)
       real*8, allocatable :: lhs1(:,:),rhs1(:,:)
-      logical, intent(in) :: useSVD
       real*8, intent(in)  :: valpen
-      integer :: i,j,rF,N,cst,cfi
+      character(len=64), intent(in) :: solver
+      integer :: i,j,k,rF,N,M,cst,cfi
 
-!     LHS is rF x N*rF; RHS is rF x N
+!     LHS is rF x rF * N; RHS is rF x N * M
       rF=SIZE(LHS,1)
       N=SIZE(LHS,2)/rF
+      M=SIZE(RHS,2)/N
 
-      ALLOCATE(lhs1(rF,rF),rhs1(rF,1))
+      ALLOCATE(lhs1(rF,rF),rhs1(rF,M))
 
       cst=1
       cfi=rF
       DO i=1,N
 !        Solve a separate linear equation for each i
          lhs1(1:rF,1:rF)=LHS(1:rF,cst:cfi)
-         rhs1(1:rF,1:1)=RHS(1:rF,i:i)
+         DO j=1,M
+            k=(j-1)*N+i
+            rhs1(1:rF,j)=RHS(1:rF,k)
+         ENDDO
 
-         IF (useSVD) THEN
-            call SolveLinSysSVD(lhs1,rhs1,valpen)
-         ELSE
-            call SolveLinSysLU(lhs1,rhs1,valpen)
-         ENDIF
+         call SolveLinSys(lhs1,rhs1,valpen,solver)
 
 !        Copy the result back to RHS
-         RHS(1:rF,i:i)=rhs1(1:rF,1:1)
+         DO j=1,M
+            k=(j-1)*N+i
+            RHS(1:rF,k)=rhs1(1:rF,j)
+         ENDDO
 
          cst=cst+rF
          cfi=cfi+rF

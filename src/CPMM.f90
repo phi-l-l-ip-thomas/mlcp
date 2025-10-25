@@ -11,8 +11,9 @@
       USE SEPDREPN
 
       implicit none
-      real*8, private  :: mvp_time=0.d0
-      logical, private :: MVP_SETUP = .FALSE.
+      real(kind=8), allocatable, private :: cpmm_time(:),cpmmvec_time(:)
+      real(kind=8), allocatable, private :: reshift_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
 
       INTERFACE CPMM
          MODULE PROCEDURE CPMM_noshiftall
@@ -40,33 +41,37 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine InitializePRODHVModule()
+      subroutine Init_CPMM_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      mvp_time = 0.d0
-      MVP_SETUP = .TRUE.
+      allocate(cpmm_time(mpinodes),cpmmvec_time(mpinodes))
+      allocate(reshift_time(mpinodes))
+      cpmm_time(:) = 0.d0
+      cpmmvec_time(:) = 0.d0
+      reshift_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine InitializePRODHVModule
+      end subroutine Init_CPMM_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposePRODHVModule()
+      subroutine Dispose_CPMM_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. MVP_SETUP) call InitializePRODHVModule()
+      IF (.NOT. MODULE_SETUP) call Init_CPMM_Module()
+      call Get_MPI_Timings('CPMM matrix mult',cpmm_time)
+      call Get_MPI_Timings('CPMM-vec matrix mult',cpmmvec_time)
+      call Get_MPI_Timings('CPMM reshift',reshift_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(cpmm_time,cpmmvec_time,reshift_time)
 
-      MVP_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total matrix-vector product time  (s)',&
-                            mvp_time
-
-      end subroutine DisposePRODHVModule
+      end subroutine Dispose_CPMM_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -272,7 +277,7 @@
       logical, allocatable :: symsub(:)
       character(1) :: tN1,tN2            
 
-      IF (.NOT. MVP_SETUP) call InitializePRODHVModule()
+      IF (.NOT. MODULE_SETUP) call Init_CPMM_Module()
 
       call CPU_TIME(ti1)
 
@@ -522,7 +527,7 @@
       call FlushCP(I2)
 
       call CPU_TIME(ti2)
-      mvp_time=mvp_time+ti2-ti1
+      cpmm_time=cpmm_time+ti2-ti1
 
       end subroutine CPMM_general
 
@@ -722,7 +727,7 @@
       integer :: d,h,i,j,k,ik,rk1,rk2,rk3,re3,ndof,nsubm
       real*8  :: alpha1,alpha2,afac,ti1,ti2
 
-      IF (.NOT. MVP_SETUP) call InitializePRODHVModule()
+      IF (.NOT. MODULE_SETUP) call Init_CPMM_Module()
 
       call CPU_TIME(ti1)
 
@@ -888,7 +893,7 @@
       deallocate(subm,resm)
 
       call CPU_TIME(ti2)
-      mvp_time=mvp_time+ti2-ti1
+      cpmmvec_time=cpmmvec_time+ti2-ti1
 
       end subroutine CPMM_vec_general
 
@@ -911,7 +916,7 @@
       integer :: i,k,ik,rk1,rk2,rk3
       real*8  :: ti1,ti2
 
-      IF (.NOT. MVP_SETUP) call InitializePRODHVModule()
+      IF (.NOT. MODULE_SETUP) call Init_CPMM_Module()
 
       call CPU_TIME(ti1)
 
@@ -967,7 +972,7 @@
       ENDIF
 
       call CPU_TIME(ti2)
-      mvp_time=mvp_time+ti2-ti1
+      reshift_time=reshift_time+ti2-ti1
 
       end subroutine CPMMreshift
 

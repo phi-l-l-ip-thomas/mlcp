@@ -12,7 +12,7 @@
 
       TYPE Configs
          INTEGER, ALLOCATABLE :: nbas(:),qns(:,:)
-         REAL*8,  ALLOCATABLE :: coef(:)
+         REAL(KIND=8), ALLOCATABLE :: coef(:)
       END TYPE Configs
 
       CONTAINS
@@ -62,7 +62,7 @@
 
       implicit none
       TYPE (Configs), INTENT(IN) :: v
-      integer :: i,j,nconf,ndof
+      integer :: i,j,nconf,ndof,vmod,wmod,ndash
       character*64 :: frmt
 
       IF (.not.ALLOCATED(v%qns)) THEN
@@ -72,11 +72,24 @@
 
       nconf=SIZE(v%qns,1)
       ndof=SIZE(v%qns,2)
+      vmod=max(6,int(log10(REAL(nconf)))+1)
+      wmod=int(log10(REAL(MAXVAL(v%nbas))))+2
+      ndash=ndof*(wmod+1)
 
+!      write(frmt,'(A,I0,A,I0,A)') &
+!            '(A,X,',ndof,'(I',wmod,',X),12X,A)'
+!      write(*,frmt) 'Config:',(v%nbas(j),j=1,ndof),&
+!            'Coefficient'
+!      write(frmt,'(A,I0,A,I0,A)') '(',vmod,'A,X,',ndash,'A,X,A)'
+!      write(*,frmt) ('-',i=1,vmod),('-',j=1,ndash),&
+!                    '-----------------------'
+
+      write(frmt,'(3(A,I0),A)') &
+            '(I',vmod,'A,X,',ndof,'(I',wmod,',X),f23.12)'
       DO i=1,nconf
-         write(frmt,'(A,I0,A)') '(X,',ndof,'(I3,X),f26.12)'
-         write(*,frmt) (v%qns(i,j),j=1,ndof),v%coef(i)
+         write(*,frmt) i,')',(v%qns(i,j),j=1,ndof),v%coef(i)
       ENDDO
+      write(*,*)
 
       end subroutine PrintConfigs
 
@@ -95,6 +108,44 @@
       IF (ALLOCATED(v%coef)) DEALLOCATE(v%coef)
 
       end subroutine FlushConfigs
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function CompareConfigs(v,w) result(same)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Compares configuration list: list must be sorted before calling
+
+      implicit none
+      TYPE (Configs), INTENT(IN) :: v,w
+      integer :: i,j,rk,nsubm
+      logical :: same
+
+      IF (SIZE(v%qns,1).ne.SIZE(w%qns,1)) THEN
+         same=.FALSE.
+      ELSEIF (SIZE(v%qns,2).ne.SIZE(w%qns,2)) THEN
+         same=.FALSE.
+      ELSE
+         rk=SIZE(v%qns,1)
+         nsubm=SIZE(v%qns,2)
+         same=.TRUE.
+         DO i=1,rk
+            DO j=1,nsubm
+               IF (v%qns(i,j).ne.w%qns(i,j)) THEN
+                  same=.FALSE.
+                  EXIT
+               ENDIF
+               IF (.not.same) EXIT
+            ENDDO
+            IF (.not.same) EXIT
+            IF (v%coef(i).ne.w%coef(i)) THEN
+               same=.FALSE.
+               EXIT
+            ENDIF
+         ENDDO
+      ENDIF
+
+      end function CompareConfigs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -827,7 +878,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SortConfigsByIndex(v)
+      subroutine SortConfigsByIndex(v,ifast)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Sorts configurations in ascending order of indices, with the first
@@ -835,12 +886,19 @@
 
       implicit none
       TYPE (Configs), INTENT(INOUT) :: v
+      integer, intent(in), optional :: ifast
       integer, allocatable :: ist(:),iend(:)
-      integer :: nrk,ndof,j
+      integer :: nrk,ndof,j,k,imod
 
 !     Set parameters
       nrk=SIZE(v%qns,1)
       ndof=SIZE(v%qns,2)
+
+      if (present(ifast)) then
+         imod=ifast
+      else
+         imod=ndof
+      endif
 
 !     Make sure qns are positive before sorting
       call PutSignOnCoef(v)
@@ -855,14 +913,16 @@
       j=1
       DO
 !        Sort the configurations by DOF index j
-         call SortConfigBlock(v,j,ist(j),iend(j))
+         k=mod(imod+j-1,ndof)+1
+         call SortConfigBlock(v,k,ist(j),iend(j))
+!         call SortConfigBlock(v,j,ist(j),iend(j))
 
 !        Update DOF index j
          IF (j.lt.ndof) j=j+1
          DO 
+            IF (j.eq.1) EXIT
             IF (iend(j).lt.iend(j-1)) EXIT
             j=j-1
-            IF (j.eq.1) EXIT
          ENDDO
 
 !        When j returns to 1, the entire vector is sorted
@@ -870,7 +930,9 @@
 
 !        Update the sort ranges
          ist(j)=iend(j)+1
-         iend(j)=ibisect(v%qns(ist(j):iend(j-1),j-1),1)+ist(j)-1
+         k=mod(imod+j-2,ndof)+1
+         iend(j)=ibisect(v%qns(ist(j):iend(j-1),k),1)+ist(j)-1
+!         iend(j)=ibisect(v%qns(ist(j):iend(j-1),j-1),1)+ist(j)-1
       ENDDO
 
       DEALLOCATE(ist,iend)

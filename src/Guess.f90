@@ -15,78 +15,158 @@
       USE TARGETEDSTATES
 
       implicit none
-      real*8, private  :: guess_time=0.d0
-      logical, private :: GUESS_SETUP=.FALSE.
+      real(kind=8), allocatable, private :: module_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine InitializeGuessModule()
+      subroutine Init_Guess_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      guess_time = 0.d0
-      GUESS_SETUP = .TRUE.
+      allocate(module_time(mpinodes))
+      module_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
 
-      end subroutine InitializeGuessModule
+      end subroutine Init_Guess_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine DisposeGuessModule()
+      subroutine Dispose_Guess_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
 
-      IF (.NOT. GUESS_SETUP) call InitializeGuessModule()
+      IF (.NOT. MODULE_SETUP) call Init_Guess_Module()
+      call Get_MPI_Timings('Guess module',module_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(module_time)
 
-      GUESS_SETUP = .FALSE.
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,X,f20.3)') 'Total wave-function guess time    (s)',&
-                             guess_time
-
-      end subroutine DisposeGuessModule
+      end subroutine Dispose_Guess_Module
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GuessPsi(il,im,evalsND,delta,Q,H,ML,cpp)
+      subroutine GuessPsi(im,evalsND,delta,bounds,Q,Ham,ML,cpp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for generating the initial guess
 ! wavefunction
 
       implicit none
-      TYPE (CPpar), INTENT(IN)        :: cpp
-      TYPE (Hamiltonian), INTENT(IN)  :: H
-      TYPE (MLtree), INTENT(IN)       :: ML
       TYPE (CP), ALLOCATABLE, INTENT(OUT) :: Q(:)
-      integer, intent(in)  :: il,im
-      integer, allocatable :: qns(:,:),nbas(:),nmode(:,:),nexci(:,:)
-      integer, allocatable :: qnfull(:)
-      real*8, allocatable  :: evals1D(:,:)
-      real*8, allocatable, intent(out) :: evalsND(:),delta(:)
-      integer :: i,j,mi,nsubm,mstart,nbloc,maxbas,nagn
-      integer :: prodND,nmsum,nesum,neibas,mst,mfi,constraint
-      real *8 :: t1,t2,Etarget
-      character*64 :: frmt,tag
+      TYPE (Hamiltonian), INTENT(INOUT) :: Ham
+      TYPE (MLtree), INTENT(IN) :: ML
+      TYPE (CPpar), INTENT(IN)  :: cpp
+      integer, intent(in)  :: im
+      real(kind=8), allocatable, intent(out) :: evalsND(:),delta(:)
+      real(kind=8), intent(inout) :: bounds(2)
+      integer :: nsubm
 
-      IF (.NOT. GUESS_SETUP) call InitializeGuessModule()
+      nsubm=Ham%nt(im)%nsubm()
 
-      call CPU_TIME(t1)
+      IF (nsubm.eq.0) THEN ! Bottom-layer nodes
+         call GuessPsi_primitive(im,evalsND,delta,bounds,Q,Ham)
+      ELSE                 ! All other nodes
+         call GuessPsi_node(im,evalsND,delta,bounds,Q,Ham,ML,cpp)
+      ENDIF
+
+      end subroutine GuessPsi
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GuessPsi_primitive(im,evals,delta,bounds,Q,Ham)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! This is the master routine for generating the initial guess
+! wavefunction
+
+      implicit none
+      TYPE (CP), ALLOCATABLE, INTENT(OUT) :: Q(:)
+      TYPE (Hamiltonian), INTENT(INOUT) :: Ham
+      integer, intent(in)  :: im
+      integer :: nbas(1)
+      real(kind=8), allocatable, intent(out) :: evals(:),delta(:)
+      real(kind=8), intent(inout) :: bounds(2)
+      integer, allocatable :: qns(:,:)
+      integer :: i,nbloc,nHterm
+      character*64 :: frmt,tag,tag2
+
+      nbloc=Ham%nt(im)%B
+      nbas(1)=nbloc
+      bounds(:)=0.d0
+
+!     Use harmonic oscillator functions as guesses
+      ALLOCATE(Q(nbloc),evals(nbloc),delta(nbloc),qns(nbloc,1))
+
+      DO i=1,nbloc
+         qns(i,1)=i
+         evals(i)=(2*i-1)*Ham%nt(im)%Hfacs(1) ! extract omega from Ham
+         delta(i)=0.d0
+      ENDDO
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         write(*,'(3X,A/)') 'Initial guess harmonic functions:'
+         write(frmt,'(A)') '(26X,I2,X)'
+         write(*,frmt) Ham%nt(im)%dofs(1)
+         write(frmt,'(A)') '(3X,f19.12,X,A,X,I2,X)'
+         DO i=1,nbloc
+            write(*,frmt) evals(i),'->',qns(i,1)-1
+         ENDDO
+         write(*,*)
+      ENDIF
+
+      call BuildProdFunctions(Q,nbas,qns)
+      DEALLOCATE(qns)
+
+      end subroutine GuessPsi_primitive
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GuessPsi_node(im,evalsND,delta,bounds,Q,Ham,ML,cpp)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! This is the master routine for generating the initial guess
+! wavefunction
+
+      implicit none
+      TYPE (CP), ALLOCATABLE, INTENT(OUT) :: Q(:)
+      TYPE (Hamiltonian), INTENT(INOUT) :: Ham
+      TYPE (MLtree), INTENT(IN) :: ML
+      TYPE (CPpar), INTENT(IN)  :: cpp
+      integer, intent(in)  :: im
+      integer, allocatable :: qns(:,:),nmode(:,:),nexci(:,:),nexmx(:,:)
+      integer, allocatable :: qnfull(:),nbas(:)
+      real(kind=8), allocatable  :: evals1D(:,:)
+      real(kind=8), allocatable, intent(out) :: evalsND(:),delta(:)
+      real(kind=8), intent(inout) :: bounds(2)
+      integer :: i,j,nsubm,nbloc,nblocref,sm,prodND,prodNDref,mlil
+      integer :: maxbas,ndof,nmsum,nesum,neibas,constraint,nemax,mlim
+      real(kind=8) :: ti1,ti2,Etarget
+      logical      :: gentrunc,changenbloc
+      character*64 :: frmt,tag,tag2
+
+      IF (.NOT. MODULE_SETUP) call Init_Guess_Module()
+
+      call CPU_TIME(ti1)
 
 !     Set parameters
-      nsubm=ML%modcomb(il,im)   ! number of sub-modes in mode 'im'
-      mstart=ML%modstart(il,im) ! start index of sub-modes of 'im'
-      nbloc=ML%gdim(il,im)      ! block size (# eigfxns for 'im')
-      mst=firstmode(il,1,im,ML) ! index of 1st mode on bottom layer
-      mfi=lastmode(il,1,im,ML)  ! index of last mode on bottom layer
-      nagn=mfi-mst+1            ! number of bottom-layer modes
+      changenbloc=.FALSE.
+      nsubm=Ham%nt(im)%nsubm()
+      nbloc=Ham%nt(im)%B
+      ndof=Ham%nt(im)%ndof()
+      mlil=Ham%nt(im)%mlil
+      mlim=Ham%nt(im)%mlim
       ALLOCATE(nbas(nsubm))
-      nbas(1:nsubm)=ML%gdim(il-1,mstart:mstart+nsubm-1)
-      maxbas=MAXVAL(nbas)    ! max # b.f. of sub-modes in mode 'im'
+      DO j=1,nsubm
+         sm=Ham%nt(im)%subm(j)
+         nbas(j)=Ham%nt(sm)%nbas()
+      ENDDO
+      maxbas=MAXVAL(nbas)    ! max # b.f. of sub-nodes in node 'im'
 
 !     Truncation layer: filter energies by criterion from input file
       IF (nsubm.eq.1 .and. nbloc.lt.maxbas) THEN
@@ -97,75 +177,133 @@
          Etarget=0.d0
       ENDIF
 
-!     Error if more states are requested than allowed by the basis
-      prodND=1
-      DO j=1,nsubm
-         prodND=prodND*nbas(j)
-         IF (prodND.ge.nbloc) EXIT
-      ENDDO
+!     Check block size against product basis and reference and
+!     dynamically adjust if needed
+      nblocref=ML%gdim(mlil,mlim)
+      prodNDref=getboundingbaseprod(ML%gdim(mlil-1,&
+                ML%modstart(mlil,mlim):&
+                ML%modstart(mlil,mlim)+nsubm-1),nblocref)
+      prodND=getboundingbaseprod(nbas,nbloc)
+
       IF (nbloc.gt.prodND) THEN
-         write(*,*) 'Error: nbloc is too large for product basis size'
-         call AbortWithError('Error in GuessPsi()')
+!        Constraints in the $truncation namelist for earlier nodes can 
+!        reduce the product basis size so that it exceeds nbloc for this
+!        node; if this happens then resize nbloc to fit the new size
+         nbloc=prodND
+         IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,'(X,A,X,I0,X,A,X,I0,X,A/)') &
+             '  * Block size reduced to fit truncated product basis:',&
+             nbloc,'(overwrites',ML%gdim(mlil,mlim),'from layers.inp)'
+         call Ham%nt(im)%setb(nbloc)
+         changenbloc=.TRUE.
+
+      ELSEIF (nbloc.lt.prodND .and. nblocref.eq.prodNDref) THEN
+!        Contraints in the $truncation namelist for earlier nodes can
+!        increase the product basis size so that the current nbloc no
+!        longer equals than the product basis size, so resize nbloc
+         prodND=1
+         DO j=1,nsubm
+            prodND=prodND*nbas(j)
+         ENDDO
+         nbloc=prodND
+         IF (mpirank.eq.mpi_prnt_rank) &
+         write(*,'(X,A,X,I0,X,A,X,I0,X,A/)') &
+            '  * Block size increased to fit expanded product basis:',&
+         nbloc,'(overwrites',ML%gdim(mlil,mlim),'from layers.inp)'
+         call Ham%nt(im)%setb(nbloc)
+         changenbloc=.TRUE.
+
       ENDIF
 
-!     Allocate the block vectors (Q), guess energy, solver deltas,
-!     and guess quantum number arrays
-      ALLOCATE(Q(nbloc),evalsND(nbloc),delta(nbloc),qns(nbloc,nsubm))
-      ALLOCATE(nmode(maxbas,nsubm),nexci(maxbas,nsubm))
-      delta(:)=0.d0
+!     Allocate the arrays containing the mode information
+      ALLOCATE(nmode(maxbas,nsubm),nexci(maxbas,nsubm),nexmx(maxbas,nsubm))
 
-!     Copy the eigenvalues of the sub-modes to evals1D
+!     Copy the eigenvalues of the sub-modes to evals1D, and compute the
+!     guess spectral range
       ALLOCATE(evals1D(nsubm,maxbas))
+      bounds(:)=0.d0
       DO i=1,nsubm
-         mi=mstart+i-1
-         IF (nbas(i).ne.SIZE(H%eig(il-1,mi)%evals)) &
+         sm=Ham%nt(im)%subm(i)
+         IF (nbas(i).ne.Ham%nt(sm)%nbas()) &
             call AbortWithError("Mismatch in block, eigval list sizes")
-         evals1D(i,:nbas(i))=H%eig(il-1,mi)%evals(:)
+         evals1D(i,:nbas(i))=Ham%nt(sm)%eig(:)
+         bounds(1)=bounds(1)+evals1D(i,1)
+         bounds(2)=bounds(2)+evals1D(i,nbas(i))
       ENDDO
 
 !     N-mode coupling and excitation data for submodes in each state
-      call getsubmodedata(il,im,H,ML,nbas,nmode,nexci,nmsum,nesum)
+      call getsubmodedata(im,Ham,ML,nbas,nmode,nexci,nexmx,&
+                          nmsum,nesum,nemax,gentrunc)
+
+!     If using truncation as specified in the layerfile, use the
+!     pre-truncated node block size as nbloc
+      IF (gentrunc) THEN
+         nbloc=Ham%nt(im)%b
+         IF (mpirank.eq.mpi_prnt_rank) write(*,'(X,A,X,I0)') &
+         '  * Block size initially set to previous layer size  :',nbloc
+      ENDIF
+
+      ALLOCATE(evalsND(nbloc),delta(nbloc),qns(nbloc,nsubm))
+      delta(:)=0.d0
 
 !     Generate the guess states
       call sortDPeigvalsGen(nbloc,evalsND,qns,evals1D,nbas,&
-                            nmode,nexci,nmsum,nesum,constraint,&
-                            Etarget)
-!      call sortDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
-!      call structuredDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
+                            nmode,nexci,nexmx,nmsum,nesum,nemax,&
+                            constraint,Etarget,gentrunc)
+
+!     If using truncation as specified in the layerfile, pass the number
+!     of states found in the call above to the tree node type
+      IF (gentrunc) THEN
+         nbloc=SIZE(evalsND)
+         IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,'(X,A,X,I0,X,A,X,I0,X,A/)') &
+            '  * New block size determined from constraints       :',&
+            nbloc,'(overwrites',ML%gdim(mlil,mlim),'from layers.inp)'
+         call Ham%nt(im)%setb(nbloc)
+         changenbloc=.TRUE.
+      ENDIF
 
       IF (mpirank.eq.mpi_prnt_rank) THEN
          IF (nsubm.gt.1 .or. (nsubm.eq.1 .and. nbloc.lt.maxbas)) THEN
 
             IF (nsubm.gt.1) THEN
-               write(*,'(/3X,A/)') 'Initial guess product functions:'
+               write(*,'(3X,A/)') 'Initial guess product functions:'
             ELSE
-               select case (cpp%truncation)
-               case(0)
-                  tag='energy'
-               case(1)
-                  tag='n-mode coupling, then by energy'
-               case(2)
-                  tag='total excitation, then by energy'
-               case(12)
-                  tag='n-mode coupling, then by total excitation'
-               case(21)
-                  tag='total excitation, then by n-mode coupling'
-               case default
-                  tag='invalid truncation choice'
-               end select
-               write(*,'(/3X,2(A,I0),A,A/)') &
-              'Truncating basis from ',maxbas,' to ',nbloc,&
-               ' functions by ',trim(adjustl(tag))
+               if (gentrunc) then
+                  tag='$truncation namelist in layers.inp'
+                  write(tag2,'(3(A,I0),A)') &
+                  '(limited to nmode-max = ',nmsum,&
+                              '; sum-max = ',nesum,&
+                             '; q.n.-max = ',nemax,')'
+               else
+                  select case (cpp%truncation)
+                  case(0)
+                     tag='energy'
+                  case(1)
+                     tag='n-mode coupling, then by energy'
+                  case(2)
+                     tag='total excitation, then by energy'
+                  case(12)
+                     tag='n-mode coupling, then by total excitation'
+                  case(21)
+                     tag='total excitation, then by n-mode coupling'
+                  case default
+                     tag='invalid truncation choice'
+                  end select
+                  write(*,'(3X,2(A,I0),A,A/)') &
+                 'Truncating basis from ',maxbas,' to ',nbloc,&
+                  ' functions by ',trim(adjustl(tag))
+               endif
             ENDIF
 
-            write(frmt,'(2(A,I0),A)') '(',4*nsubm+26,'X,',nagn,'(I2,X))'
-            write(*,frmt) (ML%resort(j),j=mst,mfi)
+            write(frmt,'(2(A,I0),A)') '(',4*nsubm+26,'X,',ndof,'(I2,X))'
+            write(*,frmt) (Ham%nt(im)%dofs(j),j=1,ndof)
             write(frmt,'(2(A,I0),A)') &
-            '(3X,',nsubm,'(I3,X),f19.12,X,A,X',nagn,'(I2,X))'
+            '(3X,',nsubm,'(I3,X),f19.12,X,A,X',ndof,'(I2,X))'
             DO i=1,nbloc
-               call GetFullAssignment(il,im,H,ML,qns(i,:),qnfull)
+               call ConstructAssignment(Ham%nt,im,qns(i,:),qnfull)
                write(*,frmt) (qns(i,j)-1,j=1,nsubm),evalsND(i),&
-               '->',(qnfull(j)-1,j=1,nagn)
+               '->',(qnfull(j),j=1,ndof)
                deallocate(qnfull)
             ENDDO
             write(*,*)
@@ -173,18 +311,19 @@
       ENDIF
 
 !     Build the N-D separable eigenfunctions
+      ALLOCATE(Q(nbloc))
       call BuildProdFunctions(Q,nbas,qns)
 
-      DEALLOCATE(qns,nbas,evals1D,nmode,nexci)
+      DEALLOCATE(qns,nbas,evals1D,nmode,nexci,nexmx)
 
-      call CPU_TIME(t2)
-      guess_time=guess_time+t2-t1
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
-      end subroutine GuessPsi
+      end subroutine GuessPsi_node
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function GuessWeights(il,im,T,H,ML) result(W)
+      function GuessWeights(im,T,Ham) result(W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Guesses Boltzmann weights for separable H energies at temperature T,
@@ -192,39 +331,46 @@
 ! temperature is negative then identity matrix is guessed.
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN)  :: H
-      TYPE (MLtree), INTENT(IN) :: ML
+      TYPE (Hamiltonian), INTENT(IN) :: Ham
       TYPE (CP) :: W
       real*8, intent(in)   :: T
       real*8, parameter    :: kb=0.69503476 ! cm^-1/K
-      integer, intent(in)  :: il,im
+      integer, intent(in)  :: im
       integer, allocatable :: nbas(:)
       logical, allocatable :: sym(:)
-      integer :: i,j,mi,nsubm,mstart
-      real *8 :: t1,t2,val
+      integer :: i,j,sm,nsubm,msubm,mstart
+      real*8 :: val
+      real(kind=8) :: ti1,ti2
 
-      IF (.NOT. GUESS_SETUP) call InitializeGuessModule()
+      IF (.NOT. MODULE_SETUP) call Init_Guess_Module()
 
-      call CPU_TIME(t1)
+      call CPU_TIME(ti1)
 
 !     Set parameters
-      nsubm=ML%modcomb(il,im)   ! number of sub-modes in mode 'im'
-      mstart=ML%modstart(il,im) ! start index of sub-modes of 'im'
-      ALLOCATE(nbas(nsubm),sym(nsubm))
-      nbas(1:nsubm)=ML%gdim(il-1,mstart:mstart+nsubm-1)
-      sym(:)=.FALSE.
+      nsubm=Ham%nt(im)%nsubm()
+      msubm=max(1,nsubm)
+
+      ALLOCATE(nbas(msubm),sym(msubm))
+      DO j=1,msubm
+         sm=Ham%nt(im)%subm(j)
+         if (nsubm.eq.0) then
+            nbas(j)=Ham%nt(sm)%B
+         else
+            nbas(j)=Ham%nt(sm)%nbas()
+         endif
+         sym(j)=.FALSE.
+      ENDDO
 
       W=IdentityCPMatrix(nbas,nbas,sym)
 
-      IF (T.ge.0.d0) THEN
+      IF (T.ge.0.d0 .or. nsubm.gt.0) THEN
 !        Use the eigenvalues of the sub-modes to compute the weights
 !        If T=0, force weights of 1 for g.s. and 0 for all other states
          DO i=1,nsubm
-            mi=mstart+i-1
+            sm=Ham%nt(im)%subm(i)
             DO j=1,nbas(i)
                IF (T.gt.0.d0) THEN
-                  val=exp((H%eig(il-1,mi)%evals(1)-&
-                           H%eig(il-1,mi)%evals(j))/(kb*T))
+                  val=exp((Ham%nt(sm)%eig(1)-Ham%nt(sm)%eig(j))/(kb*T))
                ELSEIF (j.eq.1) THEN
                   val=1.d0
                ELSE
@@ -237,48 +383,80 @@
 
       DEALLOCATE(nbas,sym)
 
-      call CPU_TIME(t2)
-      guess_time=guess_time+t2-t1
+      call CPU_TIME(ti2)
+      module_time=module_time+ti2-ti1
 
       end function GuessWeights
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine getsubmodedata(il,im,H,ML,nbas,nmode,nexci,nmsum,nesum)
+      subroutine getsubmodedata(im,Ham,ML,nbas,nmode,nexci,nexmx,&
+                                nmsum,nesum,nemax,gentrunc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
-      TYPE (Hamiltonian), INTENT(IN) :: H
-      TYPE (MLtree), INTENT(IN)      :: ML
-      integer, intent(in)  :: il,im
-      integer, intent(inout) :: nbas(:),nmode(:,:),nexci(:,:)
-      integer, intent(out)   :: nmsum,nesum
+      TYPE (Hamiltonian), INTENT(IN) :: Ham
+      TYPE (MLtree), INTENT(IN) :: ML
+      integer, intent(in)  :: im
+      integer, intent(inout) :: nbas(:),nmode(:,:),nexci(:,:),nexmx(:,:)
+      integer, intent(out)   :: nmsum,nesum,nemax
       integer, allocatable :: subqns(:)
-      integer :: i,j,k,nsubm,neibas
+      integer :: i,j,k,sm,nsubm,neibas,mlil,mlim
+      logical, intent(out) :: gentrunc
 
-      nsubm=ML%modcomb(il,im)
-      nmsum=0
-      nesum=0
+      nsubm=Ham%nt(im)%nsubm()
+      mlil=Ham%nt(im)%mlil
+      mlim=Ham%nt(im)%mlim
+      nmsum=0 ! Max number of coupled modes
+      nesum=0 ! Max sum of quantum numbers
+      nemax=0 ! Max value of individual quantum number
+      gentrunc=.false.
+
       DO j=1,nsubm
+         sm=Ham%nt(im)%subm(j)
          neibas=0
          DO i=1,nbas(j)
-!           Get assignment of the single-mode function from the tree
-            call GetPartialAssignment(il,im,H,ML,j,i,subqns)
-
 !           Calculate the nmode and the nexci values for each single mode fxn
             nmode(i,j)=0
             nexci(i,j)=0
-            DO k=1,SIZE(subqns)
-               IF (subqns(k).gt.1) nmode(i,j)=nmode(i,j)+1
-               nexci(i,j)=nexci(i,j)+subqns(k)-1
+            nexmx(i,j)=MAXVAL(Ham%nt(sm)%assgn(i,:))
+            nemax=MAX(nemax,MAXVAL(Ham%nt(sm)%assgn(i,:)))
+            DO k=1,Ham%nt(sm)%ndof()
+               IF (Ham%nt(sm)%assgn(i,k).gt.0) nmode(i,j)=nmode(i,j)+1
+               nexci(i,j)=nexci(i,j)+Ham%nt(sm)%assgn(i,k)
             ENDDO
-
-            if (i.eq.1) nmsum=nmsum+SIZE(subqns)
+            if (i.eq.1) nmsum=nmsum+Ham%nt(sm)%ndof()
             if (nexci(i,j).gt.neibas) neibas=nexci(i,j)
-            DEALLOCATE(subqns)
          ENDDO
          nesum=nesum+neibas
+      ENDDO
+
+!     Replace maximum values with those from truncation namelist
+      DO j=1,ML%ntrunc
+         if (ML%truncate(j,1).eq.mlil .and. ML%truncate(j,2).eq.mlim) then
+            if (ML%truncate(j,3).ge.0) nmsum=min(nmsum,ML%truncate(j,3))
+            if (ML%truncate(j,4).ge.0) nesum=min(nesum,ML%truncate(j,4))
+            if (ML%truncate(j,5).ge.0) nemax=min(nemax,ML%truncate(j,5))
+
+            if (nesum.gt.nmsum*nemax) then
+               IF (mpirank.eq.mpi_prnt_rank) write(*,'(A,2(A,I0))') &
+               '   * sum-max contraint exceeds (nmode-max * q.n.-max), ',&
+               'so modifying sum-max: ',&
+               nesum,' -> ',nmsum*nemax
+               nesum=nmsum*nemax
+            endif
+
+            if (nemax.gt.nesum) then
+               IF (mpirank.eq.mpi_prnt_rank) write(*,'(A,2(A,I0))') &
+               '   * q.n.-max constraint exceeds sum-max, ',&
+               'so modifying q.n.-max: ',&
+               nemax,' -> ',nesum
+               nemax=nesum
+            endif
+            gentrunc=.true.
+            exit
+         endif
       ENDDO
 
       end subroutine getsubmodedata
@@ -286,41 +464,67 @@
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       subroutine sortDPeigvalsGen(nbloc,evalsND,qns,evals1D,nbas,&
-                                  nmode,nexci,nmsum,nesum,constraint,&
-                                  Etarget)
+                                  nmode,nexci,nexmx,nmsum,nesum,nemax,&
+                                  constraint,Etarget,gentrunc)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Generates all vecs in the direct-product representation (for testing)
 
       implicit none
-      integer, intent(inout) :: qns(:,:)
-      real*8, intent(inout)  :: evalsND(:)
-      integer, intent(in)    :: nmode(:,:),nexci(:,:)
-      integer, intent(in)    :: nbas(:)
-      real*8, intent(in)     :: evals1D(:,:)
-      integer, intent(in)    :: nbloc,nmsum,nesum,constraint
-      real*8, intent(in)     :: Etarget
-      integer, allocatable   :: qnstmp(:,:)
-      real*8,  allocatable   :: evalsNDtmp(:),tabindx(:)
-      integer, allocatable   :: subqns(:)
-      integer :: nmtarget(2),netarget(2)
+      integer, intent(in)  :: nbloc
+      integer, allocatable, intent(inout) :: qns(:,:)
+      real*8,  allocatable, intent(inout) :: evalsND(:)
+      integer, intent(in)  :: nmode(:,:),nexci(:,:),nexmx(:,:)
+      integer, intent(in)  :: nbas(:)
+      real*8, intent(in)   :: evals1D(:,:)
+      integer, intent(in)  :: nmsum,nesum,nemax,constraint
+      real*8, intent(in)   :: Etarget
+      logical, intent(in)  :: gentrunc
+      integer, allocatable :: qnstmp(:,:)
+      real*8,  allocatable :: evalsNDtmp(:),tabindx(:)
+      integer, allocatable :: subqns(:)
+      integer :: nmtarget(2),netarget(2),mxtarget(2)
       integer :: i,j,k,ndof,nstate,mstate
-!!!
-!      integer :: l
-!      character(len=64) :: frmt
-!!!
+
       ndof=SIZE(nbas)
-!!! TEST
-!      write(frmt,'(A,I0,A)') '(',ndof,'(X,I3),X,f16.8)'
-!!!
+
+      if (gentrunc) then
+
+         nmtarget=(/0,nmsum/)
+         netarget=(/0,nesum/)
+         mxtarget=(/0,nemax/)
+!        Find all states allowed by limits imposed in layerfile
+         call GetStatesinWindow(nbloc,evalsND,qns,evals1D,nbas,&
+                                nmode,nexci,nexmx,nmtarget,netarget,&
+                                mxtarget,Etarget,nstate)
+
+!        Truncate block by nr. of states found and sort by energy
+         allocate(evalsNDtmp(nstate),qnstmp(nstate,ndof),tabindx(nstate))
+         evalsNDtmp(:)=evalsND(1:nstate)
+         qnstmp(:,:)=qns(1:nstate,:)
+         deallocate(evalsND,qns)
+         do k=1,nstate
+            tabindx(k)=k
+         enddo
+         call dsort(evalsNDtmp,tabindx,nstate,2)
+         allocate(evalsND(nstate),qns(nstate,ndof))
+         do k=1,nstate
+            qns(k,:)=qnstmp(int(tabindx(k)),:)
+            evalsND(k)=evalsNDtmp(int(tabindx(k)))
+         enddo
+         deallocate(evalsNDtmp,qnstmp,tabindx)
+
+      else
+
+      mxtarget=(/0,nemax/)
 
       select case(constraint)
       case(0) ! Sort only by energy
          nmtarget=(/0,nmsum/) ! Default: any number of modes coupled
          netarget=(/0,nesum/) ! Default: any excitation level
          call GetStatesinWindow(nbloc,evalsND,qns,evals1D,nbas,&
-                                nmode,nexci,nmtarget,netarget,Etarget,&
-                                nstate)
+                                nmode,nexci,nexmx,nmtarget,netarget,&
+                                mxtarget,Etarget,nstate)
 
       case(1) ! Sort by increasing nmode, by energy for each nmode value
          nstate=0
@@ -330,19 +534,14 @@
             netarget=(/j,nesum/)
 !           Get states having j modes coupled
             call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,nbas,&
-                                   nmode,nexci,nmtarget,netarget,Etarget,&
-                                   mstate)
-!!!
-            if (mstate.gt.0) write(*,*) 'Adding ',j,'-mode states:'
-!!!
+                                   nmode,nexci,nexmx,nmtarget,netarget,&
+                                   mxtarget,Etarget,mstate)
+
 !           Add the states to the master list
             do k=1,mstate
                nstate=nstate+1
                qns(nstate,:)=qnstmp(k,:)
                evalsND(nstate)=evalsNDtmp(k)
-!!!
-!               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
-!!!
                if (nstate.ge.nbloc) exit
             enddo
             if (nstate.ge.nbloc) exit
@@ -357,20 +556,14 @@
             netarget(1:2)=j
 !           Get states having j excitations
             call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,nbas,&
-                                   nmode,nexci,nmtarget,netarget,&
-                                   Etarget,mstate)
-!!!
-!            if (mstate.gt.0) write(*,*) 'Adding ',j,'-excited states:'
-!!!
+                                   nmode,nexci,nexmx,nmtarget,netarget,&
+                                   mxtarget,Etarget,mstate)
 
 !           Add the states to the master list
             do k=1,mstate
                nstate=nstate+1
                qns(nstate,:)=qnstmp(k,:)
                evalsND(nstate)=evalsNDtmp(k)
-!!!
-!               write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
-!!!
                if (nstate.ge.nbloc) exit
             enddo
             if (nstate.ge.nbloc) exit
@@ -387,21 +580,14 @@
                netarget(1:2)=i
 !              Get states having j modes coupled and i quanta
                call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,&
-                                      nbas,nmode,nexci,nmtarget,netarget,&
-                                      Etarget,mstate)
-!!!
-!               if (mstate.gt.0) &
-!               write(*,*) 'Adding ',j,'-mode ',i,'-excited states:'
-!!!
+                                      nbas,nmode,nexci,nexmx,nmtarget,netarget,&
+                                      mxtarget,Etarget,mstate)
 
 !              Add the states to the master list
                do k=1,mstate
                   nstate=nstate+1
                   qns(nstate,:)=qnstmp(k,:)
                   evalsND(nstate)=evalsNDtmp(k)
-!!!
-!                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
-!!!
                   if (nstate.ge.nbloc) exit
                enddo
                if (nstate.ge.nbloc) exit
@@ -420,22 +606,14 @@
                nmtarget(1:2)=j
 !              Get states having i quanta and j modes coupled
                call GetStatesinWindow(nbloc,evalsNDtmp,qnstmp,evals1D,&
-                                      nbas,nmode,nexci,nmtarget,netarget,&
-                                      Etarget,mstate)
-!!!
-!               if (mstate.gt.0) &
-!               write(*,*) 'Adding ',i,'-excited ',j,'-mode states:'
-!!!
+                                      nbas,nmode,nexci,nexmx,nmtarget,netarget,&
+                                      mxtarget,Etarget,mstate)
 
 !              Add the states to the master list
                do k=1,mstate
                   nstate=nstate+1
                   qns(nstate,:)=qnstmp(k,:)
                   evalsND(nstate)=evalsNDtmp(k)
-!!!
-!                  write(*,frmt) (qns(nstate,l)-1,l=1,ndof),evalsND(nstate)
-!!!
-
                   if (nstate.ge.nbloc) exit
                enddo
                if (nstate.ge.nbloc) exit
@@ -466,117 +644,9 @@
       enddo
       deallocate(qnstmp,tabindx)
 
+      endif ! gentrunc
+
       end subroutine sortDPeigvalsGen
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine structuredDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Generates all vecs in the direct-product representation (for testing)
-
-      implicit none
-      integer, intent(inout) :: qns(:,:)
-      real*8, intent(inout)  :: evalsND(:)
-      integer, intent(in)  :: nbas(:)
-      real*8, intent(in)   :: evals1D(:,:)
-      integer, allocatable :: indx(:)
-      integer, intent(in)  :: nbloc
-      integer :: i,j,ndof
-
-      ndof=SIZE(nbas)
-      ALLOCATE(indx(ndof))
-      indx(:)=nbas(:)
-
-!     Run through DP-basis via calls to NextIndex and assemble the guess
-!     eigenvalues
-      DO i=1,nbloc
-         call NextIndex(indx,nbas)
-         qns(i,:)=indx(:)
-         evalsND(i)=0.d0
-         DO j=1,ndof
-            evalsND(i)=evalsND(i)+evals1D(j,indx(j))
-         ENDDO
-      ENDDO
-
-      DEALLOCATE(indx)
-
-      end subroutine structuredDPeigvals
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine sortDPeigvals(nbloc,evalsND,qns,evals1D,nbas)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Sorts eigenvalues of a direct product separable wavefunction
-
-      implicit none
-      integer, intent(inout) :: qns(:,:)
-      real*8, intent(inout)  :: evalsND(:)
-      integer, allocatable, intent(in) :: nbas(:)
-      real*8, allocatable, intent(in)  :: evals1D(:,:)
-      integer, allocatable :: qnlist(:,:),tmpqn(:)
-      real*8, allocatable  :: sums(:)
-      integer, intent(in)  :: nbloc
-      integer :: i,j,k,l,ndof,prodND,nguess,ii,jj
-      integer :: minind(1),nallowed
-      real*8  :: sumt,bignr
-      logical :: allowed,add2end
-
-      ndof=SIZE(nbas)
-      bignr=1.0d99
-
-      ALLOCATE(qnlist(ndof*nbloc,ndof),sums(ndof*nbloc),tmpqn(ndof))
-
-!     Initialize the list of q.n. list and the sums with the ground state
-      nguess=1
-      qnlist(1,:)=1
-      sums(1)=0.d0
-      DO j=1,ndof
-         sums(1)=sums(1)+evals1D(j,1)
-      ENDDO
-
-!     Build the list of states
-      DO i=1,nbloc
-
-!        Get the state in the list with the lowest energy
-         evalsND(i)=MINVAL(sums(1:nguess))
-         minind=MINLOC(sums(1:nguess))
-         qns(i,:)=qnlist(minind(1),:)
-
-!        Find the allowed excitations out of the previously-found
-!        lowest energy state and add to qnlist
-         add2end=.FALSE.
-         nallowed=0
-         DO j=1,ndof
-            sumt=evalsND(i)
-            tmpqn=qns(i,:)
-            call ExciteQN(j,evals1D(j,:),nbas(j),tmpqn,sumt)
-            allowed=checkallowed(qnlist(1:nguess,:),tmpqn,minind(1),&
-                    nbas)
-            IF (allowed) THEN
-               nallowed=nallowed+1
-               IF (add2end) THEN ! Allowed new q.n.: add to end
-                  nguess=nguess+1
-                  qnlist(nguess,:)=tmpqn
-                  sums(nguess)=sumt
-               ELSE  ! First new allowed q.n.: replace old one
-                  qnlist(minind(1),:)=tmpqn
-                  sums(minind(1))=sumt
-                  add2end=.TRUE.
-               ENDIF
-            ENDIF
-         ENDDO
-!        IF none of the excitations are allowed, remove from the list
-         IF (nallowed.eq.0) THEN
-            qnlist(minind(1),:)=nbas(:)+1
-            sums(minind(1))=bignr
-         ENDIF
-      ENDDO
-
-      DEALLOCATE(qnlist,sums,tmpqn)
-
-      end subroutine sortDPeigvals
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -659,67 +729,25 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ExciteQN(dofnr,evals,nbas,qnlist,dsum)
+      integer function getboundingbaseprod(nbas,nbloc) result(prodND)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Excites a quantum number in a multi-D list, and replaces the sum 
-! resulting from the old value with the sum resulting from the new value
+! Compares product basis in 'nbas' with block size 'nbloc'
+! Returns [-1,0,1] for PI_j nbas_j [.lt.,.eq.,.gt.] nbloc, respectively
 
       implicit none
-      integer, intent(in) :: dofnr,nbas
-      integer, intent(inout) :: qnlist(:)
-      real*8, intent(in) :: evals(:)
-      real*8, intent(inout) :: dsum
-      real*8 :: bignr,subtr,add
+      integer, intent(in) :: nbas(:)
+      integer, intent(in) :: nbloc
+      integer :: j,nsubm
 
-      bignr=1.0d99
-
-!     If qnlist already exceeds the basis, do not excite
-      IF (qnlist(dofnr).lt.nbas) THEN ! excite and update sum
-         subtr=evals(qnlist(dofnr))
-         add=evals(qnlist(dofnr)+1)
-         dsum=dsum-subtr+add
-         qnlist(dofnr)=qnlist(dofnr)+1
-      ELSE
-         dsum=bignr
-         qnlist(dofnr)=nbas+1
-      ENDIF
-
-      end subroutine ExciteQN
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      function checkallowed(qnlist,tmpqn,iskip,nbas)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Return true if excitation of quantum number is allowed, i.e. if there
-! are no states in the q.n. list with ALL q.n.s <= the ones in tmpqn
-
-      implicit none
-      integer, intent(in) :: qnlist(:,:),tmpqn(:),nbas(:)
-      integer, intent(in) :: iskip
-      integer :: k,l,ndof,nterms
-      logical :: checkallowed
-
-      ndof=SIZE(tmpqn)
-      nterms=SIZE(qnlist,1)
-
-      checkallowed=.TRUE.
-
-      DO k=1,nterms
-         IF (k.eq.iskip) CYCLE
-         DO l=1,ndof
-            IF (tmpqn(l).gt.nbas(l)) THEN
-               checkallowed=.TRUE.
-               EXIT
-            ENDIF
-            IF (tmpqn(l).lt.qnlist(k,l)) EXIT
-            IF (l.eq.ndof) checkallowed=.FALSE.
-         ENDDO
-         IF (.not. checkallowed) EXIT
+      nsubm=SIZE(nbas)
+      prodND=1
+      DO j=1,nsubm
+         prodND=prodND*nbas(j)
+         IF (prodND.gt.nbloc) EXIT
       ENDDO
 
-      end function checkallowed
+      end function getboundingbaseprod
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
