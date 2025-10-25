@@ -143,7 +143,7 @@ COMPILE                 = ${FC} ${COMPILEFLG} ${MODULEFLG} ${OBJDIR}
 MLEXEFILE = mlcp.x
 
 # Make target to build all the object files and assemble them
-all : ${MLEXEFILE} 
+all : clean directories mlcp
 
 mlcp : ${MLEXEFILE}
 
@@ -160,12 +160,12 @@ ${OBJDIR}/%.o : ${SRCDIR}/%.f
 	mv *.o ${OBJDIR}
 
 # Make target to build required directories
-directories : ${OBJDIR}
+directories :
 	mkdir -p ${OBJDIR}
 
 # Remove compiled objects and related stuff
 clean :
-	rm -rf ${OBJDIR}/*
+	rm -rf ${OBJDIR} *.o *.mod mlcp.x
 
 # ----------------------------------------------------------------------
 # ----------------------- DEPENDENCIES----------------------------------
