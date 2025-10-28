@@ -447,11 +447,11 @@
 
          nrs=SIZE(cpp%rs)
 
-         fa='(3A)'
-         fi='(A,I0,A)'
-         fl='(A,L0,A)'
-         fr='(A,ES14.6,A)'
-         write(fii,'(A,I0,A)') '(A,',nrs,'(I0,X),A)'
+         fa='(X,3A)'
+         fi='(X,A,I0,A)'
+         fl='(X,A,L0,A)'
+         fr='(X,A,ES14.6,A)'
+         write(fii,'(A,I0,A)') '(X,A,',nrs,'(I0,X),A)'
 
          write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
 
