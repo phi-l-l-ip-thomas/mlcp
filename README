@@ -12,12 +12,14 @@
 
    Alternatively, MLCP comes with BLAS and LAPACK libraries included
    (in the 'lib/' directory) which can be compiled and linked
-   using e.g. gfortran tools. After performing step 1 above, one can
-   use the script
+   using e.g. gfortran tools. One can use the script
 
-   $ bash install
+   $ ./install.sh
 
-   to compile and link the libraries and to build MLCP.
+   to compile and link the libraries and to build MLCP. Note that the
+   serial + OpenMP is built by default; to build the parallel MPI
+   version, select the appropriate configuration file to copy in 
+   install.sh.
 
 2) MLCP requires an input file containing the calculation settings and
    the layer structure of the system of interest. A number of potential
@@ -28,7 +30,7 @@
 
    To run MLCP, at the command line execute:
 
-   $ mlcp.x <input file>
+   $ ./mlcp.x <input file>
 
    The input file consists of five sections, each of which is initiated
    by a '$<section>' tag and terminated with an '$end-<section>' tag.
