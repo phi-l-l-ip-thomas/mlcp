@@ -8,16 +8,34 @@
       USE ERRORTRAP
       USE UTILS
       USE MYMPI
+      USE INPUTCP
 
       implicit none
       real(kind=8), allocatable, private :: module_time(:)
       logical, private :: MODULE_SETUP = .FALSE.
 
       TYPE MLtree
-          integer, dimension(:,:), allocatable :: modcomb,modstart,&
-          whichmod,gdim,truncate
-          integer, dimension(:), allocatable :: nmode,resort
-          integer :: nlayr,ndof,ntrunc
+           TYPE (CPPar) :: dpp
+           TYPE (CPPar), allocatable :: cpp(:)
+           integer, dimension(:,:), allocatable :: modcomb,modstart,&
+           whichmod,gdim
+           integer, dimension(:), allocatable :: nmode,resort
+           integer :: nlayr,ndof,nnodelist,nkey
+           character(len=128), allocatable :: keyfields(:), keyvalues(:)
+           ! Control parameters
+           character(len=128) :: system,pes_path,resfile,pe_transform
+           logical            :: dorestart
+           integer            :: rs(33)
+           real(kind=8)       :: pe_trans_fac
+           character(len=128), dimension(6) :: &
+           fieldlist=[character(len=128) :: &
+                       'pe_trans_fac',&
+                       'pe_transform',&
+                       'system',&
+                       'pes_path',&
+                       'resfile',&
+                       'rs'&
+                      ]
       END TYPE MLtree
 
       contains
@@ -65,32 +83,32 @@
       IF (ALLOCATED(ML%modstart)) DEALLOCATE(ML%modstart)
       IF (ALLOCATED(ML%whichmod)) DEALLOCATE(ML%whichmod)
       IF (ALLOCATED(ML%gdim)) DEALLOCATE(ML%gdim)
-      IF (ALLOCATED(ML%truncate)) DEALLOCATE(ML%truncate)
+      IF (ALLOCATED(ML%cpp)) DEALLOCATE(ML%cpp)
       IF (ALLOCATED(ML%nmode)) DEALLOCATE(ML%nmode)
       IF (ALLOCATED(ML%resort)) DEALLOCATE(ML%resort)
+      IF (ALLOCATED(ML%keyfields)) DEALLOCATE(ML%keyfields)
+      IF (ALLOCATED(ML%keyvalues)) DEALLOCATE(ML%keyvalues)
 
       end subroutine Flush_ModeComb
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine StartModeComb(ML,verbosity)
+      subroutine StartModeComb(ML,fnm)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Main routine for reading and processing mode combination data
 
       implicit none
       TYPE (MLtree) :: ML
-      integer, intent(in) :: verbosity
-      character(len=64) :: inpfile
+      character(len=128),intent(in) :: fnm
 
       IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(/X,A/)') 'Setting up mode-combination module...'
 
-      inpfile='layers.inp'
-      CALL ReadModeDat(ML,inpfile)
+      CALL ReadModeDat(ML,fnm)
       CALL BcastModeDat(ML)
       CALL ValidateModeDat(ML)
-      CALL PrintModeDat(ML,verbosity)
+      CALL PrintModeDat(ML)
 
       end subroutine StartModeComb
 
@@ -104,14 +122,19 @@
 
       implicit none
       TYPE (MLtree) :: ML
-      character(len=64), intent(in) :: fnm      
+      TYPE (CPPar)  :: cppref
+      character(len=128), intent(in) :: fnm
+      character(len=128), dimension(:), allocatable :: tfields, tvalues
+      character(len=128), dimension(:,:), allocatable :: mfields, mvalues
       integer, allocatable :: nmode_tmp(:),blankline(:),res_tmp(:)
-      integer, allocatable :: bas_tmp(:,:),layrs_tmp(:,:)
+      integer, allocatable :: bas_tmp(:,:),layrs_tmp(:,:),nfield_tmp(:)
+      integer, allocatable :: lm_key(:)
+      real(kind=8), allocatable :: lm_tmp(:,:)
       integer :: il,im,ii,i2,u,InpStat,ReadStat,linelen,maxndof
-      integer :: iri,irf,ili,ilf,ibi,ibf,iti,itf,maxlines,ilb,ill,ilt
-      integer :: iline,nlines,iblk,nblk,rblk,bblk,lblk,tblk
+      integer :: ici,icf,iri,irf,ili,ilf,ibi,ibf,iti,itf,maxfields
+      integer :: ilb,ill,ilt,maxlines,nread
+      integer :: iline,nlines,iblk,nblk,cblk,rblk,bblk,lblk,tblk
       character(len=1024)  :: line
-      character(len=32)    :: string
       real(kind=8) :: ti1,ti2
 
       IF (.NOT. MODULE_SETUP) call Init_ModeComb_Module()
@@ -124,6 +147,9 @@
 !     For line reading (change if working with a larger system)
       maxndof=1024
       maxlines=1024
+      maxfields=128
+      ici=0
+      icf=0
       iri=0
       irf=0
       ibi=0
@@ -158,6 +184,10 @@
             iblk=iblk+1
             blankline(iblk)=iline
 !        determine where sections begin and end
+         ELSEIF (line(1:8) == '$control') THEN
+            ici=iline
+         ELSEIF (line(1:12) == '$end-control') THEN
+            icf=iline
          ELSEIF (line(1:7) == '$resort') THEN
             iri=iline
          ELSEIF (line(1:11) == '$end-resort') THEN
@@ -170,24 +200,35 @@
             ili=iline
          ELSEIF (line(1:11) == '$end-layers') THEN
             ilf=iline
-         ELSEIF (line(1:9) == '$truncate') THEN
+         ELSEIF (line(1:5) == '$node') THEN
             iti=iline
-         ELSEIF (line(1:13) == '$end-truncate') THEN
+         ELSEIF (line(1:9) == '$end-node') THEN
             itf=iline
-         ELSEIF (line(linelen:linelen).ne.'/') THEN
-            CALL AbortWithError('Error: input list must end with "/"')
          ENDIF
       ENDDO
       nblk=iblk
       nlines=iline
 
 !     Detect input errors:
+!     (required) Control section
+      IF (ici.eq.0 .or. icf.eq.0 .or. ici.gt.icf .or. &
+          (ici.ge.ibi .and. ici.le.ibf) .or. &
+          (ici.ge.iri .and. ici.le.irf) .or. &
+          (ici.ge.ili .and. ici.le.ilf) .or. &
+          (ici.ge.iti .and. ici.le.itf) .or. &
+          (icf.ge.ibi .and. icf.le.ibf) .or. &
+          (icf.ge.iri .and. icf.le.irf) .or. &
+          (icf.ge.ili .and. icf.le.ilf) .or. &
+          (icf.ge.iti .and. icf.le.itf)) &
+         CALL AbortWithError('ReadModeDat(): bad $control section')
 
 !     (required) Basis section
       IF (ibi.eq.0 .or. ibf.eq.0 .or. ibi.gt.ibf .or. &
+          (ibi.ge.ici .and. ibi.le.icf) .or. &
           (ibi.ge.iri .and. ibi.le.irf) .or. &
           (ibi.ge.ili .and. ibi.le.ilf) .or. &
           (ibi.ge.iti .and. ibi.le.itf) .or. &
+          (ibf.ge.ici .and. ibf.le.icf) .or. &
           (ibf.ge.iri .and. ibf.le.irf) .or. &
           (ibf.ge.ili .and. ibf.le.ilf) .or. &
           (ibf.ge.iti .and. ibf.le.itf)) &
@@ -195,9 +236,11 @@
 
 !     (required) Layers section
       IF (ili.eq.0 .or. ilf.eq.0 .or. ili.gt.ilf .or. &
+          (ili.ge.ici .and. ili.le.icf) .or. &
           (ili.ge.iri .and. ili.le.irf) .or. &
           (ili.ge.ibi .and. ili.le.ibf) .or. &
           (ili.ge.iti .and. ili.le.itf) .or. &
+          (ilf.ge.ici .and. ilf.le.icf) .or. &
           (ilf.ge.iri .and. ilf.le.irf) .or. &
           (ilf.ge.ibi .and. ilf.le.ibf) .or. &
           (ilf.ge.iti .and. ilf.le.itf)) &
@@ -206,33 +249,40 @@
 !     (optional) Resort section
       IF (.not.(iri.eq.0 .and. irf.eq.0)) THEN
          IF (iri.eq.0 .or. irf.eq.0 .or. iri.gt.irf .or. &
+             (iri.ge.ici .and. iri.le.icf) .or. &
              (iri.ge.ibi .and. iri.le.ibf) .or. &
              (iri.ge.ili .and. iri.le.ilf) .or. &
              (iri.ge.iti .and. iri.le.itf) .or. &
+             (irf.ge.ici .and. irf.le.icf) .or. &
              (irf.ge.ibi .and. irf.le.ibf) .or. &
              (irf.ge.ili .and. irf.le.ilf) .or. &
              (irf.ge.iti .and. irf.le.itf)) &
             CALL AbortWithError('ReadModeDat(): bad $resort section')
       ENDIF
 
-!     (optional) Truncation section
+!     (optional) Node section
       IF (.not.(iti.eq.0 .and. itf.eq.0)) THEN
          IF (iti.eq.0 .or. itf.eq.0 .or. iti.gt.itf .or. &
+             (iti.ge.ici .and. iti.le.icf) .or. &
              (iti.ge.ili .and. iti.le.ilf) .or. &
              (iti.ge.iri .and. iti.le.irf) .or. &
              (iti.ge.ibi .and. iti.le.ibf) .or. &
+             (itf.ge.ici .and. itf.le.icf) .or. &
              (itf.ge.ili .and. itf.le.ilf) .or. &
              (itf.ge.iri .and. itf.le.irf) .or. &
              (itf.ge.ibi .and. itf.le.ibf)) &
-            CALL AbortWithError('ReadModeDat(): bad $truncate section')
+            CALL AbortWithError('ReadModeDat(): bad $node section')
       ENDIF
 
 !     Make sure layer counts are consistent
+      cblk=0
       rblk=0
       bblk=0
       lblk=0
       tblk=0
       DO iblk=1,nblk
+        IF (blankline(iblk).gt.ici .and. blankline(iblk).lt.icf) &
+           cblk=cblk+1
         IF (blankline(iblk).gt.iri .and. blankline(iblk).lt.irf) &
            rblk=rblk+1
         IF (blankline(iblk).gt.ibi .and. blankline(iblk).lt.ibf) &
@@ -249,19 +299,21 @@
       IF (ibf-ibi-bblk.ne.ilf-ili-lblk+1) CALL AbortWithError(&
             'ReadModeDat(): Inconsistent input layer numbers')
       ML%nlayr=ibf-ibi-bblk-1
-      ML%ntrunc=itf-iti-tblk-1
       IF (ML%nlayr.lt.1) CALL AbortWithError('No layers!')
+      ML%nnodelist=itf-iti-tblk-1
 
       REWIND(u)
 
 !     Read sections
       ALLOCATE(res_tmp(maxndof),bas_tmp(ML%nlayr,maxndof))
-      IF (ML%ntrunc.gt.0) THEN
-         ALLOCATE(ML%truncate(ML%ntrunc,5))
-         ML%truncate(:,:)=-1
-      ENDIF
-      IF (ML%nlayr.gt.1) THEN
-         ALLOCATE(layrs_tmp(ML%nlayr-1,maxndof))
+      IF (ML%nlayr.gt.1) ALLOCATE(layrs_tmp(ML%nlayr-1,maxndof))
+      IF (ML%nnodelist.gt.0) THEN
+         ALLOCATE(nfield_tmp(ML%nnodelist))
+         ALLOCATE(mfields(maxfields,ML%nnodelist))
+         ALLOCATE(mvalues(maxfields,ML%nnodelist))
+         ALLOCATE(lm_tmp(ML%nnodelist,2))
+         ALLOCATE(lm_key(ML%nnodelist))
+         ALLOCATE(ML%cpp(ML%nnodelist))
       ENDIF
       res_tmp=0
       bas_tmp=0
@@ -273,22 +325,44 @@
          IF (iline.eq.blankline(iblk)) THEN
             READ(u,*,IOSTAT=ReadStat)
             iblk=iblk+1
+         ELSEIF (iline.gt.ici .and. iline.lt.icf) THEN
+            READ(u,"(A1024)") Line
+            call parse_line(line,ML%keyfields,ML%keyvalues)
          ELSEIF (iline.gt.iri .and. iline.lt.irf) THEN
-            READ(u,*,err=225) (res_tmp(im),im=1,maxndof)
+            READ(u,"(A1024)") Line
+            nread=stringcountintegers(TRIM(ADJUSTL(line)))
+            if (nread.lt.1 .or. nread.gt.maxndof) &
+               call AbortWithError("Error reading $resort data")
+            res_tmp(1:nread)=string2integerarray(TRIM(ADJUSTL(line)),nread)
          ELSEIF (iline.gt.ibi .and. iline.lt.ibf) THEN
             ilb=ilb+1
-            READ(u,*,err=225) (bas_tmp(ilb,im),im=1,maxndof)
+            READ(u,"(A1024)") Line
+            nread=stringcountintegers(TRIM(ADJUSTL(line)))
+            if (nread.lt.1 .or. nread.gt.maxndof) &
+               call AbortWithError("Error reading $basis data")
+            bas_tmp(ilb,1:nread)=string2integerarray(TRIM(ADJUSTL(line)),nread)
          ELSEIF (iline.gt.ili .and. iline.lt.ilf) THEN
             ill=ill+1
-            READ(u,*,err=225) (layrs_tmp(ill,im),im=1,maxndof)
+            READ(u,"(A1024)") Line
+            nread=stringcountintegers(TRIM(ADJUSTL(line)))
+            if (nread.lt.1 .or. nread.gt.maxndof) &
+               call AbortWithError("Error reading $layers data")
+            layrs_tmp(ill,1:nread)=string2integerarray(TRIM(ADJUSTL(line)),nread)
          ELSEIF (iline.gt.iti .and. iline.lt.itf) THEN
             ilt=ilt+1
-            READ(u,*,err=225) (ML%truncate(ilt,im),im=1,5)
+            READ(u,"(A1024)") Line
+            call parse_line(line,tfields,tvalues)
+            nfield_tmp(ilt)=SIZE(tfields)
+            mfields(1:nfield_tmp(ilt),ilt)=tfields(1:nfield_tmp(ilt))
+            mvalues(1:nfield_tmp(ilt),ilt)=tvalues(1:nfield_tmp(ilt))
+            DEALLOCATE(tfields,tvalues)
          ELSE
             READ(u,*,IOSTAT=ReadStat)
          ENDIF
-225      continue
       ENDDO
+
+      ML%nkey=0
+      IF (ALLOCATED(ML%keyfields)) ML%nkey=SIZE(ML%keyfields)
 
       ML%ndof=0
       DO im=1,maxndof
@@ -364,11 +438,49 @@
          ENDDO
       ENDDO
 
-      DEALLOCATE(bas_tmp)
-      IF (ML%nlayr.gt.1) THEN
-         DEALLOCATE(layrs_tmp)
+!     Set control parameters
+      call SetMLDefaults(ML)
+      call processmlfields(ML)
+
+!     Process node list and extract layer-mode data
+      IF (ML%nnodelist.gt.0) THEN
+         DO il=1,ML%nnodelist
+            ML%cpp(il)=ML%dpp
+!           Remove whitespace due to special characters
+            DO im=1,nfield_tmp(il)
+               call scrubstring(mfields(im,il))
+            ENDDO
+            call processcppfields(ML%cpp(il),mfields(1:nfield_tmp(il),il),&
+                                             mvalues(1:nfield_tmp(il),il))
+            lm_key(il)=il
+            lm_tmp(il,1)=REAL(ML%cpp(il)%layer)
+            lm_tmp(il,2)=REAL(ML%cpp(il)%mode)
+         ENDDO
+
+         call hsort2Drlist(lm_key,lm_tmp)
+
+!        Builded sorted node list
+         i2=0
+         DO il=1,ML%nnodelist
+            im=lm_key(il)
+            if (NINT(lm_tmp(il,1)).gt.i2) then ! Reset ref. settings
+               cppref=ML%dpp
+            endif
+            ML%cpp(il)=cppref
+            call processcppfields(ML%cpp(il),mfields(1:nfield_tmp(im),im),&
+                                             mvalues(1:nfield_tmp(im),im))
+            if (ML%cpp(il)%mode.eq.0) then ! Set layer ref. settings
+               i2=ML%cpp(il)%layer
+               cppref=ML%cpp(il)
+            endif
+         ENDDO
+
+         DEALLOCATE(nfield_tmp,mfields,mvalues,lm_tmp,lm_key)
       ENDIF
-      DEALLOCATE(blankline)
+
+      IF (ML%nlayr.gt.1) DEALLOCATE(layrs_tmp)
+      DEALLOCATE(bas_tmp,blankline)
+
       CLOSE(u)
 
       ENDIF rank0
@@ -380,7 +492,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SaveModeDat(ML,fnm)
+      subroutine SaveModeDat(ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Regurgitates input file ('layers.inp') with mode combination data to
@@ -388,9 +500,10 @@
 
       implicit none
       TYPE (MLtree), INTENT(IN) :: ML
-      character(len=48), intent(in) :: fnm
-      character(len=64) :: fname,frmt
-      integer :: u,il,im
+      TYPE (CPPar) :: cppref
+      character(len=128)  :: fnm,frmt
+      character(len=1024) :: line
+      integer :: u,il,im,i2
       real(kind=8) :: ti1,ti2
 
       IF (.NOT. MODULE_SETUP) call Init_ModeComb_Module()
@@ -399,25 +512,36 @@
 
       rank0 : IF (mpirank.eq.mpi_io_rank) THEN
 
-      write(fname,'(2A)') TRIM(ADJUSTL(fnm)),'_layers.rst'
+      write(fnm,'(2A)') TRIM(ADJUSTL(ML%resfile)),'_layers.rst'
 
 !     Open output file
       u = LookForFreeUnit()
-      OPEN(u, FILE=TRIM(ADJUSTL(fname)), STATUS="UNKNOWN")
+      OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
+
+!     Write control section
+      write(u,*)
+      write(u,'(A)') '$control'
+      DO il=1,ML%nkey
+         write(line,'(4A,X)') &
+         TRIM(ADJUSTL(ML%keyfields(il))),"='",&
+         TRIM(ADJUSTL(ML%keyvalues(il))),"'"
+         write(u,'(A)') TRIM(ADJUSTL(line))
+      ENDDO
+      write(u,'(A)') '$end-control'
 
 !     Write resort section
       write(u,*)
       write(u,'(A)') '$resort'
-      write(frmt,'(A,I0,A)') '(',ML%ndof,'(I0,X),A)'
-      write(u,frmt) (ML%resort(im),im=1,ML%ndof),'/'
+      write(frmt,'(A,I0,A)') '(',ML%ndof,'(I0,X))'
+      write(u,frmt) (ML%resort(im),im=1,ML%ndof)
       write(u,'(A)') '$end-resort'
 
 !     Write basis section
       write(u,*)
       write(u,'(A)') '$basis'
       DO il=1,ML%nlayr
-         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X),A)'
-         write(u,frmt) (ML%gdim(il,im),im=1,ML%nmode(il)),'/'
+         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X))'
+         write(u,frmt) (ML%gdim(il,im),im=1,ML%nmode(il))
       ENDDO
       write(u,'(A)') '$end-basis'
 
@@ -425,21 +549,32 @@
       write(u,*)
       write(u,'(A)') '$layers'
       DO il=2,ML%nlayr
-         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X),A)'
-         write(u,frmt) (ML%modcomb(il,im),im=1,ML%nmode(il)),'/'
+         write(frmt,'(A,I0,A)') '(',ML%nmode(il),'(I0,X))'
+         write(u,frmt) (ML%modcomb(il,im),im=1,ML%nmode(il))
       ENDDO
       write(u,'(A)') '$end-layers'
       write(u,*)
 
-!     Write truncate section
-      IF (ML%ntrunc.gt.0) THEN
+!     Write node section
+      IF (ML%nnodelist.gt.0) THEN
          write(u,*)
-         write(u,'(A)') '$truncate'
-         DO il=1,ML%ntrunc
-            write(frmt,'(A)') '(5(I0,X),A)'
-            write(u,frmt) (ML%truncate(il,im),im=1,5),'/'
+         write(u,'(A)') '$node'
+
+         i2=0
+         DO il=1,ML%nnodelist
+            if (ML%cpp(il)%layer.gt.i2) then ! Reset ref. settings
+               cppref=ML%dpp
+            endif
+            call WriteCPPInputs(cppref,ML%cpp(il),line)
+            if (ML%cpp(il)%mode.eq.0) then ! Set layer ref. settings
+               i2=ML%cpp(il)%layer
+               cppref=ML%cpp(il)
+            endif
+            write(u,'(A)') TRIM(ADJUSTL(line))
          ENDDO
-         write(u,'(A)') '$end-truncate'
+
+
+         write(u,'(A)') '$end-node'
          write(u,*)
       ENDIF
 
@@ -454,15 +589,16 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine PrintModeDat(ML,verbosity)
+      subroutine PrintModeDat(ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Prints mode combination data
 
       implicit none
       TYPE (MLtree) :: ML
-      integer, intent(in) :: verbosity
-      integer :: il,im
+      TYPE (CPPar)  :: cppref
+      integer :: il,im,i2
+      character(len=1024) :: line
       real(kind=8) :: ti1,ti2
 
       IF (.NOT. MODULE_SETUP) call Init_ModeComb_Module()
@@ -471,7 +607,40 @@
 
       rank0 : IF (mpirank.eq.mpi_prnt_rank) THEN
 
-      write(*,'(X,A/)') '** Structure of multilayer CP-format tree **'
+      write(*,'(X,A/)') '** Input vars (defaults / set in $control) **'
+      write(*,'(X,A,2X,A)') 'Hamiltonian to be set up      (system):',&
+                             TRIM(ADJUSTL(ML%system))
+      write(*,'(X,A,2X,A)') 'Path to potential constants (pes_path):',&
+                             TRIM(ADJUSTL(ML%pes_path))
+      write(*,'(X,A,2X,A)') 'Restart file name            (resfile):',&
+                             TRIM(ADJUSTL(ML%resfile))
+      write(*,'(X,A,2X,A)') 'PES transformation type (pe_transform):',&
+                             TRIM(ADJUSTL(ML%pe_transform))
+      write(*,'(X,A,X,ES11.4)') &
+              'PE transform factor     (pe_trans_fac):',ML%pe_trans_fac
+      write(*,'(X,A,2X,33(I0,X))') &
+                            'Random seed                       (rs):',&
+                             (ML%rs(il),il=1,33)
+      call PrintCPPInputs(ML%dpp)
+
+      IF (ML%nnodelist.gt.0) then
+         write(*,'(/A/)') &
+                        '** Input vars specified in $node namelist  **'
+         i2=0
+         DO il=1,ML%nnodelist
+            if (ML%cpp(il)%layer.gt.i2) then ! Reset ref. settings
+               cppref=ML%dpp
+            endif
+            call WriteCPPInputs(cppref,ML%cpp(il),line)
+            if (ML%cpp(il)%mode.eq.0) then ! Set layer ref. settings
+               i2=ML%cpp(il)%layer
+               cppref=ML%cpp(il)
+            endif
+            write(*,'(A)') TRIM(ADJUSTL(line))
+         ENDDO
+      ENDIF
+
+      write(*,'(/X,A/)') '** Structure of multilayer CP-format tree **'
       write(*,*) 'Number of DOF    : ',ML%ndof
       write(*,*) 'Number of layers : ',ML%nlayr
 
@@ -486,7 +655,7 @@
          write(*,1234) il,(ML%modcomb(il,im),im=1,ML%nmode(il))
       ENDDO
 
-      IF (verbosity.ge.1) THEN
+      IF (ML%dpp%verbosity.ge.1) THEN
          write(*,'(/A)') &
                'modstart: prev. layer mode where current begins'
          write(*,'(A)') 'v-layer;mode-> '
@@ -514,17 +683,6 @@
          write(*,1234) il,(ML%gdim(il,im),im=1,ML%nmode(il))
       ENDDO
 
-      IF (ML%ntrunc.gt.0) then
-         write(*,'(/A)') 'truncation: trim basis based on criteria'
-         write(*,'(A)') 'layer - mode: nmode-max sum-max q.n.-max '
-         write(*,'(4(A,X))') '=====   =====','---------','-------',&
-                         '--------'
-         DO il=1,ML%ntrunc
-            write(*,1236) ML%truncate(il,1),'-',ML%truncate(il,2),':',&
-                          (ML%truncate(il,im),im=3,5)
-         ENDDO
-      ENDIF
-
       write(*,'(/X,A)') '********************************************'
 
       ENDIF rank0
@@ -535,7 +693,7 @@
 1233  format(6X,32(I4,X))
 1234  format(I4,2X,32(I4,X))
 1235  format(A5,1X,32(A4,X))
-1236  format(I5,X,A,X,I4,A,X,I9,X,I7,X,I8)
+1236  format(I4,4X,I4,2X,A)
 
       end subroutine PrintModeDat
 
@@ -555,6 +713,27 @@
 
       call CPU_TIME(ti1)
 
+!     Check parameters read in $control list
+      IF (TRIM(ADJUSTL(ML%system)).seq.'none') &
+         call AbortWithError(&
+         "ValidateModeDat: 'system' not set in $control")
+      IF (ML%dpp%layer.ne.0 .or. ML%dpp%mode.ne.0) &
+         call AbortWithError(&
+         "ValidateModeDat(): 'layer-mode' must not be set in $control")
+!      IF (.not. ML%dpp%donode) call AbortWithError(&
+!         "ValidateModeDat: 'donode' must not be set to .F. in $control")
+      IF (ML%dpp%max_nmode.ne.-1) call AbortWithError(&
+         "ValidateModeDat(): 'max_nmode' must not be set in $control")
+      IF (ML%dpp%max_sum.ne.-1) call AbortWithError(&
+         "ValidateModeDat(): 'max_sum' must not be set in $control")
+      IF (ML%dpp%max_qn.ne.-1) call AbortWithError(&
+         "ValidateModeDat(): 'max_qn' must not be set in $control")
+      IF (ML%dpp%Etarget.ne.0.d0) call AbortWithError(&
+         "ValidateModeDat(): 'Etarget' must not be set in $control")
+      IF (ML%dpp%nactivations.ne.1) call AbortWithError(&
+         "ValidateModeDat(): 'nactivations' must not be set in $control")
+
+!     Check resort section
       DO im=1,ML%nmode(1)
          sum=ML%resort(im)
          IF (sum.lt.1 .or. sum.gt.ML%nmode(1)) &
@@ -596,10 +775,8 @@
       DO il=1,ML%nlayr
          DO im=1,ML%nmode(il)
             IF (ML%gdim(il,im).lt.1) THEN
-               IF (mpirank.eq.mpi_prnt_rank) THEN
-                  write(*,*) 'Layer: ',il,' Mode: ',im, ', nbasis: ',&
-                  ML%gdim(il,im)
-               ENDIF
+               IF (mpirank.eq.mpi_prnt_rank) write(*,*) &
+               'Layer: ',il,' Mode: ',im, ', nbasis: ',ML%gdim(il,im)
                CALL AbortWithError('Must have >=1 basis fxn per mode')
             ENDIF
             IF (il.gt.1) THEN
@@ -612,49 +789,53 @@
                   IF (nbloc.lt.prod) EXIT
                ENDDO
                IF (nbloc.gt.prod) THEN
-                  IF (mpirank.eq.mpi_prnt_rank) THEN
+                  IF (mpirank.eq.mpi_prnt_rank) &
                      write(*,*) 'Layer: ',il,' Mode: ',im,&
                      ' # functions desired: ',nbloc,&
                      ' product basis size: ',prod
-                  ENDIF
                   CALL AbortWithError('Product basis exceeded')
                ENDIF
             ENDIF
          ENDDO
       ENDDO
 
-!     Truncation node validation
-      DO k=1,ML%ntrunc
-         il=ML%truncate(k,1)
-         im=ML%truncate(k,2)
+!     Node namelist validation
+      DO k=1,ML%nnodelist
+         il=ML%cpp(k)%layer
+         im=ML%cpp(k)%mode
 
 !        Check for out-of-range entries
-         IF (il.lt.2 .or. il.gt.ML%nlayr) THEN
-            write(*,'(2(A,I0),A)') 'truncation: layer-mode ',&
-                                   il,'-',im,', layer is out of range'
+         IF (il.lt.1 .or. il.gt.ML%nlayr) THEN
+            IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,'(2(A,I0),A)') 'node list: layer-mode ',&
+                                  il,'-',im,', layer is out of range'
             CALL AbortWithError('ValidateModeDat(): bad input')
-         ELSEIF (im.lt.1 .or. im.gt.ML%nmode(il)) THEN
-            write(*,'(2(A,I0),A)') 'truncation: layer-mode ',&
-                                   il,'-',im,', mode is out of range'
-            CALL AbortWithError('ValidateModeDat(): bad input')
-         ENDIF
-
-!        Truncation nodes must have only one parent
-         IF (firstmode(il,il-1,im,ML).ne.lastmode(il,il-1,im,ML)) THEN
-            write(*,'(2(A,I0),A)') 'truncation: layer-mode ',&
-                         il,'-',im,' must have exactly 1 parent node'
-            CALL AbortWithError('ValidateModeDat(): bad input')
+         ELSEIF (im.lt.0 .or. im.gt.ML%nmode(il)) THEN
+            IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,'(2(A,I0),A)') 'node list: layer-mode ',&
+                                  il,'-',im,', mode is out of range'
+            CALL AbortWithError('ValidateModeDat(): bad $node input')
          ENDIF
 
 !        Enforce ordering to prevent duplicate entries
          IF (k.gt.1) THEN
-            IF (il.lt.ML%truncate(k-1,1) .or. (il.eq.ML%truncate(k-1,1)&
-                .and. im.le.ML%truncate(k-1,2))) THEN
-               write(*,'(2(A,I0),A)') &
-               'truncation: layer-mode ',il,'-',im,&
+            IF (il.lt.ML%cpp(k-1)%layer .or. (il.eq.ML%cpp(k-1)%layer &
+                .and. im.le.ML%cpp(k-1)%mode)) THEN
+               IF (mpirank.eq.mpi_prnt_rank) write(*,'(2(A,I0),A)') &
+               'node list: layer-mode ',il,'-',im,&
                ': entries must be in ascending order and not repeated.'
-               CALL AbortWithError('ValidateModeDat(): bad input')
+               CALL AbortWithError('ValidateModeDat(): bad $node input')
             ENDIF
+         ENDIF
+
+!        Since setting ncycle=0 forces a dry run, make sure $node
+!        namelist sets this consistently with $control
+         IF ((ML%dpp%ncycle.eq.0 .and. ML%cpp(k)%ncycle.ne.0) .or. &
+             (ML%dpp%ncycle.ne.0 .and. ML%cpp(k)%ncycle.eq.0)) THEN
+             IF (mpirank.eq.mpi_prnt_rank) write(*,'(2(A,I0),A)') &
+               'node list: layer-mode ',il,'-',im,&
+               ': "ncycle" must be set =0 or !=0 same as $control.' 
+             call AbortWithError('ValidateModeDat(): bad $node input')
          ENDIF
       ENDDO
 
@@ -672,6 +853,7 @@
 
       implicit none
       TYPE (MLtree) :: ML
+      integer :: i
       real(kind=8) :: ti1,ti2
 
       IF (.NOT. MODULE_SETUP) call Init_ModeComb_Module()
@@ -680,14 +862,24 @@
 
       call bcast(ML%nlayr,mpi_io_rank)
       call bcast(ML%ndof,mpi_io_rank)
-      call bcast(ML%ntrunc,mpi_io_rank)
+      call bcast(ML%nnodelist,mpi_io_rank)
+      call bcast(ML%nkey,mpi_io_rank)
+      call bcast(ML%system,mpi_io_rank)
+      call bcast(ML%dorestart,mpi_io_rank)
+      call bcast(ML%pes_path,mpi_io_rank)
+      call bcast(ML%resfile,mpi_io_rank)
+      call bcast(ML%pe_transform,mpi_io_rank)
+      call bcast(ML%pe_trans_fac,mpi_io_rank)
+      call bcast(ML%rs,mpi_io_rank)
 
       IF (mpirank.ne.mpi_io_rank) THEN
          ALLOCATE(ML%nmode(ML%nlayr),ML%resort(ML%ndof))
          ALLOCATE(ML%modcomb(ML%nlayr,ML%ndof),ML%gdim(ML%nlayr,ML%ndof))
          ALLOCATE(ML%modstart(ML%nlayr,ML%ndof))
          ALLOCATE(ML%whichmod(max(1,ML%nlayr-1),ML%ndof))
-         IF (ML%ntrunc.gt.0) ALLOCATE(ML%truncate(ML%ntrunc,5))
+         IF (ML%nkey.gt.0) &
+            ALLOCATE(ML%keyfields(ML%nkey),ML%keyvalues(ML%nkey))
+         IF (ML%nnodelist.gt.0) ALLOCATE(ML%cpp(ML%nnodelist))
       ENDIF
 
 !     Broadcast arrays
@@ -697,7 +889,18 @@
       call bcast(ML%gdim,mpi_io_rank)
       call bcast(ML%modstart,mpi_io_rank)
       call bcast(ML%whichmod,mpi_io_rank)
-      IF (ML%ntrunc.gt.0) call bcast(ML%truncate,mpi_io_rank)
+      call BcastCPP(ML%dpp)
+      IF (ML%nkey.gt.0) THEN
+         DO i=1,ML%nkey
+            call bcast(ML%keyfields(i),mpi_io_rank)
+            call bcast(ML%keyvalues(i),mpi_io_rank)
+         ENDDO
+      ENDIF
+      IF (ML%nnodelist.gt.0) THEN
+         DO i=1,ML%nnodelist
+            call BcastCPP(ML%cpp(i))
+         ENDDO
+      ENDIF
 
       call CPU_TIME(ti2)
       module_time=module_time+ti2-ti1
@@ -709,11 +912,12 @@
       subroutine CopyModeDat(MLin,MLout)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Broadcasts MLtree to all MPI ranks
+! Copies ML data MLin -> MLout
 
       implicit none
       TYPE (MLtree), INTENT(IN) :: MLin
       TYPE (MLtree), INTENT(INOUT) :: MLout
+      integer :: i
       real(kind=8) :: ti1,ti2
 
       IF (.NOT. MODULE_SETUP) call Init_ModeComb_Module()
@@ -724,13 +928,23 @@
 
       MLout%nlayr=MLin%nlayr
       MLout%ndof=MLin%ndof
-      MLout%ntrunc=MLin%ntrunc
+      MLout%nnodelist=MLin%nnodelist
+      MLout%nkey=MLin%nkey
+      MLout%system=MLin%system
+      MLout%pes_path=MLin%pes_path
+      MLout%resfile=MLin%resfile
+      MLout%pe_transform=MLin%pe_transform
+      MLout%pe_trans_fac=MLin%pe_trans_fac
+      MLout%rs(:)=MLin%rs(:)
+      MLout%dpp=MLin%dpp
       
       ALLOCATE(MLout%nmode(MLin%nlayr),MLout%resort(MLin%ndof))
       ALLOCATE(MLout%modcomb(MLin%nlayr,MLin%ndof))
       ALLOCATE(MLout%modstart(MLin%nlayr,MLin%ndof))
       ALLOCATE(MLout%gdim(MLin%nlayr,MLin%ndof))
       ALLOCATE(MLout%whichmod(max(1,MLin%nlayr-1),MLin%ndof))
+      ALLOCATE(MLout%keyfields(MLin%nkey))
+      ALLOCATE(MLout%keyvalues(MLin%nkey))
 
       MLout%nmode(:)=MLin%nmode(:)
       MLout%resort(:)=MLin%resort(:)
@@ -738,16 +952,148 @@
       MLout%modstart(:,:)=MLin%modstart(:,:)
       MLout%gdim(:,:)=MLin%gdim(:,:)
       MLout%whichmod(:,:)=MLin%whichmod(:,:)
+      MLout%keyfields(:)=MLin%keyfields(:)
+      MLout%keyvalues(:)=MLin%keyvalues(:)
 
-      IF (MLin%ntrunc.gt.0) THEN
-         ALLOCATE(MLout%truncate(MLin%ntrunc,5))
-         MLout%truncate(:,:)=MLin%truncate(:,:)
+      IF (MLin%nnodelist.gt.0) THEN
+         ALLOCATE(MLout%cpp(MLin%nnodelist))
+         DO i=1,MLin%nnodelist
+            MLout%cpp(i)=MLin%cpp(i)
+         ENDDO
       ENDIF
 
       call CPU_TIME(ti2)
       module_time=module_time+ti2-ti1
 
       end subroutine CopyModeDat
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SetMLDefaults(ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Set MLCP parameter defaults
+
+      implicit none
+      TYPE (MLtree), INTENT(INOUT) :: ML
+
+      call SetCPPDefaults(ML%dpp,0,0)
+
+!     Real parameters
+      ML%pe_trans_fac=1.d0
+
+!     Character parameters
+      ML%pe_transform='none'
+      ML%system='none'
+      ML%pes_path='pes'
+      ML%resfile='none'
+      
+!     Array parameters
+      ML%rs(:)=0
+
+      end subroutine SetMLDefaults
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine processmlfields(ML)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Assigns values to CPpar variables if found in input file
+
+      implicit none
+      TYPE (MLtree), INTENT(INOUT) :: ML
+      character(len=128), allocatable :: cppfields(:),cppvalues(:)
+      character(len=128) :: thevalue
+      integer :: i,j,n,nfields,nfieldlist,fcount,cppct
+      logical :: valid
+
+      nfields=SIZE(ML%keyfields)
+      nfieldlist=SIZE(ML%fieldlist)
+
+      ALLOCATE(cppfields(nfieldlist),cppvalues(nfieldlist))
+      cppct=0
+
+!     Make sure each field in the input file is found in 'fieldlist'
+      do i=1,nfields
+         valid=.FALSE.
+         call scrubstring(ML%keyfields(i))
+         do j=1,nfieldlist
+            if ( TRIM(ADJUSTL(ML%keyfields(i))) .seq. &
+                 TRIM(ADJUSTL(ML%fieldlist(j))) ) then
+                valid=.true.
+                exit
+            endif
+         enddo
+
+!        If not a valid ML entry, check if this is a cpp entry
+         if (.not.valid) then
+            cppct=cppct+1
+            cppfields(cppct)=TRIM(ADJUSTL(ML%keyfields(i)))
+            cppvalues(cppct)=TRIM(ADJUSTL(ML%keyvalues(i)))
+         endif
+      enddo
+
+!     Process the accumulated list of cpp field/value pairs
+      IF (cppct.gt.0) call processcppfields(ML%dpp,cppfields(1:cppct),&
+                                                   cppvalues(1:cppct))
+      DEALLOCATE(cppfields,cppvalues)
+
+!     Real fields
+      call get_field(ML%keyfields,ML%keyvalues,'pe_trans_fac',thevalue,fcount)
+      if (fcount.eq.1) ML%pe_trans_fac=string2real8(thevalue)
+      
+!     String fields
+      call get_field(ML%keyfields,ML%keyvalues,'pe_transform',thevalue,fcount)
+      if (fcount.eq.1) ML%pe_transform=TRIM(ADJUSTL(thevalue))
+
+      call get_field(ML%keyfields,ML%keyvalues,'system',thevalue,fcount)
+      if (fcount.eq.1) ML%system=TRIM(ADJUSTL(thevalue))
+
+      call get_field(ML%keyfields,ML%keyvalues,'pes_path',thevalue,fcount)
+      if (fcount.eq.1) ML%pes_path=TRIM(ADJUSTL(thevalue))
+
+      call get_field(ML%keyfields,ML%keyvalues,'resfile',thevalue,fcount)
+      if (fcount.eq.1) ML%resfile=TRIM(ADJUSTL(thevalue))
+
+!     Integer array fields
+      n=SIZE(ML%rs)
+      call get_field(ML%keyfields,ML%keyvalues,'rs',thevalue,fcount)
+      if (fcount.eq.1) ML%rs=string2integerarray(thevalue,n)
+
+      end subroutine processmlfields
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function getnodecppar(ML,k) result (cpp)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Returns CPPar object to use for node k
+
+      implicit none
+      TYPE (MLtree), INTENT(IN) :: ML
+      TYPE (CPpar) :: cpp
+      integer, intent(in) :: k
+      integer :: i,il,im
+
+      call getlayermode(ML,k,il,im)
+
+      cpp=ML%dpp
+      DO i=1,ML%nnodelist
+         IF (ML%cpp(i)%layer.gt.il) THEN
+            EXIT
+         ELSEIF (ML%cpp(i)%layer.eq.il) THEN
+            IF (ML%cpp(i)%mode.eq.0) THEN
+               cpp=ML%cpp(i) ! Overwrite global settings with layer ref
+            ELSEIF (ML%cpp(i)%mode.eq.im) THEN
+               cpp=ML%cpp(i) ! Overwrite with layer-mode settings
+               EXIT
+            ELSEIF (ML%cpp(i)%mode.gt.im) THEN
+               EXIT
+            ENDIF
+         ENDIF
+      ENDDO
+
+      end function getnodecppar
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -863,13 +1209,12 @@
 
       end function resortedmode
 
-
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       function getnodenumber(il,im,ML) result (k)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Gets node number in sequence (for testing)
+! Gets node number in sequence
 
       implicit none
       TYPE (MLtree), intent(in)  :: ML
@@ -886,6 +1231,38 @@
       enddo
 
       end function getnodenumber
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine getlayermode(ML,k,il,im)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Gets layer and mode corresponding to node number k
+
+      implicit none
+      TYPE (MLtree), intent(in)  :: ML
+      integer, intent(in)  :: k
+      integer, intent(out) :: il,im
+      integer :: i,j
+
+      il=0
+      im=0
+      j=0
+      do i=1,ML%nlayr
+         j=j+ML%nmode(i)
+         if (j.ge.k) then
+            il=i
+            im=k-j+ML%nmode(i)
+            exit
+         endif
+      enddo
+
+      if (il.eq.0 .or. im.eq.0) then
+          write(*,*) 'Node number',k,' is out of range'
+          call AbortWithError("getlayermode(): bad node number")
+      endif
+
+      end subroutine getlayermode
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

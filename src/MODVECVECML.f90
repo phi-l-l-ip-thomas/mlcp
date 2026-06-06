@@ -616,6 +616,31 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      function PVVfromPS(F,G,PS) result (FG)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Calculates <F,G> from PStot and coefs in F and G
+
+      implicit none
+      TYPE (CP), INTENT(IN) :: F,G
+      real(kind=8), intent(in) :: PS(:,:)
+      real(kind=8) :: FG
+      integer :: i,k,rF,rG
+
+      rF=F%R()
+      rG=G%R()
+
+      FG=0.d0
+      DO i=1,rF
+         DO k=1,rG
+            FG=FG+F%coef(i)*G%coef(k)*PS(k,i)
+         ENDDO
+      ENDDO
+
+      end function PVVfromPS
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       function PRODVV_AA(F)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -740,59 +765,6 @@
                  (SIZE(G%coef).eq.SIZE(P,1))
 
       end function CHECKPDIMS
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-!      subroutine BuildP_CP8(F,G,P,modes,update)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Master routine for constructing / updating P matrix
-! 'modes' array tells which modes to act on
-! 'update' multiplies when true, divides otherwise
-
-!      implicit none
-!      TYPE (CP8), INTENT(IN)      :: F,G
-!      real(kind=8), intent(inout) :: P
-!      logical, intent(in) :: modes(:)
-!      logical :: update
-!      integer :: rF,rG,i,j,d
-
-!      rF=F%R()
-!      rG=G%R()
-!      ndof=F%D()
-
-!     Error checking
-!      IF (.not.CHECKPDIMS(F,G,P)) THEN
-!         write(*,*) 'P is (',SIZE(P,1),' x ',SIZE(P,2),&
-!                    ') but must be (',rG,' x ',rF,')'
-!         call AbortWithError('BuildP_CP8(): dimension mismatch')
-!      ENDIF
-
-!      IF (SIZE(modes).ne.ndof) THEN
-!         write(*,*) 'modes is len ',SIZE(modes),&
-!                   ' but must be ',ndof
-!         call AbortWithError('BuildP_CP8(): dimension mismatch')
-!      ENDIF
-
-!      do d=1,ndof
-!!! No coef mult here (only in dot prod vsn)
-!!!      Don't forget logic for up/downdating and modes!
-! cuBLAS call goes here
-!        msf=F%MS(d)
-!        mff=F%MF(d)
-!        msg=G%MS(d)
-!        mfg=G%MF(d)
-!        nbas=F%MN(d)
-! mult F%base(ms:mf) by G%base(ms:mf)
-!      tN1='T' ! transposed
-!      tN2='N' ! as is
-!      call DGEMM(tN1,tN2,rF,rG,nbas,1.d0,F%base(ms:mf),nbas,&
-!             G%base(ms:mf),nbas,0.d0,P,rF)
-!!! Accumulate result in P by mult or divide
-
-!      enddo
-
-!      end subroutine BuildP_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

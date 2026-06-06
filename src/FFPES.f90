@@ -17,7 +17,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetPotential(V,sys,ndof,verbosity)
+      subroutine GetPotential(V,sys,pespath,ndof,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Makes a call to the appropriate PES routine or reads potential
@@ -26,7 +26,7 @@
       implicit none
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: V(:)
       integer, intent(in) :: ndof,verbosity
-      character(len=*), intent(in) :: sys
+      character(len=*), intent(in) :: sys,pespath
 
 !     Get the constants for the PES of choice
 
@@ -44,17 +44,17 @@
 
 !     Formaldehyde QFF (level of theory and source uncertain)
       ELSEIF (trim(adjustl(sys)).seq.'forma') THEN
-         call ReadFFHamiltonian(V,sys,.FALSE.)
+         call ReadFFHamiltonian(V,sys,pespath,.FALSE.)
 
 !     CH3CN CCSD(T)/cc-pVTZ harmonic + B3LYP/cc-pVTZ cubic/quartic QFF
 !     Original: Begue et al, JPCA 109 (2005) 4611.
 !     interpreted by: Avila and Carrington, JCP 134 (2011) 054126.
       ELSEIF (trim(adjustl(sys)).seq.'ch3cn') THEN
-         call ReadFFHamiltonian(V,sys,.FALSE.)
+         call ReadFFHamiltonian(V,sys,pespath,.FALSE.)
 
 !     Arbitrary QFF, e.g. Gaussian format
       ELSE
-         call ReadFFHamiltonian(V,sys,.TRUE.)
+         call ReadFFHamiltonian(V,sys,pespath,.TRUE.)
       ENDIF
 
       call PrintPotentialConstants(V,verbosity)
@@ -241,7 +241,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ReadFFHamiltonian(W,id,divide)
+      subroutine ReadFFHamiltonian(W,id,path,divide)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Reads Quartic Force Field Hamiltonian from files containing harmonic,
@@ -250,7 +250,7 @@
       implicit none
       TYPE (Configs), ALLOCATABLE,INTENT(OUT) :: W(:)
       logical, intent(in) :: divide
-      character(len=*), intent(in) :: id
+      character(len=*), intent(in) :: id,path
       integer, allocatable :: ncoef(:),qns(:),nbas(:),modpowr(:,:)
       integer :: i,j,k,u,ndof,ndf,InpStat,ReadStat
       integer, parameter :: ncp=99 ! Max number of coupled DOF
@@ -273,8 +273,8 @@
          DO k=1,ncp
 
 !           Look for potential file with k coupled DOFs
-            write(fname,'(A,I0,A,A)') 'pes/f',k,&
-                                        trim(adjustl(id)),'.dat'
+            write(fname,'(2A,I0,2A)') &
+            trim(adjustl(path)),'/f',k,trim(adjustl(id)),'.dat'
             u=LookForFreeUnit()
             open(u,status='old',file=trim(adjustl(fname)),IOSTAT=InpStat)
 
@@ -451,7 +451,7 @@
          write(*,*) 'Harmonic constants extracted from PES:',&
                     '(used to construct KEO)'
          write(*,*)
-         write(*,'(X,A,9X,A))') 'DOF','Omega'
+         write(*,'(X,A,9X,A)') 'DOF','Omega'
          DO i=1,ndof
             write(*,'(X,I3,X,f22.12)') i,2*omega(i)
          ENDDO

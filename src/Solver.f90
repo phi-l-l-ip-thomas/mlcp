@@ -16,9 +16,10 @@
       USE ALSUTILS
       USE ALSDRVR
       USE SOLVER8
+      USE MSB
 
       implicit none
-      real(kind=8), allocatable, private :: module_time(:)
+      real(kind=8), allocatable, private :: module_time(:),itn_time(:)
       logical, private :: MODULE_SETUP = .FALSE.
 
       CONTAINS
@@ -31,8 +32,9 @@
 
       implicit none
 
-      allocate(module_time(mpinodes))
+      allocate(module_time(mpinodes),itn_time(mpinodes))
       module_time(:) = 0.d0
+      itn_time(:) = 0.d0
       MODULE_SETUP = .TRUE.
 
       end subroutine Init_Solver_Module
@@ -47,8 +49,9 @@
 
       IF (.NOT. MODULE_SETUP) call Init_Solver_Module()
       call Get_MPI_Timings('Solver module',module_time)
+      call Get_MPI_Timings('* Solver module (iterations)',itn_time)
       MODULE_SETUP = .FALSE.
-      deallocate(module_time)
+      deallocate(module_time,itn_time)
 
       end subroutine Dispose_Solver_Module
 
@@ -69,6 +72,8 @@
          styp=2
       ELSEIF (cpp%solver .seq. 'iitf') THEN
          styp=3
+      ELSEIF (cpp%solver .seq. 'msbii') THEN
+         styp=3
       ELSEIF (cpp%solver .seq. 'pALS')  THEN
 !        Use ALS-guided power method unless 2D with SVD reduction
          IF (SIZE(Q(1)%nbas).eq.2 .and. cpp%red2D.eq.'SVD') THEN
@@ -78,6 +83,18 @@
          ELSE
             styp=-1
          ENDIF
+      ELSEIF (cpp%solver .seq. 'fold')  THEN
+         styp=4
+      ELSEIF (cpp%solver .seq. 'msbfold')  THEN
+         styp=4
+      ELSEIF (cpp%solver .seq. 'RQIn')  THEN
+         styp=5
+      ELSEIF (cpp%solver .seq. 'RQIf')  THEN
+         styp=6
+      ELSEIF (cpp%solver .seq. 'RQIntwn')  THEN
+         styp=7
+      ELSEIF (cpp%solver .seq. 'RQIntwf')  THEN
+         styp=8
       ELSE
          call AbortWithError('GetSolverType(): Solver not recognized')
       ENDIF
@@ -186,7 +203,7 @@
          ELSEIF (styp.eq.3) THEN
             write(*,*) 'TODO: memory for inverse iteration-fast form'
          ELSE
-            call AbortWithError('ShowPsiMem(): Solver not recognized')
+!            call AbortWithError('ShowPsiMem(): Solver not recognized')
          ENDIF
                  
 !        Memory for Gram-Schmidt
@@ -297,23 +314,25 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolveHPsi(eigv,delta,bounds,cpp,Q,H,W)
+      subroutine SolveHPsi(eigv,delta,bounds,ML,cpp,Q,H,W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for computing the eigenfunctions and 
 ! eigenvalues using the solver of choice
 
       implicit none
+      TYPE (MLtree), INTENT(INOUT) :: ML
       TYPE (CPpar), INTENT(INOUT) :: cpp
       TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
       TYPE (CP), INTENT(IN)  :: H,W
+      TYPE (CP), ALLOCATABLE :: Qg(:)
       real*8, allocatable, intent(inout) :: eigv(:)
       real*8, allocatable, intent(inout) :: delta(:)
-      real*8, allocatable  :: eigtmp(:),ccoef(:)
+      real*8, allocatable  :: eigtmp(:),eigg(:)
       real*8, intent(inout) :: bounds(2)
-      integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp,algo
+      integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp,algo,dummy
       logical :: conv,showFmG,diag,readsuccess,calcbounds
-      real*8  :: rmsdelta,oldrms,maxdelta,sumdelta
+      real*8  :: rmsdelta,oldrms,maxdelta,sumdelta,Eref
       real*8, parameter :: redtol=1.d-12
       real(kind=8) :: ti1,ti2
 
@@ -335,7 +354,7 @@
             'Entering Solver: legacy CPU algorithm selected',&
             '(2D node with SVD reduction)...'
          ELSE
-            call WrapSolver_CP8(eigv,delta,bounds,cpp,Q,H,W)
+            call WrapSolver_CP8(eigv,delta,bounds,ML,cpp,Q,H,W)
             call CPU_TIME(ti2)
             module_time=module_time+ti2-ti1
             RETURN
@@ -345,13 +364,20 @@
          'Entering Solver: legacy CPU algorithm selected...'
       ENDIF
 
+!     Save block,eigenvals from Guess module as some solvers need them
+      ALLOCATE(Qg(nev),eigg(nev))
+      eigg(:)=eigv(:)
+      DO j=1,nev
+         Qg(j)=CopyCP(Q(j))
+      ENDDO
+
       call set_als_settings_ALS(cpp%alspenalty,cpp%als_linsys_alg)
       call set_als_settings_ALSPow(cpp%alspenalty,cpp%als_linsys_alg)
       call set_als_settings_ALSUtils(cpp%alspenalty,cpp%als_linsys_alg)
       call set_als_settings_LinSolver(cpp%alspenalty,cpp%als_linsys_alg)
       call DetermineDiag(Q,diag)
 !      call ShowPsiMem(eigv,cpp,Q,H,styp)
-      call ReadPsi(ist,bounds,eigv,delta,Q,cpp,readsuccess)
+      call ReadPsi(ist,bounds,eigv,delta,Q,ML,readsuccess)
 
 !     Calculate the spectral range of H
       IF (cpp%npow.gt.0 .and. cpp%ncycle.gt.0 .and. (.not.diag) &
@@ -362,7 +388,7 @@
                             redtol,showFmG,'SVD','ALS',cpp%alspenalty,&
                             cpp%als_linsys_alg)
          call GetSpectralRange(min(50,cpp%psirank),10,5,Q,H,bounds,&
-                               cpp%lowmem,calcbounds)
+                               cpp%lowmem,calcbounds,cpp%padbounds)
       ENDIF
 
       call SetReductionParameters(cpp%psirank,cpp%psinals,redtol,&
@@ -378,20 +404,22 @@
       ELSE
          IF (mpirank.eq.mpi_prnt_rank) &
             write(*,*) 'Initial guess   : ',0,(eigv(j),j=1,nev)
-         IF (cpp%ncycle.gt.0 .and. ((cpp%update.and.(styp.ne.-2)) &
-             .or.diag)) THEN
-            call Diagonalize(Q,H,eigv,.FALSE.,cpp%psinals,cpp%lowmem)
+         IF (cpp%ncycle.gt.0 .and. cpp%diag) THEN
+            call Diagonalize(Q,H,eigv,.FALSE.,cpp%reduceHQ,cpp%update,&
+                             cpp%psinals,cpp%lowmem,dummy,0.d0,&
+                             cpp%ovrlpenalty)
             IF (mpirank.eq.mpi_prnt_rank) THEN
                write(*,*)
                write(*,*) 'Diagonalization : ',0,(eigv(j),j=1,nev)
             ENDIF
          ENDIF
-         call SavePsi(0,bounds,eigv,delta,Q,cpp)
+         call SavePsi(0,bounds,eigv,delta,Q,ML)
       ENDIF
 
 !     If all the eigenvalues were requested, exit here since the 
 !     pre-diagonalization already gives the exact answer
       IF (diag) THEN
+         DEALLOCATE(Qg,eigg)
          call CPU_TIME(ti2)
          module_time=module_time+ti2-ti1
          RETURN
@@ -408,6 +436,11 @@
       ALLOCATE(eigtmp(nev))
       IF (ist.eq.0) delta=1.d99
       nloc=0
+!!!
+!      Eref=bounds(1)+cpp%Etarget
+!      write(*,*) 'Iterating with Eref :',Eref,' = ',&
+!                 bounds(1),' + ',cpp%Etarget
+!!!
 
 !     Loop over solver cycles
       DO i=1,cpp%ncycle
@@ -418,9 +451,7 @@
          eigtmp=eigv
 
 !        Run iterations using the solver of choice
-         call Iterate(Q,H,W,eigtmp,eigv,cpp,bounds,nloc,i,styp)
-
-         IF (styp.eq.-3) EXIT
+         call Iterate(Q,Qg,H,W,eigtmp,eigv,eigg,cpp,bounds,nloc,i,styp,Eref)
 
 !        Check for convergence (rms change < tol for all eigenvalues  
 !        excluding the top) and exit if achieved
@@ -457,7 +488,7 @@
          ENDIF
 
 !        Save the wavefunction from the current cycle
-         call SavePsi(i,bounds,eigv,delta,Q,cpp)
+         call SavePsi(i,bounds,eigv,delta,Q,ML)
 
 !        Exit if energies are converged
          IF (conv) THEN
@@ -469,7 +500,7 @@
          oldrms=rmsdelta
       ENDDO  ! Loop over cycles
 
-      DEALLOCATE(eigtmp)
+      DEALLOCATE(Qg,eigtmp,eigg)
 
       call CPU_TIME(ti2)
       module_time=module_time+ti2-ti1
@@ -478,29 +509,48 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine Iterate(Q,H,W,eigvo,eigv,cpp,bounds,nconv,i,styp)
+      subroutine Iterate(Q,Qg,H,W,eigvo,eigv,eigg,cpp,bounds,&
+                         nconv,i,styp,Eref)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Performs iterations of various types, depending on the value of styp:
 
       implicit none
       TYPE (CPpar), INTENT(IN) :: cpp
-      TYPE (CP), INTENT(INOUT) :: Q(:)
+      TYPE (CP), INTENT(INOUT), ALLOCATABLE :: Q(:)
+      TYPE (CP), INTENT(IN)  :: Qg(:)
+      TYPE (CP), ALLOCATABLE :: Qr(:)
       TYPE (CP), INTENT(IN)  :: H,W
       integer, intent(inout) :: nconv
       integer, intent(in)    :: i,styp
-      real*8, intent(inout)  :: eigv(:)
-      real*8, intent(in)     :: eigvo(:),bounds(2)
+      real*8, intent(inout), allocatable  :: eigv(:)
+      real*8, intent(in)     :: eigvo(:),eigg(:),bounds(2),Eref
+      real*8, allocatable    :: eigvr(:)
       real*8, parameter      :: tol=1.d-15
       character(len=18)      :: tag
-      real*8  :: Eshift
-      integer :: j,nbloc,sz,os,szmx
+      real*8  :: Eshift,lbounds(2)
+      logical :: intw
+      integer :: j,nbloc,nblocr,sz,os,szmx,nbt
+      real(kind=8) :: ti1,ti2
+!!!
+      integer :: nshift
+      real(kind=8) :: esig
+
+      nshift=24
+      esig=60.d0
+!!!
+
+      IF (.NOT. MODULE_SETUP) call Init_Solver_Module()
 
 !     Easy exit for zero iterations
       IF (cpp%npow.lt.1) RETURN
 
+      call CPU_TIME(ti1)
+
 !     Set parameters
       nbloc=SIZE(Q)
+      nbt=max(1,nbloc/2)
+      intw=(styp.eq.-1)
 
 !     Solver specific procedures
       IF (styp.eq.1) THEN
@@ -511,6 +561,16 @@
          tag='Inv. it. N cycle: '
       ELSEIF (styp.eq.3) THEN
          tag='Inv. it. F cycle: '
+      ELSEIF (styp.eq.4) THEN
+         tag='FoldedSpec cycle: '
+      ELSEIF (styp.eq.5) THEN
+         tag='RayleighQn cycle: '
+      ELSEIF (styp.eq.6) THEN
+         tag='RayleighQf cycle: '
+      ELSEIF (styp.eq.7) THEN
+         tag='RQ intw. n cycle: '
+      ELSEIF (styp.eq.8) THEN
+         tag='RQ intw, f cycle: '
       ELSEIF (styp.eq.-1) THEN
          call GetBlockShift(eigv,bounds,Eshift)
          tag='ALS-Power cycle : '
@@ -518,11 +578,18 @@
          call AbortWithError('Iterate(): invalid solver type')
       ENDIF
 
+!!! MSB
+      IF (cpp%solver(1:3) .seq. 'msb') &
+         call MSB_expand_block(Qr,Q,eigvr,eigv,nblocr,nbloc,nshift,esig)
+!!!
+
 !     Assign vectors to this MPI rank
       call calc_mpi_partition(nbloc-nconv,sz,os,szmx)
       os=os+nconv
 
 !     Run power iterations on each vector in the block
+!$omp parallel
+!$omp do private(j) schedule(static)
       DO j=1,sz
          IF (styp.eq.1) THEN
             call PowrRecurse(Q(os+j),H,cpp%npow,Eshift)
@@ -530,33 +597,45 @@
             call InverseRecurse(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),1)
          ELSEIF (styp.eq.3) THEN
             call InverseRecurse(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),2)
+         ELSEIF (styp.eq.4) THEN
+!            call FoldedRecurse(Q(os+j),H,cpp%npow,eigv(os+j),bounds)
+            call FoldedRecurse(Q(os+j),H,cpp%npow,Eref,bounds)
+         ELSEIF (styp.eq.5) THEN
+            call RayleighQuotientItn(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),1)
+         ELSEIF (styp.eq.6) THEN
+            call RayleighQuotientItn(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),2)
+         ELSEIF (styp.eq.7) THEN
+            call RayleighQuotientIntertwining(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),1)
+         ELSEIF (styp.eq.8) THEN
+            call RayleighQuotientIntertwining(Q(os+j),H,cpp%npow,cpp%psinals,eigv(os+j),2)
          ELSEIF (styp.eq.-1) THEN
             call ALS_POW_alg(H,Q(os+j),cpp%npow,1,Eshift,cpp%lowmem)
          ENDIF
       ENDDO
+!$omp end do
+!$omp end parallel
 
 !     Sync vectors before Gram-Schmidt, updates
       call MPI_Sync_CP_block(Q)
 
-!     Orthogonalization and update/vector sort
-      IF (cpp%update) THEN
-         IF (styp.eq.-1) THEN
-            call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
-            call Diagonalize(Q,H,eigv,.TRUE.,cpp%psinals,cpp%lowmem)
-         ELSE
-            call GRAMORTHO(Q)
-            call Diagonalize(Q,H,eigv,.FALSE.,cpp%psinals,cpp%lowmem)
-         ENDIF
-      ELSE
-         IF (styp.eq.-1) THEN
-            call ALS_ORTHO_alg(Q,cpp%psinals,cpp%lowmem)
-         ELSE
-            call pGRAMORTHO(Q,nconv)
-         ENDIF
-         eigv(nconv+1:nbloc)=0.d0
-         call GetQHQdiag(Q,H,eigv,nconv)
-         call SortVecs(Q,eigv,nconv,bounds(1))
-      ENDIF
+      call CPU_TIME(ti2)
+      itn_time=itn_time+ti2-ti1
+
+!     Orthogonalization and Update/vector sort
+      call Orthogonalize(Q,nconv,intw,cpp%psinals,cpp%lowmem,cpp%orthogalg)
+!      IF (styp.eq.4) THEN
+!         call Diagonalizeshsq(Q,H,eigv,intw,cpp%update,cpp%psinals,&
+!                              cpp%lowmem,nconv,Eref,cpp%ovrlpenalty)
+!      ELSE
+      IF (cpp%diag) call &
+         Diagonalize(Q,H,eigv,intw,cpp%reduceHQ,cpp%update,cpp%psinals,&
+                     cpp%lowmem,nconv,bounds(1),cpp%ovrlpenalty)
+!      ENDIF
+
+!!! MSB
+      IF (cpp%solver(1:3) .seq. 'msb') &
+         call MSB_extract_block(Qr,Q,eigvr,eigv,nblocr,nbloc,esig) 
+!!!
 
 !     Test convergence on eigenvalues and "lock" converged vectors
       nconv=0
@@ -575,7 +654,8 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetSpectralRange(rk,npow,ncyc,Q,H,bounds,lowmem,calcbounds)
+      subroutine GetSpectralRange(rk,npow,ncyc,Q,H,bounds,lowmem,&
+                                  calcbounds,padbounds)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Estimates the spectral range of the Hamiltonian using power method
@@ -586,9 +666,14 @@
       TYPE (CP), allocatable :: Qt(:)
       integer, intent(in) :: rk,npow,ncyc,lowmem
       logical, intent(in) :: calcbounds
+      real(kind=8), intent(in) :: padbounds
       real*8, intent(inout) :: bounds(2)
       integer :: i,j,gst,ndof
       real*8  :: btmp(2)
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_Solver_Module()
+      call CPU_TIME(ti1)
 
       ndof=SIZE(Q(1)%nbas)
 
@@ -671,13 +756,16 @@
       IF (mpirank.eq.mpi_prnt_rank) &
       write(*,'(/X,A,2(f15.6,A))') 'Spectral range of H = [',&
                                    bounds(1),',',bounds(2),']'
-      btmp(1)=0.001*(bounds(2)-bounds(1))
+      btmp(1)=padbounds*(bounds(2)-bounds(1))
       bounds(1)=bounds(1)-btmp(1)
       bounds(2)=bounds(2)+btmp(1)
 
       IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,2(f15.6,A)/)') 'Range padded by .1% = [',&
-                                   bounds(1),',',bounds(2),']'
+      write(*,'(X,A,ES9.2,A,2(f15.6,A)/)') 'Padded by ',padbounds,&
+                                    ' = [',bounds(1),',',bounds(2),']'
+
+      call CPU_TIME(ti2)
+      itn_time=itn_time+ti2-ti1
 
       end subroutine GetSpectralRange
 

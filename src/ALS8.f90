@@ -421,7 +421,9 @@
                call X%downdateBP(AF,F,F,G,d)
                call X%constls(d)
 
+#if MPI_ENABLED
                call MPI_WAITALL(4,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
                if (ierr.ne.0) &
                   write(*,*) 'rank ',mpirank,': ierr = ',ierr
                swapA=(.not.swapA)
@@ -448,7 +450,9 @@
          call X%resetdofstate()
          call X%accumprods(AF,F,F,G)
 
+#if MPI_ENABLED
          call MPI_WAITALL(4,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
          if (ierr.ne.0) &
             write(*,*) 'rank ',mpirank,': ierr = ',ierr
             swapA=(.not.swapA)
@@ -885,8 +889,9 @@
                call X%recalcnormal(dummy,0,0.d0,dummy,AF,d)
                call X%downdateBP(F,F,dummy,AF,d)
                call X%constls(d)
-
+#if MPI_ENABLED
                call MPI_WAITALL(4,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
                if (ierr.ne.0) &
                   write(*,*) 'rank ',mpirank,': ierr = ',ierr
                swapA=(.not.swapA)
@@ -916,7 +921,9 @@
          call X%resetdofstate()
          call X%accumprods(F,F,dummy,AF)
 
+#if MPI_ENABLED
          call MPI_WAITALL(4,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
          if (ierr.ne.0) &
             write(*,*) 'rank ',mpirank,': ierr = ',ierr
             swapA=(.not.swapA)
@@ -1005,7 +1012,9 @@
                call X%downdateBP(F,F,dummy,AF,d)
                call X%constls(d)
 
+#if MPI_ENABLED
                call MPI_WAITALL(4,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
                if (ierr.ne.0) &
                   write(*,*) 'rank ',mpirank,': ierr = ',ierr
                swapA=(.not.swapA)
@@ -1034,7 +1043,9 @@
          call X%resetdofstate()
          call X%accumprods(F,F,dummy,AF)
 
+#if MPI_ENABLED
          call MPI_WAITALL(4,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
          if (ierr.ne.0) &
             write(*,*) 'rank ',mpirank,': ierr = ',ierr
             swapA=(.not.swapA)

@@ -17,7 +17,40 @@
       USE CPr8
       USE ALS8DRVR
 
+      implicit none
+      real(kind=8), allocatable, private :: itn_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
+
       CONTAINS
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Init_Solver_Module_CP8()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+
+      allocate(itn_time(mpinodes))
+      itn_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
+
+      end subroutine Init_Solver_Module_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Dispose_Solver_Module_CP8()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+
+      IF (.NOT. MODULE_SETUP) call Init_Solver_Module_CP8()
+      call Get_MPI_Timings('* Solver CP8 module (iterations)',itn_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(itn_time)
+
+      end subroutine Dispose_Solver_Module_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -71,13 +104,14 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine WrapSolver_CP8(eigv,delta,bounds,cpp,Q,H,W)
+      subroutine WrapSolver_CP8(eigv,delta,bounds,ML,cpp,Q,H,W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for computing the eigenfunctions and 
 ! eigenvalues using the solver of choice
 
       implicit none
+      TYPE (MLtree), INTENT(INOUT) :: ML
       TYPE (CPpar), INTENT(INOUT) :: cpp
       TYPE (CP), ALLOCATABLE, INTENT(INOUT) :: Q(:)
       TYPE (CP), INTENT(IN)  :: H,W
@@ -109,7 +143,7 @@
       enddo
 
       call set_als_settings_ALS8(cpp%alspenalty,cpp%als_linsys_alg)
-      call SolveHPsi_CP8(eigv,delta,bounds,cpp,Q8,H8,W8)
+      call SolveHPsi_CP8(eigv,delta,bounds,ML,cpp,Q8,H8,W8)
 
       do i=1,nbloc
          call Q8(i)%toCP(Q(i))
@@ -124,13 +158,14 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SolveHPsi_CP8(eigv,delta,bounds,cpp,Q,H,W)
+      subroutine SolveHPsi_CP8(eigv,delta,bounds,ML,cpp,Q,H,W)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! This is the master routine for computing the eigenfunctions and 
 ! eigenvalues using the solver of choice
 
       implicit none
+      TYPE (MLtree), INTENT(INOUT) :: ML
       TYPE (CPpar), INTENT(INOUT) :: cpp
       TYPE (CP8), ALLOCATABLE, INTENT(INOUT) :: Q(:)
       TYPE (CP8), INTENT(IN)  :: H,W
@@ -138,7 +173,7 @@
       real(kind=8), allocatable, intent(inout) :: delta(:)
       real(kind=8), allocatable  :: eigtmp(:)
       real(kind=8), intent(inout) :: bounds(2)
-      integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp,nsubm
+      integer :: i,j,nev,nup,ndown,nsame,nloc,ist,styp,nsubm,dummy
       logical :: conv,diag,tiledH,readsuccess,calcbounds
       real(kind=8)  :: rmsdelta,oldrms,maxdelta,sumdelta
       real(kind=8), parameter :: redtol=1.d-12
@@ -157,7 +192,7 @@
               .and. mpinodes.gt.1)
 
 !     Read psi file if this is a restart
-      call ReadPsi_CP8(ist,bounds,eigv,delta,Q,cpp,readsuccess)
+      call ReadPsi_CP8(ist,bounds,eigv,delta,Q,ML,readsuccess)
 
 !     Calculate the spectral range of H
       IF (cpp%npow.gt.0 .and. cpp%ncycle.gt.0 .and. (.not.diag) &
@@ -165,7 +200,7 @@
           .or. (.not.readsuccess))) THEN
          calcbounds=(.not.(cpp%calcbounds.seq.'guess'))
          call GetSpectralRange_CP8(min(50,cpp%psirank),10,5,Q,H,bounds,&
-                                   cpp%algo,calcbounds,tiledH)
+                               cpp%algo,calcbounds,cpp%padbounds,tiledH)
       ENDIF
 
 !     Extend guess vectors to target rank
@@ -183,14 +218,16 @@
       ELSE
          IF (mpirank.eq.mpi_prnt_rank) &
             write(*,*) 'Initial guess   : ',0,(eigv(j),j=1,nev)
-         IF (cpp%ncycle.gt.0 .and. (cpp%update.or.diag)) THEN
-            call Diagonalize_CP8(Q,H,eigv,cpp%psinals,cpp%algo,tiledH)
+         IF (cpp%ncycle.gt.0 .and. (cpp%diag.or.diag)) THEN
+            call Diagonalize_CP8(Q,H,eigv,cpp%ovrlpenalty,0.d0,dummy,&
+                                 cpp%psinals,cpp%algo,cpp%reduceHQ,&
+                                 cpp%update,tiledH)
             IF (mpirank.eq.mpi_prnt_rank) THEN
                write(*,*)
                write(*,*) 'Diagonalization : ',0,(eigv(j),j=1,nev)
             ENDIF
          ENDIF
-         call SavePsi_CP8(0,bounds,eigv,delta,Q,cpp)
+         call SavePsi_CP8(0,bounds,eigv,delta,Q,ML)
       ENDIF
 
 !     If all the eigenvalues were requested, exit here since the 
@@ -251,7 +288,7 @@
          ENDIF
 
 !        Save the wavefunction from the current cycle
-         call SavePsi_CP8(i,bounds,eigv,delta,Q,cpp)
+         call SavePsi_CP8(i,bounds,eigv,delta,Q,ML)
 
 !        Exit if energies are converged
          IF (conv) THEN
@@ -289,9 +326,14 @@
       character(len=18) :: tag
       real(kind=8)  :: Eshift,rq
       integer :: j,k,nbloc,sz,os,szmx
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_Solver_Module_CP8()
 
 !     Easy exit for zero iterations
       IF (cpp%npow.lt.1) RETURN
+
+      call CPU_TIME(ti1)
 
 !     Set parameters
       nbloc=SIZE(Q)
@@ -360,16 +402,15 @@
          ENDDO
       endif
 
+      call CPU_TIME(ti2)
+      itn_time=itn_time+ti2-ti1
+
 !     Orthogonalization and update/vector sort
-      IF (cpp%update) THEN
-         call pGRAMORTHO_CP8(Q,nconv,cpp%psinals,cpp%algo)
-         call Diagonalize_CP8(Q,H,eigv,cpp%psinals,cpp%algo,tiledH)
-      ELSE
-         call pGRAMORTHO_CP8(Q,nconv,cpp%psinals,cpp%algo)
-         eigv(nconv+1:nbloc)=0.d0
-         call GetQHQdiag_CP8(Q,H,eigv,nconv,cpp%algo,tiledH)
-         call SortVecs_CP8(Q,eigv,nconv,bounds(1))
-      ENDIF
+      call Orthogonalize_CP8(Q,nconv,cpp%psinals,cpp%algo,cpp%orthogalg)
+      IF (cpp%diag) call &
+         Diagonalize_CP8(Q,H,eigv,cpp%ovrlpenalty,bounds(1),nconv,&
+                         cpp%psinals,cpp%algo,cpp%reduceHQ,cpp%update,&
+                         tiledH)
 
 !     Test convergence on eigenvalues and "lock" converged vectors
       nconv=0
@@ -388,8 +429,8 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetSpectralRange_CP8(rk,npow,ncyc,Q,H,bounds,&
-                                      algo,calcbounds,tiledH)
+      subroutine GetSpectralRange_CP8(rk,npow,ncyc,Q,H,bounds,algo,&
+                                      calcbounds,padbounds,tiledH)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Estimates the spectral range of the Hamiltonian using power method
@@ -400,13 +441,17 @@
       TYPE (CP8), allocatable :: Qt(:)
       integer, intent(in) :: rk,npow,ncyc,algo
       logical, intent(in) :: calcbounds,tiledH
+      real(kind=8), intent(in) :: padbounds
       real(kind=8), intent(inout) :: bounds(2)
       integer :: i,j,ndof
       integer :: ishs(2)
       real(kind=8) :: btmp(2)
       real(kind=8), allocatable :: bhist(:,:)
       real(kind=8), parameter :: smallnr = 1.d-15
+      real(kind=8) :: ti1,ti2
 
+      IF (.NOT. MODULE_SETUP) call Init_Solver_Module_CP8()
+      call CPU_TIME(ti1)
       call nvtx_start('GetSpectralRange')
 
       ndof=Q(1)%D()
@@ -473,15 +518,17 @@
                                       bounds(1),',',bounds(2),']'
       ENDIF
 
-      btmp(2)=0.001*(bounds(2)-bounds(1))
+      btmp(2)=padbounds*(bounds(2)-bounds(1))
       bounds(1)=bounds(1)-btmp(2)
       bounds(2)=bounds(2)+btmp(2)
 
       IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(X,A,2(f15.6,A)/)') 'Range padded by .1% = [',&
-                                   bounds(1),',',bounds(2),']'
+      write(*,'(X,A,ES9.2,A,2(f15.6,A)/)') 'Padded by ',padbounds,&
+                                    ' = [',bounds(1),',',bounds(2),']'
 
       call nvtx_stop()
+      call CPU_TIME(ti2)
+      itn_time=itn_time+ti2-ti1
 
       end subroutine GetSpectralRange_CP8
 

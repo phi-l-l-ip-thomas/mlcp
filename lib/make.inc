@@ -13,9 +13,9 @@ SHELL = /bin/sh
 #  desired load options for your machine.
 #
 FORTRAN  = gfortran 
-OPTS     = -O3 -frecursive
+OPTS     = -O3 -frecursive -fallow-argument-mismatch
 DRVOPTS  = $(OPTS)
-NOOPT    = -O0 -frecursive
+NOOPT    = -O0 -frecursive -fallow-argument-mismatch
 LOADER   = gfortran
 LOADOPTS =
 #

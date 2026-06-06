@@ -2412,6 +2412,7 @@
       integer, intent(out) :: req(4)
       integer :: ierrcs,ierrcr,ierrbs,ierrbr,rk,nb
 
+#if MPI_ENABLED
       IF ((.not.v%same(w)) .or. (v%R().ne.w%R())) THEN
          write(*,*) 'v, w must have same dimensions'
          write(*,*) 'v:'
@@ -2458,6 +2459,7 @@
           'MPI_ISendRecv_NB_CP8(): base send failed')
       if (ierrbr.ne.0) call AbortWithError(&
           'MPI_ISendRecv_NB_CP8(): base recv failed')
+#endif
 
       end subroutine MPI_ISendRecv_CP8
 
@@ -2477,6 +2479,7 @@
       integer :: p,b,i,j,ierr,totlen,ist,nbas,bs,bf
       real(kind=8) :: ti1,ti2
 
+#if MPI_ENABLED
       IF (.NOT. MODULE_SETUP) call Init_CPr8_Module()
 
       call CPU_TIME(ti1)
@@ -2484,16 +2487,7 @@
       nbloc=SIZE(Q)
 
 !     Number of CP-vecs on each MPI rank, and mpi offsets
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do b=1,nbloc
-         i=mod(b-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+1
-      enddo
-      moffs(1)=0
-      do p=2,mpinodes
-         moffs(p)=moffs(p-1)+mvecs(p-1)
-      enddo
+      call get_mpi_array_pointers(1,nbloc,mvecs,moffs)
 
 !     Array of CP-ranks depends on the CP-ranks of vectors distributed
 !     over different MPI-ranks
@@ -2596,6 +2590,7 @@
 
       call CPU_TIME(ti2)
       mpi_time=mpi_time+ti2-ti1
+#endif
 
       end subroutine MPI_Sync_block_CP8
 

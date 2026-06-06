@@ -70,13 +70,15 @@
 
       nev=SIZE(Q)
 
+!     Set the node's done status 
+      Ham%nt(im)%done=.TRUE.
+
 !     No operator update necessary for the following cases:
 !     - memory check run
-!     - last layer
 !     - node has only one sub-node (without truncation)
-      IF (cpp%ncycle.eq.0 .or. im.eq.SIZE(Ham%nt) .or. &
+      IF (cpp%ncycle.eq.0 .or. &
           (Ham%nt(im)%nHterm().eq.0 .and. &  ! Presolved
-           Ham%nt(im)%nsubm() .eq. 1 .and. &
+           Ham%nt(im)%nsubm() .eq.1 .and. &
            Ham%nt(Ham%nt(im)%subm(1))%nbas().eq.nev)) RETURN
 
       call CPU_TIME(ti1)

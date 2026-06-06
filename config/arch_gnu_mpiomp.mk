@@ -1,5 +1,5 @@
 # Fortran compiler
-FC = gfortran
+FC = mpifort
 
 # Flags to always include
 FOPTS = -fdefault-real-8 -fdefault-double-8
@@ -14,7 +14,7 @@ DEBUGFLG = -O0 -g -fcheck=all -fbacktrace
 MODULEFLG = -I
 
 # Flag to specify Message Passing Interface parallelization
-USEMPI = no
+USEMPI = yes
 MPIFLG = 
 
 # Flag to specify OpenMP parallelization

@@ -12,6 +12,7 @@
       implicit none
 
       TYPE TN
+         logical :: ready,done
          integer :: nid,supern,superi,mlil,mlim,B
          integer, allocatable :: subs(:),dofs(:)
          integer, allocatable :: Hnop(:)   ! Nr. operators in each H term
@@ -59,6 +60,8 @@
       n%supern=supern
       n%superi=superi
       n%B=0
+      n%ready=.FALSE.
+      n%done=.FALSE.
 
       end subroutine NewTreeNode
 
@@ -84,6 +87,8 @@
       n%supern=-1
       n%superi=-1
       n%B=0
+      n%ready=.FALSE.
+      n%done=.FALSE.
 
       end subroutine FlushTreeNode
 
@@ -462,7 +467,7 @@
 ! sub-nodes of inode
 
       implicit none
-      TYPE (TN), intent(inout) :: nt(:)
+      TYPE (TN), intent(in) :: nt(:)
       integer, intent(in) :: inode
       integer, intent(in) :: qns(:)
       integer, allocatable, intent(out) :: qnfull(:)
@@ -530,6 +535,7 @@
       do il=1,nlayr
          do im=1,nmode(il)
             inode=inode+1
+            nt(inode)%done=.FALSE.
 
 !           For cross-referencing ML and TN formats
             nt(inode)%nid=inode
@@ -546,6 +552,7 @@
             if (il.eq.1) then
                ALLOCATE(nt(inode)%dofs(1))
                nt(inode)%dofs(1)=resort(im)
+               nt(inode)%ready=.TRUE.
 
 !           Upper layers
             else

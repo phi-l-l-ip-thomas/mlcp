@@ -11,168 +11,109 @@
       implicit none
 
       TYPE CPpar
-           integer :: ncycle,npow,lowmem,truncation,algo
-           integer :: psirank,hrank,psinals,hnals,verbosity
-           integer :: rs(33)
-           real(kind=8)  :: etarget,solvtol,alspenalty,pe_trans_fac
-           logical :: update,dorestart,dotopnode
-           character(len=64) :: resfile
-           character(len=64) :: system
-           character(len=64) :: solver,calcbounds
-           character(len=64) :: red2D,redND
-           character(len=64) :: h_sort_alg
-           character(len=64) :: als_linsys_alg
-           character(len=64) :: pe_transform
+           integer :: layer,mode,ncycle,npow,lowmem,algo,verbosity
+           integer :: max_nmode,max_sum,max_qn
+           integer :: psirank,hrank,psinals,hnals,nactivations
+           real(kind=8) :: Etarget,solvtol,ovrlpenalty,alspenalty,hcut
+           real(kind=8) :: padbounds
+           logical :: update,diag,donode,reduceHQ
+           character(len=128) :: solver,calcbounds,orthogalg
+           character(len=128) :: red2D,redND
+           character(len=128) :: h_sort_alg,activation
+           character(len=128) :: als_linsys_alg
            ! 'fieldlist' holds parameters that can be set in input file
-           character(len=64), dimension(26) :: &
-           fieldlist=(/&
-                       'update',&
-                       'dotopnode',&
+           character(len=128), dimension(32) :: &
+           fieldlist=[character(len=128) :: &
+                       'layer-mode',&
+                       'donode',&
+                       'max_nmode',&  
+                       'max_sum',&  
+                       'max_qn',&  
+                       'Etarget',&  
+                       'activation',&
+                       'nactivations',&
+                       'hcut',&
+                       'verbosity',&
+                       'algo',&
+                       'lowmem',&
+                       'h_sort_alg',&
+                       'calcbounds',&
+                       'padbounds',&
+                       'solver',&
+                       'solvtol',&
                        'ncycle',&
                        'npow',&
+                       'orthogalg',&
+                       'diag',&
+                       'reduceHQ',&
+                       'update',&
+                       'ovrlpenalty',&
+                       'red2D',&
+                       'redND',&
                        'psirank',&
                        'psinals',&
                        'hrank',&
                        'hnals',&
-                       'h_sort_alg',&
-                       'verbosity',&
                        'alspenalty',&
-                       'als_linsys_alg',&
-                       'algo',&
-                       'lowmem',&
-                       'truncation',&
-                       'etarget',&
-                       'solvtol',&
-                       'pe_trans_fac',&
-                       'pe_transform',&
-                       'system',&
-                       'solver',&
-                       'calcbounds',&
-                       'red2D',&
-                       'redND',&
-                       'resfile',&
-                       'rs'&
-                      /)
+                       'als_linsys_alg'&
+                      ]
       END TYPE CPpar
 
       contains
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine StartInputCP(cpp)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Main routine for reading and processing mode combination data
-
-      implicit none
-      TYPE (CPpar) :: cpp
-      character(len=64) :: inpfile
-
-      IF (mpirank.eq.mpi_prnt_rank) &
-      write(*,'(/X,A/)') 'Reading input file (CP.inp)...'
-
-      inpfile='CP.inp'
-      CALL SetMLCPparameterDefaults(cpp)
-      CALL ReadMLCPInputs(cpp,inpfile)
-      CALL BcastMLCPInputs(cpp)
-      CALL PrintMLCPInputs(cpp)
-
-      end subroutine StartInputCP
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine SetMLCPparameterDefaults(cpp)
+      subroutine SetCPPDefaults(cpp,layer,mode)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Set MLCP parameter defaults
 
       implicit none
       TYPE (CPpar) :: cpp
-
-!     Logical parameters
-      cpp%update=.true.
-      cpp%dorestart=.false.
-      cpp%dotopnode=.true.
+      integer, intent(in) :: layer,mode
 
 !     Integer parameters
+      cpp%layer=layer
+      cpp%mode=mode
+      cpp%verbosity=0
+      cpp%algo=-1
+      cpp%lowmem=2
+      cpp%max_nmode=-1
+      cpp%max_sum=-1
+      cpp%max_qn=-1
+      cpp%nactivations=1
       cpp%ncycle=10
       cpp%npow=10
       cpp%psirank=10
       cpp%psinals=10
       cpp%hrank=0
       cpp%hnals=200
-      cpp%verbosity=0
-      cpp%algo=-1
-      cpp%lowmem=2
-      cpp%truncation=0
 
 !     Real parameters
-      cpp%etarget=0.d0
+      cpp%Etarget=0.d0
+      cpp%hcut=0.d0
+      cpp%padbounds=0.d0
       cpp%solvtol=1.d-10
+      cpp%ovrlpenalty=0.d0
       cpp%alspenalty=1.d-10
-      cpp%pe_trans_fac=1.d0
 
 !     Character parameters
-      cpp%pe_transform='none'
-      cpp%system='CpOsc'
-      cpp%solver='powr'
       cpp%calcbounds='calc'
+      cpp%h_sort_alg='pack'
+      cpp%activation='scale-linear'
+      cpp%solver='powr'
+      cpp%orthogalg='gram'
       cpp%red2D='SVD'
       cpp%redND='ALS'
-      cpp%resfile='none'
-      cpp%h_sort_alg='pack'
       cpp%als_linsys_alg='LU'
 
-!     Array parameters
-      cpp%rs(:)=0
-!      cpp%rs(27:32)=(/14,2,2022,20,21,13/)
+!     Logical parameters
+      cpp%diag=.true.
+      cpp%reduceHQ=.true.
+      cpp%update=.true.
+      cpp%donode=.true.
 
-      end subroutine SetMLCPparameterDefaults
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine ReadMLCPInputs(cpp,fnm)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-!     Reads input file for CP-format code for computing eigenvalues
-
-      implicit none
-      TYPE (CPpar) :: cpp
-      character(len=64), intent(in) :: fnm
-      character(1024) :: line
-      character(len=128), dimension(:), allocatable :: fields, values
-      integer :: i,u,InpStat
-
-!     Read from mpi_io_rank 
-      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
-
-!        Open input file
-         u = LookForFreeUnit()
-         OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="OLD", IOSTAT=InpStat)
-         IF (InpStat /= 0) THEN
-            write(*,*) TRIM(ADJUSTL(fnm)),' not found'
-           call AbortWithError("Error reading input file")
-         ENDIF
-         rewind(u)
-
-!        Read loop
-         DO
-            READ(u,"(A1024)",IOSTAT=InpStat) line
-            IF (InpStat /= 0) EXIT
-            call parse_line(line,fields,values)
-         ENDDO
-
-         CLOSE(u)
-
-         IF (.not.allocated(fields)) call &
-            AbortWithError('ReadMLCPInputs(): no valid inputs found!')
-
-         call processfieldlist(cpp,fields,values)
-         deallocate(fields,values)
-
-      ENDIF rank0
-
-      end subroutine ReadMLCPInputs
+      end subroutine SetCPPDefaults
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -210,7 +151,7 @@
       do itn=1,2
          fct=0
          m=1
-         fi=-1
+         fi=1 !-1
          ff=-1
          q='$'
          qi=-1
@@ -237,10 +178,11 @@
                   qf=m
                   fct=fct+1
                   if (itn.eq.2) then
+!                     write(*,'(3A,3(X,I0))') '"',line,'"',fi,ff,m !!!
                      write(fields(nfields+fct),'(A)') line(fi:ff)
                      write(vals(nfields+fct),'(A)') line(qi+1:qf-1)
                   endif
-                  fi=-1
+                  fi=1 !-1
                   ff=-1
                   q='$'
                   qi=-1
@@ -277,7 +219,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine processfieldlist(cpp,fields,values)
+      subroutine processcppfields(cpp,fields,values)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Assigns values to CPpar variables if found in input file
@@ -285,7 +227,7 @@
       implicit none
       TYPE (CPpar), intent(inout) :: cpp
       character(len=*), dimension(:), intent(in) :: fields, values
-      character(len=256) :: thevalue
+      character(len=128) :: thevalue
       integer :: i,j,n,nfields,nfieldlist,fcount
       logical :: valid
 
@@ -305,20 +247,47 @@
          if (.not.valid) then
              write(*,*) 'Input item "',TRIM(ADJUSTL(fields(i))),&
                         '" does not correspond to a valid input flag'
-             call AbortWithError('processfieldlist(): bad input item')
+             call AbortWithError('processcppfields(): bad input item')
          endif 
       enddo
 
 !     Check for items in field list; overwrite default if found
 
 !     Logical fields
+      call get_field(fields,values,'diag',thevalue,fcount)
+      if (fcount.eq.1) cpp%diag=string2logical(thevalue)
+
+      call get_field(fields,values,'reduceHQ',thevalue,fcount)
+      if (fcount.eq.1) cpp%reduceHQ=string2logical(thevalue)
+
       call get_field(fields,values,'update',thevalue,fcount)
       if (fcount.eq.1) cpp%update=string2logical(thevalue)
 
-      call get_field(fields,values,'dotopnode',thevalue,fcount)
-      if (fcount.eq.1) cpp%dotopnode=string2logical(thevalue)
+      call get_field(fields,values,'donode',thevalue,fcount)
+      if (fcount.eq.1) cpp%donode=string2logical(thevalue)
 
 !     Integer fields
+      call get_field(fields,values,'verbosity',thevalue,fcount)
+      if (fcount.eq.1) cpp%verbosity=string2integer(thevalue)
+
+      call get_field(fields,values,'algo',thevalue,fcount)
+      if (fcount.eq.1) cpp%algo=string2integer(thevalue)
+
+      call get_field(fields,values,'lowmem',thevalue,fcount)
+      if (fcount.eq.1) cpp%lowmem=string2integer(thevalue)
+
+      call get_field(fields,values,'max_nmode',thevalue,fcount)
+      if (fcount.eq.1) cpp%max_nmode=string2integer(thevalue)
+
+      call get_field(fields,values,'max_sum',thevalue,fcount)
+      if (fcount.eq.1) cpp%max_sum=string2integer(thevalue)
+
+      call get_field(fields,values,'max_qn',thevalue,fcount)
+      if (fcount.eq.1) cpp%max_qn=string2integer(thevalue)
+
+      call get_field(fields,values,'nactivations',thevalue,fcount)
+      if (fcount.eq.1) cpp%nactivations=string2integer(thevalue)
+
       call get_field(fields,values,'ncycle',thevalue,fcount)
       if (fcount.eq.1) cpp%ncycle=string2integer(thevalue)
 
@@ -337,43 +306,43 @@
       call get_field(fields,values,'hnals',thevalue,fcount)
       if (fcount.eq.1) cpp%hnals=string2integer(thevalue)
 
-      call get_field(fields,values,'verbosity',thevalue,fcount)
-      if (fcount.eq.1) cpp%verbosity=string2integer(thevalue)
-
-      call get_field(fields,values,'algo',thevalue,fcount)
-      if (fcount.eq.1) cpp%algo=string2integer(thevalue)
-
-      call get_field(fields,values,'lowmem',thevalue,fcount)
-      if (fcount.eq.1) cpp%lowmem=string2integer(thevalue)
-
-      call get_field(fields,values,'truncation',thevalue,fcount)
-      if (fcount.eq.1) cpp%truncation=string2integer(thevalue)
-
 !     Real fields
-      call get_field(fields,values,'etarget',thevalue,fcount)
-      if (fcount.eq.1) cpp%etarget=string2real8(thevalue)
+      call get_field(fields,values,'Etarget',thevalue,fcount)
+      if (fcount.eq.1) cpp%Etarget=string2real8(thevalue)
+
+      call get_field(fields,values,'hcut',thevalue,fcount)
+      if (fcount.eq.1) cpp%hcut=string2real8(thevalue)
+
+      call get_field(fields,values,'padbounds',thevalue,fcount)
+      if (fcount.eq.1) cpp%padbounds=string2real8(thevalue)
 
       call get_field(fields,values,'solvtol',thevalue,fcount)
       if (fcount.eq.1) cpp%solvtol=string2real8(thevalue)
 
+      call get_field(fields,values,'ovrlpenalty',thevalue,fcount)
+      if (fcount.eq.1) cpp%ovrlpenalty=string2real8(thevalue)
+
       call get_field(fields,values,'alspenalty',thevalue,fcount)
       if (fcount.eq.1) cpp%alspenalty=string2real8(thevalue)
 
-      call get_field(fields,values,'pe_trans_fac',thevalue,fcount)
-      if (fcount.eq.1) cpp%pe_trans_fac=string2real8(thevalue)
-
 !     String fields
-      call get_field(fields,values,'pe_transform',thevalue,fcount)
-      if (fcount.eq.1) cpp%pe_transform=TRIM(ADJUSTL(thevalue))
+      call get_field(fields,values,'layer-mode',thevalue,fcount)
+      if (fcount.eq.1) call parselayermode(thevalue,cpp%layer,cpp%mode)
 
-      call get_field(fields,values,'system',thevalue,fcount)
-      if (fcount.eq.1) cpp%system=TRIM(ADJUSTL(thevalue))
+      call get_field(fields,values,'calcbounds',thevalue,fcount)
+      if (fcount.eq.1) cpp%calcbounds=TRIM(ADJUSTL(thevalue))
+
+      call get_field(fields,values,'h_sort_alg',thevalue,fcount)
+      if (fcount.eq.1) cpp%h_sort_alg=TRIM(ADJUSTL(thevalue))
+
+      call get_field(fields,values,'activation',thevalue,fcount)
+      if (fcount.eq.1) cpp%activation=TRIM(ADJUSTL(thevalue))
 
       call get_field(fields,values,'solver',thevalue,fcount)
       if (fcount.eq.1) cpp%solver=TRIM(ADJUSTL(thevalue))
 
-      call get_field(fields,values,'calcbounds',thevalue,fcount)
-      if (fcount.eq.1) cpp%calcbounds=TRIM(ADJUSTL(thevalue))
+      call get_field(fields,values,'orthogalg',thevalue,fcount)
+      if (fcount.eq.1) cpp%orthogalg=TRIM(ADJUSTL(thevalue))
 
       call get_field(fields,values,'red2D',thevalue,fcount)
       if (fcount.eq.1) cpp%red2D=TRIM(ADJUSTL(thevalue))
@@ -381,21 +350,10 @@
       call get_field(fields,values,'redND',thevalue,fcount)
       if (fcount.eq.1) cpp%redND=TRIM(ADJUSTL(thevalue))
 
-      call get_field(fields,values,'h_sort_alg',thevalue,fcount)
-      if (fcount.eq.1) cpp%h_sort_alg=TRIM(ADJUSTL(thevalue))
-
       call get_field(fields,values,'als_linsys_alg',thevalue,fcount)
       if (fcount.eq.1) cpp%als_linsys_alg=TRIM(ADJUSTL(thevalue))
 
-      call get_field(fields,values,'resfile',thevalue,fcount)
-      if (fcount.eq.1) cpp%resfile=TRIM(ADJUSTL(thevalue))
-
-!     Integer array fields
-      n=SIZE(cpp%rs)
-      call get_field(fields,values,'rs',thevalue,fcount)
-      if (fcount.eq.1) cpp%rs=string2integerarray(thevalue,n)
-
-      end subroutine processfieldlist
+      end subroutine processcppfields
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -425,7 +383,7 @@
 
       if (fcount.gt.1) then
          write(*,*) 'Input field "',trim(adjustl(thefield)),&
-                    '" must appear [0,1]x, appears ',fcount
+                    '" must appear [0,1]x, appears ',fcount,'x'
          call AbortWithError('get_field(): duplicated field')
       endif
 
@@ -433,121 +391,215 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SaveMLCPInputFile(cpp)
+      subroutine WriteCPPInputs(dpp,cpp,line)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Regurgitates input file ('CP.inp') to another file for restart
+! Writes parameters in 'cpp' differing from 'dpp' to line
 
       implicit none
-      TYPE (CPpar), intent(in) :: cpp
-      character(len=64) :: fnm,fa,fi,fl,fr,fii
-      integer :: u,j,nrs
+      TYPE (CPpar), intent(in) :: dpp,cpp
+      character(len=1024), intent(out) :: line
+      character(len=128) :: tag
 
-      rank0 : IF (mpirank.eq.mpi_io_rank) THEN
+      line=""
 
-         nrs=SIZE(cpp%rs)
+      IF (cpp%layer.ne.dpp%layer .or. cpp%mode.ne.dpp%mode) THEN
+         write(tag,'(A,I0,A,I0,A)') &
+         "layer-mode='",cpp%layer,"-",cpp%mode,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
 
-         fa='(X,3A)'
-         fi='(X,A,I0,A)'
-         fl='(X,A,L0,A)'
-         fr='(X,A,ES14.6,A)'
-         write(fii,'(A,I0,A)') '(X,A,',nrs,'(I0,X),A)'
+      IF (cpp%donode.neqv.dpp%donode) THEN
+         write(tag,'(A,L0,A)') &
+         "donode='",cpp%donode,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
 
-         write(fnm,'(2A)') TRIM(ADJUSTL(cpp%resfile)),'_CP.rst'
+      IF (cpp%max_nmode.ne.dpp%max_nmode) THEN
+         write(tag,'(A,I0,A)') &
+         "max_nmode='",cpp%max_nmode,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
 
-!        Open output file
-         u = LookForFreeUnit()
-         OPEN(u, FILE=TRIM(ADJUSTL(fnm)), STATUS="UNKNOWN")
+      IF (cpp%max_sum.ne.dpp%max_sum) THEN
+         write(tag,'(A,I0,A)') &
+         "max_sum='",cpp%max_sum,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
 
-         write(u,*) "* Physical system:"
-         write(u,fa) "system='",TRIM(ADJUSTL(cpp%system)),"'"
-         write(u,*)
-         write(u,*) "* Eigensolver algorithm:"
-         write(u,fa) "solver='",TRIM(ADJUSTL(cpp%solver)),"'"
-         write(u,*)
-         write(u,*) "* Calculate spectral bounds using power method:"
-         write(u,fa) "calcbounds='",TRIM(ADJUSTL(cpp%calcbounds)),"'"
-         write(u,*)
-         write(u,*) "* Rank-reduction for 2D nodes:"
-         write(u,fa) "red2D='",TRIM(ADJUSTL(cpp%red2D)),"'"
-         write(u,*)
-         write(u,*) "* Rank-reduction for >2D nodes:"
-         write(u,fa) "redND='",TRIM(ADJUSTL(cpp%redND)),"'"
-         write(u,*)
-         write(u,*) "* Restart file name (set to 'none' to omit):"
-         write(u,fa) "resfile='",TRIM(ADJUSTL(cpp%resfile)),"'"
-         write(u,*)
-         write(u,*) "* Number of solver cycles:"
-         write(u,fi) "ncycle='",cpp%ncycle,"'"
-         write(u,*)
-         write(u,*) "* Number of power iterations:"
-         write(u,fi) "npow='",cpp%npow,"'"
-         write(u,*)
-         write(u,*) "* Target reduction rank for eigenstates"
-         write(u,fi) "psirank='",cpp%psirank,"'"
-         write(u,*)
-         write(u,*) "* Number of ALS iterations for psi reduction"
-         write(u,fi) "psinals='",cpp%psinals,"'"
-         write(u,*)
-         write(u,*) "* Target reduction rank for Hamiltonian:"
-         write(u,*) "  (set to 0 to bypass H reduction)"
-         write(u,fi) "hrank='",cpp%hrank,"'"
-         write(u,*)
-         write(u,*) "* Number of ALS iterations for H reduction:"
-         write(u,fi) "hnals='",cpp%hnals,"'"
-         write(u,*)
-         write(u,*) "* Algorithm used to sort H terms:"
-         write(u,fa) "h_sort_alg='",TRIM(ADJUSTL(cpp%h_sort_alg)),"'"
-         write(u,*)
-         write(u,*) "* Potential energy transformation:"
-         write(u,fa) "pe_transform='",&
-                      TRIM(ADJUSTL(cpp%pe_transform)),"'"
-         write(u,*)
-         write(u,*) "* PE transform scaling factor:"
-         write(u,fr) "pe_trans_fac='",cpp%pe_trans_fac,"'"
-         write(u,*)
-         write(u,*) "* Print verbosity (less <-{0,1,2,3}-> more):"
-         write(u,fi) "verbosity='",cpp%verbosity,"'"
-         write(u,*)
-         write(u,*) "* ALS regularization penalty:"
-         write(u,fr) "alspenalty='",cpp%alspenalty,"'"
-         write(u,*)
-         write(u,*) "* ALS linear system algorithm:"
-         write(u,fa) "als_linsys_alg='",TRIM(ADJUSTL(cpp%als_linsys_alg)),"'"
-         write(u,*)
-         write(u,*) "* Numerical algorithm (-1 legacy, 0 CPU, 1 GPU):"
-         write(u,fi) "algo='",cpp%algo,"'"
-         write(u,*)
-         write(u,*) "* Low memory option:"
-         write(u,fi) "lowmem='",cpp%lowmem,"'"
-         write(u,*)
-         write(u,*) "* Basis truncation option:"
-         write(u,fi) "truncation='",cpp%truncation,"'"
-         write(u,*)
-         write(u,*) "* Update psi with solutions of subspace problem:"
-         write(u,fl) "update='",cpp%update,"'"
-         write(u,*)
-         write(u,*) "* Process top node of tree:"
-         write(u,fl) "dotopnode='",cpp%dotopnode,"'"
-         write(u,*)
-         write(u,*) "* Solver target energy:"
-         write(u,fr) "Etarget='",cpp%etarget,"'"
-         write(u,*)
-         write(u,*) "* Solver convergence tolerance:"
-         write(u,fr) "solvtol='",cpp%solvtol,"'"
-         write(u,*)
-         write(u,*) "* Random seed:"
-         write(u,fii) "rs='",(cpp%rs(j),j=1,nrs),"'"
+      IF (cpp%max_qn.ne.dpp%max_qn) THEN
+         write(tag,'(A,I0,A)') &
+         "max_qn='",cpp%max_qn,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
 
-         CLOSE(u)
+      IF (cpp%Etarget.ne.dpp%Etarget) THEN
+         write(tag,'(A,ES14.6,A)') &
+         "Etarget='",cpp%Etarget,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
 
-      ENDIF rank0
+      IF (.not.(cpp%activation.seq.dpp%activation)) THEN
+         write(tag,'(A,A,A)') &
+         "activation='",TRIM(ADJUSTL(cpp%activation)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
 
-      end subroutine SaveMLCPInputFile
+      IF (cpp%nactivations.ne.dpp%nactivations) THEN
+         write(tag,'(A,I0,A)') &
+         "nactivations='",cpp%nactivations,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%hcut.ne.dpp%hcut) THEN
+         write(tag,'(A,ES14.6,A)') &
+         "hcut='",cpp%hcut,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%verbosity.ne.dpp%verbosity) THEN
+         write(tag,'(A,I0,A)') &
+         "verbosity='",cpp%verbosity,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%algo.ne.dpp%algo) THEN
+         write(tag,'(A,I0,A)') &
+         "algo='",cpp%algo,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%lowmem.ne.dpp%lowmem) THEN
+         write(tag,'(A,I0,A)') &
+         "lowmem='",cpp%lowmem,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (.not.(cpp%h_sort_alg.seq.dpp%h_sort_alg)) THEN
+         write(tag,'(A,A,A)') &
+         "h_sort_alg='",TRIM(ADJUSTL(cpp%h_sort_alg)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (.not.(cpp%calcbounds.seq.dpp%calcbounds)) THEN
+         write(tag,'(A,A,A)') &
+         "calcbounds='",TRIM(ADJUSTL(cpp%calcbounds)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%padbounds.ne.dpp%padbounds) THEN
+         write(tag,'(A,ES14.6,A)') &
+         "padbounds='",cpp%padbounds,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (.not.(cpp%solver.seq.dpp%solver)) THEN
+         write(tag,'(A,A,A)') &
+         "solver='",TRIM(ADJUSTL(cpp%solver)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%solvtol.ne.dpp%solvtol) THEN
+         write(tag,'(A,ES14.6,A)') &
+         "solvtol='",cpp%solvtol,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%ncycle.ne.dpp%ncycle) THEN
+         write(tag,'(A,I0,A)') &
+         "ncycle='",cpp%ncycle,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%npow.ne.dpp%npow) THEN
+         write(tag,'(A,I0,A)') &
+         "npow='",cpp%npow,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (.not.(cpp%orthogalg.seq.dpp%orthogalg)) THEN
+         write(tag,'(A,A,A)') &
+         "orthogalg='",TRIM(ADJUSTL(cpp%orthogalg)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%diag.neqv.dpp%diag) THEN
+         write(tag,'(A,L0,A)') &
+         "diag='",cpp%diag,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%reduceHQ.neqv.dpp%reduceHQ) THEN
+         write(tag,'(A,L0,A)') &
+         "reduceHQ='",cpp%reduceHQ,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%update.neqv.dpp%update) THEN
+         write(tag,'(A,L0,A)') &
+         "update='",cpp%update,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%ovrlpenalty.ne.dpp%ovrlpenalty) THEN
+         write(tag,'(A,ES14.6,A)') &
+         "ovrlpenalty='",cpp%ovrlpenalty,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (.not.(cpp%red2D.seq.dpp%red2D)) THEN
+         write(tag,'(A,A,A)') &
+         "red2D='",TRIM(ADJUSTL(cpp%red2D)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (.not.(cpp%redND.seq.dpp%redND)) THEN
+         write(tag,'(A,A,A)') &
+         "redND='",TRIM(ADJUSTL(cpp%redND)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%psirank.ne.dpp%psirank) THEN
+         write(tag,'(A,I0,A)') &
+         "psirank='",cpp%psirank,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%psinals.ne.dpp%psinals) THEN
+         write(tag,'(A,I0,A)') &
+         "psinals='",cpp%psinals,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%hrank.ne.dpp%hrank) THEN
+         write(tag,'(A,I0,A)') &
+         "hrank='",cpp%hrank,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%hnals.ne.dpp%hnals) THEN
+         write(tag,'(A,I0,A)') &
+         "hnals='",cpp%hnals,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (cpp%alspenalty.ne.dpp%alspenalty) THEN
+         write(tag,'(A,ES14.6,A)') &
+         "alspenalty='",cpp%alspenalty,"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      IF (.not.(cpp%als_linsys_alg.seq.dpp%als_linsys_alg)) THEN
+         write(tag,'(A,A,A)') &
+         "als_linsys_alg='",TRIM(ADJUSTL(cpp%als_linsys_alg)),"'"
+         line=TRIM(line) // " " // TRIM(tag)
+      ENDIF
+
+      end subroutine WriteCPPInputs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine PrintMLCPInputs(cpp)
+      subroutine PrintCPPInputs(cpp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Prints out parameters read in CP.inp
@@ -558,69 +610,240 @@
 
       rank0 : IF (mpirank.eq.mpi_prnt_rank) THEN
 
-      write(*,'(X,A/)') '********** Input parameters read: ***********'
-      write(*,'(X,A,2X,A5)') 'The Hamiltonian will be set up for    :',&
-                             cpp%system
-      write(*,'(X,A,4X,A3)') 'Reduction type for 2-D modes   (red2D):',&
-                             cpp%red2D
-      write(*,'(X,A,4X,A3)') 'Reduction type for >2-D modes  (redND):',&
-                             cpp%redND
-      write(*,'(X,A,2X,I5)') 'Wavefunction reduced rank    (psirank):',&
-                             cpp%psirank
-      write(*,'(X,A,2X,I5)') 'Hamiltonian reduced rank       (hrank):',&
-                             cpp%hrank
-      write(*,'(X,A,2X,I5)') 'Number of ALS iterations-w.f.(psinals):',&
-                             cpp%psinals
-      write(*,'(X,A,2X,I5)') 'Number of ALS iterations-H     (hnals):',&
-                             cpp%hnals
-      write(*,'(X,A,4X,A3)') 'H sorting algorithm       (h_sort_alg):',&
-                             cpp%h_sort_alg
-      write(*,'(X,A,2X,A5)') 'PES transformation type (pe_transform):',&
-                             cpp%pe_transform
-      write(*,'(X,A,2X,ES11.4)') &
-              'PE transform factor     (pe_trans_fac):',cpp%pe_trans_fac
-      write(*,'(X,A,2X,I5)') 'Printout verbosity         (verbosity):',&
+      write(*,'(X,A,X,I5)') 'Guess max nr coupled modes (max_nmode):',&
+                             cpp%max_nmode
+      write(*,'(X,A,X,I5)') 'Guess max sum of quanta      (max_sum):',&
+                             cpp%max_sum
+      write(*,'(X,A,X,I5)') 'Guess max quantum number      (max_qn):',&
+                             cpp%max_qn
+      write(*,'(X,A,X,ES11.4)') &
+                             'Guess target energy          (Etarget):',&
+                             cpp%Etarget
+      write(*,'(X,A,2X,A)') 'Solver activation algo    (activation):',&
+                             TRIM(ADJUSTL(cpp%orthogalg))
+      write(*,'(X,A,X,I5)') 'Nr. solver activations  (nactivations):',&
+                             cpp%nactivations
+      write(*,'(X,A,X,ES11.4)') &
+                             'Hamiltonian term minimum cutoff (hcut):',&
+                             cpp%hcut
+      write(*,'(X,A,X,I5)') 'Printout verbosity         (verbosity):',&
                              cpp%verbosity
-      write(*,'(X,A,2X,ES11.4)') &
-              'ALS regularization        (alspenalty):',cpp%alspenalty
-      write(*,'(X,A,4X,A3)') 'ALS solver algorithm  (als_linsys_alg):',&
-                             cpp%als_linsys_alg
-      write(*,'(X,A,2X,A5)') 'Eigensolver algorithm to use  (solver):',&
-                             cpp%solver
-      write(*,'(X,A,2X,A5)') 'Calculate spectral bounds (calcbounds):',&
-                             cpp%calcbounds
-      write(*,'(X,A,2X,I5)') 'Data algorithm for OMP/ACC      (algo):',&
+      write(*,'(X,A,X,I5)') 'Data algorithm for OMP/ACC      (algo):',&
                              cpp%algo
-      write(*,'(X,A,2X,I5)') 'Number of solver cycles       (ncycle):',&
-                             cpp%ncycle
-      write(*,'(X,A,2X,I5)') 'Number of Power iteratons       (npow):',&
-                             cpp%npow
-      write(*,'(X,A,2X,I5)') 'Low-memory calculation type   (lowmem):',&
+      write(*,'(X,A,X,I5)') 'Low-memory calculation type   (lowmem):',&
                              cpp%lowmem
-      write(*,'(X,A,2X,I5)') 'Truncation criterion      (truncation):',&
-                             cpp%truncation
-      write(*,'(X,A,2X,L5)') 'Use vector updates            (update):',&
-                             cpp%update
-      write(*,'(X,A,2X,L5)') 'Process top node of tree   (dotopnode):',&
-                             cpp%dotopnode
-      write(*,'(X,A,2X,ES11.4)') &
-                'Solver target energy         (etarget):',cpp%etarget
-      write(*,'(X,A,2X,ES11.4)') &
+      write(*,'(X,A,2X,A)') 'H sorting algorithm       (h_sort_alg):',&
+                             TRIM(ADJUSTL(cpp%h_sort_alg))
+      write(*,'(X,A,2X,A)') 'Calculate spectral bounds (calcbounds):',&
+                             TRIM(ADJUSTL(cpp%calcbounds))
+      write(*,'(X,A,X,ES11.4)') &
+                'Spectral bounds pad factor (padbounds):',cpp%padbounds
+      write(*,'(X,A,2X,A)') 'Eigensolver algorithm to use  (solver):',&
+                             TRIM(ADJUSTL(cpp%solver))
+      write(*,'(X,A,X,ES11.4)') &
                 'Solver convergence criterion (solvtol):',cpp%solvtol
-      write(*,'(X,A,2X,A)') 'Restart file name            (resfile):',&
-                             cpp%resfile
-      write(*,'(X,A,2X,33(I0,X))') &
-                            'Random seed                       (rs):',&
-                             (cpp%rs(i),i=1,33)
-      write(*,'(/X,A)') '*********************************************'
+      write(*,'(X,A,X,I5)') 'Number of solver cycles       (ncycle):',&
+                             cpp%ncycle
+      write(*,'(X,A,X,I5)') 'Number of Power iteratons       (npow):',&
+                             cpp%npow
+      write(*,'(X,A,2X,A)') 'Orthogonalization algo.    (orthogalg):',&
+                             TRIM(ADJUSTL(cpp%orthogalg))
+      write(*,'(X,A,X,L5)') 'Use subspace diagonalization    (diag):',&
+                             cpp%diag
+      write(*,'(X,A,X,L5)') 'Rank-reduce HQ during diag. (reduceHQ):',&
+                             cpp%reduceHQ
+      write(*,'(X,A,X,L5)') 'Use vector updates            (update):',&
+                             cpp%update
+      write(*,'(X,A,X,ES11.4)') &
+              'Gen. eigv regularization (ovrlpenalty):',cpp%ovrlpenalty
+      write(*,'(X,A,4X,A)') 'Reduction type for 2-D modes   (red2D):',&
+                             TRIM(ADJUSTL(cpp%red2D))
+      write(*,'(X,A,4X,A)') 'Reduction type for >2-D modes  (redND):',&
+                             TRIM(ADJUSTL(cpp%redND))
+      write(*,'(X,A,X,I5)') 'Wavefunction reduced rank    (psirank):',&
+                             cpp%psirank
+      write(*,'(X,A,X,I5)') 'Number of ALS iterations-w.f.(psinals):',&
+                             cpp%psinals
+      write(*,'(X,A,X,I5)') 'Hamiltonian reduced rank       (hrank):',&
+                             cpp%hrank
+      write(*,'(X,A,X,I5)') 'Number of ALS iterations-H     (hnals):',&
+                             cpp%hnals
+      write(*,'(X,A,X,ES11.4)') &
+              'ALS regularization        (alspenalty):',cpp%alspenalty
+      write(*,'(X,A,2X,A)') 'ALS solver algorithm  (als_linsys_alg):',&
+                             TRIM(ADJUSTL(cpp%als_linsys_alg))
 
       ENDIF rank0
 
-      end subroutine PrintMLCPInputs
+      end subroutine PrintCPPInputs
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine BcastMLCPInputs(cpp)
+      subroutine compareCPP(cpp,cppo,same1,same2)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Compares two cpp objects
+
+      implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp,cppo
+      logical, intent(out) :: same1,same2
+
+!     The following parameters can only be changed on restart if
+!     processing for the node has not yet begun
+      same1=.TRUE.
+      same1=(same1.and.(cpp%donode.eqv.cppo%donode))
+      same1=(same1.and.(cpp%max_nmode.eq.cppo%max_nmode))
+      same1=(same1.and.(cpp%max_sum.eq.cppo%max_sum))
+      same1=(same1.and.(cpp%max_qn.eq.cppo%max_qn))
+      same1=(same1.and.(cpp%Etarget.eq.cppo%Etarget))
+      same1=(same1.and.(cpp%activation.eq.cppo%activation))
+      same1=(same1.and.(cpp%nactivations.eq.cppo%nactivations))
+
+!     The following parameters can be changed on restart even if
+!     processing for the node has begun
+      same2=.TRUE.
+      same2=(same2.and.(cpp%hcut.eq.cppo%hcut))
+      same2=(same2.and.(cpp%verbosity.eq.cppo%verbosity))
+      same2=(same2.and.(cpp%algo.eq.cppo%algo))
+      same2=(same2.and.(cpp%lowmem.eq.cppo%lowmem))
+      same2=(same2.and.(cpp%h_sort_alg.eq.cppo%h_sort_alg))
+      same2=(same2.and.(cpp%calcbounds.eq.cppo%calcbounds))
+      same2=(same2.and.(cpp%padbounds.eq.cppo%padbounds))
+      same2=(same2.and.(cpp%solver.eq.cppo%solver))
+      same2=(same2.and.(cpp%solvtol.eq.cppo%solvtol))
+      same2=(same2.and.(cpp%ncycle.eq.cppo%ncycle))
+      same2=(same2.and.(cpp%npow.eq.cppo%npow))
+      same2=(same2.and.(cpp%orthogalg.eq.cppo%orthogalg))
+      same2=(same2.and.(cpp%diag.eqv.cppo%diag))
+      same2=(same2.and.(cpp%reduceHQ.eqv.cppo%reduceHQ))
+      same2=(same2.and.(cpp%update.eqv.cppo%update))
+      same2=(same2.and.(cpp%ovrlpenalty.eq.cppo%ovrlpenalty))
+      same2=(same2.and.(cpp%red2D.eq.cppo%red2D))
+      same2=(same2.and.(cpp%redND.eq.cppo%redND))
+      same2=(same2.and.(cpp%psirank.eq.cppo%psirank))
+      same2=(same2.and.(cpp%psinals.eq.cppo%psinals))
+      same2=(same2.and.(cpp%hrank.eq.cppo%hrank))
+      same2=(same2.and.(cpp%hnals.eq.cppo%hnals))
+      same2=(same2.and.(cpp%alspenalty.eq.cppo%alspenalty))
+      same2=(same2.and.(cpp%als_linsys_alg.eq.cppo%als_linsys_alg))
+
+      end subroutine compareCPP
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine showCPPcomparisons(cpp,cppo)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Summarize changes in current CPPar object vs. old one
+
+      implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp,cppo
+      logical :: same1,same2
+
+      call compareCPP(cpp,cppo,same1,same2)
+      if (same1.and.same2) return
+
+!     Print changes to job parameters
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         IF (cpp%donode.neqv.cppo%donode) write(*,2232) &
+            '  * donode changed from ',cppo%donode,' to ',cpp%donode
+         IF (cpp%max_nmode.ne.cppo%max_nmode) write(*,2233) &
+            '  * max_nmode changed from ',&
+            cppo%max_nmode,' to ',cpp%max_nmode
+         IF (cpp%max_sum.ne.cppo%max_sum) write(*,2233) &
+            '  * max_sum changed from ',cppo%max_sum,' to ',cpp%max_sum
+         IF (cpp%max_qn.ne.cppo%max_qn) write(*,2233) &
+            '  * max_qn changed from ',cppo%max_qn,' to ',cpp%max_qn
+         IF (cpp%Etarget.ne.cppo%Etarget) write(*,2234) &
+            '  * Etarget changed from ',cppo%Etarget,&
+            ' to ',cpp%Etarget
+         IF (.not.(cpp%activation .seq. cppo%activation)) &
+            write(*,2235) '  * activation changed from "',&
+            TRIM(ADJUSTL(cppo%activation)),'" to "',&
+            TRIM(ADJUSTL(cpp%activation)),'"'
+         IF (cpp%nactivations.ne.cppo%nactivations) write(*,2233) &
+            '  * nactivations changed from ',&
+            cppo%nactivations,' to ',cpp%nactivations
+         IF (cpp%hcut.ne.cppo%hcut) write(*,2234) &
+            '  * hcut changed from ',cppo%hcut,&
+            ' to ',cpp%hcut
+         IF (cpp%verbosity.ne.cppo%verbosity) write(*,2233) &
+            '  * verbosity changed from ',&
+            cppo%verbosity,' to ',cpp%verbosity
+         IF (cpp%algo.ne.cppo%algo) write(*,2233) &
+            '  * algo changed from ',cppo%algo,' to ',cpp%algo
+         IF (cpp%lowmem.ne.cppo%lowmem) write(*,2233) &
+            '  * lowmem changed from ',cppo%lowmem,' to ',cpp%lowmem
+         IF (.not.(cpp%h_sort_alg .seq. cppo%h_sort_alg)) &
+            write(*,2235) '  * h_sort_alg changed from "',&
+            TRIM(ADJUSTL(cppo%h_sort_alg)),'" to "',&
+            TRIM(ADJUSTL(cpp%h_sort_alg)),'"'
+         IF (.not.(cpp%calcbounds .seq. cppo%calcbounds)) &
+            write(*,2235) '  * calcbounds changed from "',&
+            TRIM(ADJUSTL(cppo%calcbounds)),'" to "',&
+            TRIM(ADJUSTL(cpp%calcbounds)),'"'
+         IF (cpp%padbounds.ne.cppo%padbounds) write(*,2234) &
+            '  * padbounds changed from ',cppo%padbounds,&
+            ' to ',cpp%padbounds
+         IF (.not.(cpp%solver .seq. cppo%solver)) write(*,2235) &
+            '  * solver changed from "',&
+            TRIM(ADJUSTL(cppo%solver)),'" to "',&
+            TRIM(ADJUSTL(cpp%solver)),'"'
+         IF (cpp%solvtol.ne.cppo%solvtol) write(*,2234) &
+            '  * solvtol changed from ',cppo%solvtol,' to ',cpp%solvtol
+         IF (cpp%ncycle.ne.cppo%ncycle) write(*,2233) &
+            '  * ncycle changed from ',cppo%ncycle,' to ',cpp%ncycle
+         IF (cpp%npow.ne.cppo%npow) write(*,2233) &
+            '  * npow changed from ',cppo%npow,' to ',cpp%npow
+         IF (.not.(cpp%orthogalg .seq. cppo%orthogalg)) &
+            write(*,2235) '  * orthogalg changed from "',&
+            TRIM(ADJUSTL(cppo%orthogalg)),'" to "',&
+            TRIM(ADJUSTL(cpp%orthogalg)),'"'
+         IF (cpp%diag.neqv.cppo%diag) write(*,2232) &
+            '  * diag changed from ',cppo%diag,' to ',cpp%diag
+         IF (cpp%reduceHQ.neqv.cppo%reduceHQ) write(*,2232) &
+            '  * reduceHQ changed from ',cppo%reduceHQ,' to ',cpp%reduceHQ
+         IF (cpp%update.neqv.cppo%update) write(*,2232) &
+            '  * update changed from ',cppo%update,' to ',cpp%update
+         IF (cpp%ovrlpenalty.ne.cppo%ovrlpenalty) write(*,2234) &
+            '  * ovrlpenalty changed from ',cppo%ovrlpenalty,&
+            ' to ',cpp%ovrlpenalty
+         IF (.not.(cpp%red2D .seq. cppo%red2D)) write(*,2235) &
+            '  * red2D changed from "',&
+            TRIM(ADJUSTL(cppo%red2D)),'" to "',&
+            TRIM(ADJUSTL(cpp%red2D)),'"'
+         IF (.not.(cpp%redND .seq. cppo%redND)) write(*,2235) &
+            '  * redND changed from "',&
+            TRIM(ADJUSTL(cppo%redND)),'" to "',&
+            TRIM(ADJUSTL(cpp%redND)),'"'
+         IF (cpp%psirank.ne.cppo%psirank) write(*,2233) &
+            '  * psirank changed from ',cppo%psirank,' to ',cpp%psirank
+         IF (cpp%psinals.ne.cppo%psinals) write(*,2233) &
+            '  * psinals changed from ',cppo%psinals,' to ',cpp%psinals
+         IF (cpp%hrank.ne.cppo%hrank) write(*,2233) &
+            '  * hrank changed from ',cppo%hrank,' to ',cpp%hrank
+         IF (cpp%hnals.ne.cppo%hnals) write(*,2233) &
+            '  * hnals changed from ',cppo%hnals,' to ',cpp%hnals
+         IF (cpp%alspenalty.ne.cppo%alspenalty) write(*,2234) &
+            '  * alspenalty changed from ',cppo%alspenalty,&
+            ' to ',cpp%alspenalty
+         IF (.not.(cpp%als_linsys_alg .seq. cppo%als_linsys_alg)) &
+            write(*,2235) '  * als_linsys_alg changed from "',&
+            TRIM(ADJUSTL(cppo%als_linsys_alg)),'" to "',&
+            TRIM(ADJUSTL(cpp%als_linsys_alg)),'"'
+         write(*,*)
+      ENDIF
+
+2232  format(X,A,L0,A,L0)
+2233  format(X,A,I0,A,I0)
+2234  format(X,A,ES11.4,A,ES11.4)
+2235  format(X,5A)
+
+      end subroutine showCPPcomparisons
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine BcastCPP(cpp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Broadcasts MLtree to all MPI ranks
@@ -629,35 +852,69 @@
       TYPE (CPpar) :: cpp
 
 !     Broadcast variables
+      call bcast(cpp%layer,mpi_io_rank)
+      call bcast(cpp%mode,mpi_io_rank)
+      call bcast(cpp%donode,mpi_io_rank)
+      call bcast(cpp%max_nmode,mpi_io_rank)
+      call bcast(cpp%max_sum,mpi_io_rank)
+      call bcast(cpp%max_qn,mpi_io_rank)
+      call bcast(cpp%Etarget,mpi_io_rank)
+      call bcast(cpp%activation,mpi_io_rank)
+      call bcast(cpp%nactivations,mpi_io_rank)
+      call bcast(cpp%hcut,mpi_io_rank)
+      call bcast(cpp%verbosity,mpi_io_rank)
+      call bcast(cpp%algo,mpi_io_rank)
+      call bcast(cpp%lowmem,mpi_io_rank)
+      call bcast(cpp%h_sort_alg,mpi_io_rank)
+      call bcast(cpp%calcbounds,mpi_io_rank)
+      call bcast(cpp%padbounds,mpi_io_rank)
+      call bcast(cpp%solver,mpi_io_rank)
+      call bcast(cpp%solvtol,mpi_io_rank)
       call bcast(cpp%ncycle,mpi_io_rank)
       call bcast(cpp%npow,mpi_io_rank)
-      call bcast(cpp%lowmem,mpi_io_rank)
-      call bcast(cpp%truncation,mpi_io_rank)
-      call bcast(cpp%psirank,mpi_io_rank)
-      call bcast(cpp%hrank,mpi_io_rank)
-      call bcast(cpp%psinals,mpi_io_rank)
-      call bcast(cpp%hnals,mpi_io_rank)
-      call bcast(cpp%verbosity,mpi_io_rank)
-      call bcast(cpp%alspenalty,mpi_io_rank)
-      call bcast(cpp%rs,mpi_io_rank)
-      call bcast(cpp%etarget,mpi_io_rank)
-      call bcast(cpp%solvtol,mpi_io_rank)
+      call bcast(cpp%orthogalg,mpi_io_rank)
+      call bcast(cpp%diag,mpi_io_rank)
+      call bcast(cpp%reduceHQ,mpi_io_rank)
       call bcast(cpp%update,mpi_io_rank)
-      call bcast(cpp%dorestart,mpi_io_rank)
-      call bcast(cpp%dotopnode,mpi_io_rank)
-      call bcast(cpp%algo,mpi_io_rank)
-      call bcast(cpp%resfile,mpi_io_rank)
-      call bcast(cpp%system,mpi_io_rank)
-      call bcast(cpp%pe_transform,mpi_io_rank)
-      call bcast(cpp%pe_trans_fac,mpi_io_rank)
-      call bcast(cpp%solver,mpi_io_rank)
-      call bcast(cpp%calcbounds,mpi_io_rank)
+      call bcast(cpp%ovrlpenalty,mpi_io_rank)
       call bcast(cpp%red2D,mpi_io_rank)
       call bcast(cpp%redND,mpi_io_rank)
-      call bcast(cpp%h_sort_alg,mpi_io_rank)
+      call bcast(cpp%psirank,mpi_io_rank)
+      call bcast(cpp%psinals,mpi_io_rank)
+      call bcast(cpp%hrank,mpi_io_rank)
+      call bcast(cpp%hnals,mpi_io_rank)
+      call bcast(cpp%alspenalty,mpi_io_rank)
       call bcast(cpp%als_linsys_alg,mpi_io_rank)
 
-      end subroutine BcastMLCPInputs
+      end subroutine BcastCPP
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine parselayermode(tag,il,im)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Extracts layer and mode numbers from tag
+
+      implicit none
+      character(len=128), intent(in) :: tag
+      integer, intent(out) :: il,im
+      integer :: j,lf,mi
+
+      il=-1
+      im=-1
+
+      do j=1,128
+         lf=j-1
+         mi=j+1
+         if (tag(j:j).eq.'-') exit
+      enddo
+      
+      if (lf.gt.0 .and. mi.le.128) then
+         il=string2integer(tag(1:lf))
+         im=string2integer(tag(mi:128))
+      endif
+
+      end subroutine parselayermode
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

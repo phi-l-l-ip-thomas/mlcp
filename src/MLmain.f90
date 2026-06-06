@@ -33,18 +33,20 @@
 !!!
 
       implicit none
-      TYPE (CPpar)        :: cpp
       TYPE (MLtree)       :: ML
+      TYPE (CPpar)        :: cpp
       TYPE (Hamiltonian)  :: Ham
       TYPE (CP), ALLOCATABLE :: Q(:)
       TYPE (CP) :: H,W
       real(kind=8), allocatable :: eigv(:),delta(:)
       real(kind=8) :: bounds(2)
+      logical :: procnode
       integer, allocatable :: rs(:)
       integer :: d(3),t(3)
-      integer :: im,j,imrst,ndof,nnode
-      real(kind=8)  :: t1,t2
-      character(len=64) :: frmt
+      integer :: im,ia,j,iarst,ndof,nnode,na,ninp
+      real(kind=8)  :: t1,t2,Etarget
+      character(len=128) :: fnm
+      character(len=64)  :: frmt
 
       call prepare_mpi()
       call init_device()
@@ -85,79 +87,115 @@
          call PrintWallTime('MLCP initialized')
       ENDIF
 
-!     Read input file, assign parameters
-      CALL StartInputCP(cpp)
+      ninp=command_argument_count()
+      if (ninp.ne.1) call AbortWithError("Usage: mlcp <input_file>")
+      call get_command_argument(1,fnm)
 
 !     Read the mode combination data
-      CALL StartModeComb(ML,cpp%verbosity)
+      CALL StartModeComb(ML,fnm)
 
 !     Initialize random number generator
       CALL CPU_TIME(t2)
-      CALL InitRandom(t2-t1,d,t,cpp%rs,rs)
+      CALL InitRandom(t2-t1,d,t,ML%rs,rs)
 !!!   TEST
 !      call maintestcpr8
 !      call testmpicycle()
 !!!
 
 !     Set up and sort operators into layers; solve bottom layer nodes
-      CALL SetupHamiltonian(cpp%system,cpp%pe_transform,cpp%verbosity,&
-                                       cpp%pe_trans_fac,Ham,ML)
+      CALL SetupHamiltonian(Ham,ML)
 
       ndof=SIZE(Ham%ops,1)
       nnode=SIZE(Ham%nt)
 
 !     Restart a previous run
-      call RestartSetup(imrst,cpp,Ham,ML)
-!      IF (imrst.lt.ndof) call SaveEigenInfo(ndof,cpp,Ham)
+      call RestartSetup(Ham,ML)
 
 !!!!!! --- MAIN RUN --- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
       IF (mpirank.eq.mpi_prnt_rank) &
          write(*,'(/X,A)') '***** MAIN RUN *****'
 
-      DO im=1,nnode !ndof+1,nnode
-!      DO im=ndof+1,nnode
+      DO im=1,nnode
 
-         IF (im.eq.nnode .and. (.not.cpp%dotopnode)) THEN
-            IF (mpirank.eq.mpi_prnt_rank) write(*,'(/X,A)') &
-               'Calculation *paused* at top layer node!'
-            EXIT
-         ENDIF
-
-         IF (im.le.imrst) CYCLE
+         call setnodeready(Ham,im)
 
          IF (mpirank.eq.mpi_prnt_rank) &
             write(*,'(/,X,A,I0,A,I0,A,I0,A,/)') &
             '--- NODE ',im,' (LAYER-MODE: ',&
              Ham%nt(im)%mlil,'-',Ham%nt(im)%mlim,') ---'
 
-!        Build the mode block (Q) and Hamiltonian matrix (H) here
-         call BuildModeHamiltonian(im,H,Ham,cpp)
+         cpp=getnodecppar(ML,im)
+         procnode=(cpp%donode .and. Ham%nt(im)%ready .and. &
+                              (.not.Ham%nt(im)%done))
+
+         IF (.not.procnode) THEN
+            IF (mpirank.eq.mpi_prnt_rank) THEN
+               IF (Ham%nt(im)%done) THEN
+                  write(*,'(5X,A)') &
+                  "Skipping node: read from previous calculation"
+               ELSEIF (.not.Ham%nt(im)%ready) THEN
+                  write(*,'(5X,A)') &
+                  "Skipping node: not ready due to dependency"
+               ELSE
+                  write(*,'(5X,A)') &
+                  "Skipping node: 'donode' is .F. in input file"
+               ENDIF
+            ENDIF
+            CYCLE
+         ENDIF
+
+         call showCPPcomparisons(cpp,ML%dpp)
 
 !        Make the initial guess
          call GuessPsi(im,eigv,delta,bounds,Q,Ham,ML,cpp)
-         W=GuessWeights(im,4000.0,Ham)
 
-!        Calculate the node eigenfunctions with the solver of choice
-!        If the node on the current layer contains only one sub-node from
-!        the previous layer, we already have the eigenvalues and 
-!        eigenfunctions so no need to run the solver
-         IF (Ham%nt(im)%nHterm().eq.0 .and. &
-            Ham%nt(im)%nsubm().eq.1) THEN
-            IF (mpirank.eq.mpi_prnt_rank) &
-               write(*,'(3X,A)') '(Mode solved previously)'
-         ELSE
-            call SolveHPsi(eigv,delta,bounds,cpp,Q,H,W)
-         ENDIF
+!        Get number of activation steps
+         na=cpp%nactivations
+         call ReadActivationCounter(im,iarst,na,ML)
+
+         DO ia=1,na
+
+            IF (ia.lt.iarst) CYCLE
+
+            call SaveActivationCounter(im,ia,na,ML)
+
+            IF (mpirank.eq.mpi_prnt_rank .and. na.gt.1) &
+               write(*,'(/,3X,A,I0,A,I0,A,/)') &
+               '-- H_coupling terms, Activation (',ia,'/',na,') --'
+
+!           Build the node Hamiltonian matrix (H)
+            call BuildModeHamiltonian(im,ia,na,H,Ham,cpp)
+
+!           Build the preconditioner, if needed (future)
+            W=GuessWeights(im,4000.0,Ham)
+
+!           Calculate the node eigenfunctions with the solver of choice
+!           If the node on the current layer contains only one sub-node from
+!           the previous layer, we already have the eigenvalues and 
+!           eigenfunctions so no need to run the solver
+            IF (Ham%nt(im)%nHterm().eq.0 .and. &
+               Ham%nt(im)%nsubm().eq.1) THEN
+               IF (mpirank.eq.mpi_prnt_rank) &
+                  write(*,'(5X,A)') '(Mode solved previously)'
+            ELSE
+               call SolveHPsi(eigv,delta,bounds,ML,cpp,Q,H,W)
+            ENDIF
+
+            call FlushCP(H)
+            call FlushCP(W)
+         ENDDO
 
 !        Analyze wavefunction and assign levels
          call AnalyzePsi(im,eigv,delta,Q,Ham)
 
-!        Transform operators to the mode eigenfunction basis
-         call UpdateH(im,Q,Ham,cpp)
+         IF (im.lt.nnode) THEN
+!           Transform operators to the mode eigenfunction basis
+            call UpdateH(im,Q,Ham,cpp)
 
-!        Save eigenvalues and operator matrices for restart
-         call SaveEigenInfo(im,cpp,Ham)
+!           Save eigenvalues and operator matrices for restart
+            call SaveEigenInfo(ML,Ham)
+         ENDIF
 
 !        Print the wall time
          IF (mpirank.eq.mpi_prnt_rank) THEN
@@ -168,8 +206,6 @@
          ENDIF
 
          DEALLOCATE(eigv,Q)
-         call FlushCP(H)
-         call FlushCP(W)
       ENDDO
 
       call sync_mpi
@@ -179,8 +215,6 @@
 !     Free memory and print timings
       call Flush_ModeComb(ML)
       call Flush_Hamiltonian(Ham)
-
-!      call DisposeReduction() ! to be removed
 
       call Show_section_times()
       call Show_module_times()

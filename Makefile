@@ -13,6 +13,7 @@ OPTFLG := $(strip ${OPTFLG})
 DEBUG := $(strip ${DEBUG})
 DEBUGFLG := $(strip ${DEBUGFLG})
 MODULEFLG := $(strip ${MODULEFLG})
+USEMPI := $(strip ${USEMPI})
 MPIFLG := $(strip ${MPIFLG})
 USEOMP := $(strip ${USEOMP})
 OMPFLG := $(strip ${OMPFLG})
@@ -38,8 +39,15 @@ else
     COMPILEFLG += ${OPTFLG}
 endif
 
-COMPILEFLG += ${MPIFLG}
+# MPI parallelization
+ifeq (${USEMPI}, yes)
+    COMPILEFLG += ${MPIFLG}
+    PREPROCFLG += -DMPI_ENABLED=1
+else
+    PREPROCFLG += -DMPI_ENABLED=0
+endif
 
+# OpenMP parallelization
 ifeq (${USEOMP}, yes)
     COMPILEFLG += ${OMPFLG}
     PREPROCFLG += -DOMP_ENABLED=1
@@ -97,6 +105,7 @@ COBJS = \
 	${OBJDIR}/CPLS8.o \
 	${OBJDIR}/TestCPr8.o \
 	${OBJDIR}/CPConfig.o \
+	${OBJDIR}/OConfig.o \
 	${OBJDIR}/FFPES.o \
 	${OBJDIR}/MODVECVECML.o \
 	${OBJDIR}/CPMM.o \
@@ -120,8 +129,10 @@ MOBJS = \
 	${OBJDIR}/Updater.o \
 	${OBJDIR}/Analyzer.o \
 	${OBJDIR}/ModeH.o \
+	${OBJDIR}/Precondition.o \
 	${OBJDIR}/BlockPower.o \
 	${OBJDIR}/LinSolver.o \
+	${OBJDIR}/MSB.o \
 	${OBJDIR}/Solver.o \
 	${OBJDIR}/Solver_CP8.o \
 	${OBJDIR}/Timings.o \
@@ -227,7 +238,8 @@ ${OBJDIR}/InputCS.o  : ${SRCDIR}/InputCS.f90 ${COMMONDEP1}
 ${OBJDIR}/NodeTree.o     : ${SRCDIR}/NodeTree.f90 ${COMMONDEP1}
 
 # Mode combination module
-${OBJDIR}/ModeComb.o     : ${SRCDIR}/ModeComb.f90 ${OBJDIR}/NodeTree.o ${COMMONDEP1}
+${OBJDIR}/ModeComb.o     : ${SRCDIR}/ModeComb.f90 ${OBJDIR}/NodeTree.o \
+                           ${OBJDIR}/InputCP.o ${COMMONDEP1}
 
 # CP-format types
 ${OBJDIR}/SepdRepn.o     : ${SRCDIR}/SepdRepn.f90 ${COMMONDEP1}
@@ -247,6 +259,9 @@ ${OBJDIR}/CPLS8.o        : ${SRCDIR}/CPLS8.f90 ${OBJDIR}/CPr8.o ${COMMONDEP1}
 # CP configuration module
 ${OBJDIR}/CPConfig.o     : ${SRCDIR}/CPConfig.f90 ${OBJDIR}/SepdRepn.o ${COMMONDEP1}
 
+# Orthogonal configuration module
+${OBJDIR}/OConfig.o      : ${SRCDIR}/OConfig.f90 ${OBJDIR}/CPConfig.o ${COMMONDEP1}
+
 # Force Field PES
 ${OBJDIR}/FFPES.o        : ${SRCDIR}/FFPES.f90 ${OBJDIR}/SepdRepn.o \
                            ${OBJDIR}/CPConfig.o ${COMMONDEP1}
@@ -264,7 +279,8 @@ ${OBJDIR}/REDORTHO.o     : ${SRCDIR}/REDORTHO.f90 ${OBJDIR}/CPConfig.o \
 
 # ALS reduction of psi in separated representation
 ${OBJDIR}/Reduction.o    : ${SRCDIR}/Reduction.f90 ${OBJDIR}/LinAlg.o \
-                           ${OBJDIR}/MODVECVECML.o ${OBJDIR}/REDORTHO.o ${COMMONDEP1}
+                           ${OBJDIR}/MODVECVECML.o ${OBJDIR}/REDORTHO.o \
+	                   ${OBJDIR}/CPConfig.o ${OBJDIR}/OConfig.o ${COMMONDEP1}
 
 # Object-oriented ALS code
 ${OBJDIR}/ALSOO.o        : ${SRCDIR}/ALSOO.f90 ${OBJDIR}/LinAlg.o \
@@ -325,6 +341,10 @@ ${OBJDIR}/Analyzer.o     : ${SRCDIR}/Analyzer.f90 ${COMMONDEP2}
 ${OBJDIR}/ModeH.o        : ${SRCDIR}/ModeH.f90 ${OBJDIR}/HamilSetup.o \
                            ${COMMONDEP2}
 
+# Preconditioning
+${OBJDIR}/Precondition.o : ${SRCDIR}/Precondition.f90 ${OBJDIR}/LinSolver.o \
+                           ${COMMONDEP2}
+
 # Block Power code
 ${OBJDIR}/BlockPower.o   : ${SRCDIR}/BlockPower.f90 ${OBJDIR}/CPMM.o \
                            ${OBJDIR}/LinSolver.o ${OBJDIR}/BlockUtils.o ${COMMONDEP2}
@@ -332,6 +352,9 @@ ${OBJDIR}/BlockPower.o   : ${SRCDIR}/BlockPower.f90 ${OBJDIR}/CPMM.o \
 # Linear equation solver
 ${OBJDIR}/LinSolver.o    : ${SRCDIR}/LinSolver.f90 ${OBJDIR}/ALSPow.o \
 	                   ${OBJDIR}/CPMM.o ${COMMONDEP2}
+
+# MSB utilities
+${OBJDIR}/MSB.o          : ${SRCDIR}/MSB.f90 ${OBJDIR}/BlockUtils.o ${COMMONDEP2}
 
 # Eigensolver CP8
 ${OBJDIR}/Solver_CP8.o   : ${SRCDIR}/Solver_CP8.f90 ${OBJDIR}/CPr8.o ${OBJDIR}/ALS8.o \
@@ -342,7 +365,8 @@ ${OBJDIR}/Solver_CP8.o   : ${SRCDIR}/Solver_CP8.f90 ${OBJDIR}/CPr8.o ${OBJDIR}/A
 ${OBJDIR}/Solver.o       : ${SRCDIR}/Solver.f90 ${OBJDIR}/BlockPower.o \
                            ${OBJDIR}/ALSPow.o ${OBJDIR}/Restart.o \
                            ${OBJDIR}/ALSUtils.o ${OBJDIR}/LinSolver.o \
-			   ${OBJDIR}/Solver_CP8.o ${COMMONDEP2}
+			   ${OBJDIR}/Solver_CP8.o ${OBJDIR}/MSB.o \
+			   ${COMMONDEP2}
 
 # Test CP-format types
 ${OBJDIR}/TestCPr8.o     : ${SRCDIR}/TestCPr8.f90 ${OBJDIR}/CPr8.o ${OBJDIR}/CPMM.o \
@@ -357,7 +381,7 @@ ${OBJDIR}/Timings.o      : ${SRCDIR}/Timings.f90 ${OBJDIR}/HamilSetup.o \
                            ${OBJDIR}/Guess.o ${OBJDIR}/Solver.o \
                            ${OBJDIR}/Updater.o ${OBJDIR}/Analyzer.o \
                            ${OBJDIR}/ALSPow.o ${OBJDIR}/LinSolver.o \
-                           ${COMMONDEP2}
+                           ${OBJDIR}/Solver_CP8.o ${COMMONDEP2}
 
 # Main MLCP program
 ${OBJDIR}/MLmain.o       : ${SRCDIR}/MLmain.f90 ${OBJDIR}/HamilSetup.o \

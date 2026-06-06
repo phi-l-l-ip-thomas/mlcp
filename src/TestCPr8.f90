@@ -1857,7 +1857,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      logical function comparepvvarrays(R,P) result(passed)
+      function comparepvvarrays(R,P) result(passed)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Compares all entries in arrays R (reference) and P
@@ -1976,7 +1976,9 @@
                endif
             ENDIF
 
+#if MPI_ENABLED
             call MPI_WAITALL(nreqs,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
             if (ierr.ne.0) write(*,*) 'rank ',mpirank,': ierr = ',ierr
 
             swapem=(.not.swapem)
@@ -1986,7 +1988,9 @@
 !     Self w->v in case odd ranks,passes leaves initial vec in w
       if (swapem) then
          call MPI_ISendRecv_CP8(w,v,mpirank,mpirank,reqs,0)
+#if MPI_ENABLED
          call MPI_WAITALL(nreqs,reqs,MPI_STATUSES_IGNORE,ierr)
+#endif
       endif
 
       IF (mpirank.eq.mpi_prnt_rank) THEN

@@ -14,6 +14,7 @@
       USE MODEH
       USE GUESS
       USE SOLVER
+      USE SOLVER8
       USE ANALYZER
       USE UPDATER
 
@@ -51,6 +52,8 @@
       call Dispose_ModeH_Module()
       call Dispose_Guess_Module()
       call Dispose_Solver_Module()
+      call Dispose_Solver_Module_CP8()
+      call Dispose_BlockUtils_Module()
       call Dispose_Analyzer_Module()
       call Dispose_Updater_Module()
 

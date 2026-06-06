@@ -54,22 +54,22 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine BuildModeHamiltonian(im,H,Ham,cpp)
+      subroutine BuildModeHamiltonian(im,ia,na,H,Ham,cpp)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Constructs Hamiltonian in CP-format for mode 'im' in layer 'il'
+! Constructs CP-format Hamiltonian for node 'im', activation 'ia'/'na'
 
       implicit none
-      TYPE (CPpar) :: cpp
+      TYPE (CPpar), INTENT(IN) :: cpp
       TYPE (Hamiltonian), INTENT(IN) :: Ham
       TYPE (Configs), ALLOCATABLE :: pop(:),opcs(:,:)
       TYPE (CP), INTENT(OUT) :: H
       TYPE (CP) :: Hnew
-      integer, intent(in)  :: im
+      integer, intent(in)  :: im,ia,na
       integer, allocatable :: nbas(:)
       integer :: i,j,nsubm,msubm,sm
       integer :: oldrank,tilesize
-      real(kind=8) :: Hstor
+      real(kind=8) :: Hstor,falpha,hcut
       real(kind=8), parameter :: redtol=1.d-12
       logical      :: showFmG,tiledH
       real(kind=8) :: ti1,ti2
@@ -83,6 +83,8 @@
       tiledH=.FALSE.
       nsubm=Ham%nt(im)%nsubm()  ! Also equals nr. eigen terms
       msubm=max(nsubm,1)
+      
+      call activate_hcoup(cpp,ia,na,falpha,hcut)
 
       ALLOCATE(nbas(msubm))
       DO i=1,msubm
@@ -95,12 +97,17 @@
       ENDDO
 
       IF (nsubm.ne.1) THEN
-         IF (mpirank.eq.mpi_prnt_rank) &
-         write(*,'(3X,A)') 'Building mode Hamiltonian...'
+         IF (mpirank.eq.mpi_prnt_rank) THEN
+            write(*,'(3X,A)') 'Building mode Hamiltonian...'
+            if (ia.lt.na .and. falpha.lt.1.d0) then
+               write(*,'(/,5X,A,ES16.8)') &
+               'coupling terms scaled by factor    : ',falpha
+            endif
+         ENDIF
       ENDIF
 
 !     Get the primitive and compound operator list
-      call GetPrimOpList(Ham,im,pop,opcs,cpp%verbosity)
+      call GetPrimOpList(Ham,im,pop,opcs,falpha,hcut,cpp%verbosity)
 
       IF (mpirank.eq.mpi_prnt_rank .and. cpp%verbosity.ge.2) THEN
          write(*,'(/X,A/)') 'Compound operator list, before sorting:'
@@ -214,25 +221,33 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetPrimOpList(Ham,im,pop,opcs,verbosity)
+      subroutine GetPrimOpList(Ham,im,pop,opcs,falpha,hcut,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Gets list of primitive operators which apply to sub-nodes of 'inode'
 
       implicit none
       TYPE (Hamiltonian), INTENT(IN) :: Ham
-      INTEGER, INTENT(IN) :: im,verbosity
+      integer, intent(in) :: im,verbosity
+      real(kind=8), intent(in) :: falpha,hcut
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: pop(:),opcs(:,:)
       TYPE (Configs) :: T,T2
       integer, allocatable :: nbas(:)
       integer :: ipass,i,j,k,l,nsubm,msubm,nHterm,nop,sm,nsubdof,rk,idx
+      integer :: nHkeep,m
 
       nsubm=Ham%nt(im)%nsubm()
       msubm=max(1,nsubm)
       nHterm=Ham%nt(im)%nHterm()
 
+!     Count the number of term which exceed the threshold
+      nHkeep=0
+      DO i=1,nHterm
+         IF (abs(Ham%nt(im)%Hfacs(i)*falpha).gt.hcut) nHkeep=nHkeep+1
+      ENDDO
+
 !     Generate the mode terms
-      ALLOCATE(pop(msubm),opcs(nsubm+nHterm,msubm),nbas(1))
+      ALLOCATE(pop(msubm),opcs(nsubm+nHkeep,msubm),nbas(1))
       nbas(:)=1
       DO j=1,msubm
          DO i=1,nsubm
@@ -243,7 +258,14 @@
       ENDDO
       DEALLOCATE(nbas)
 
-      IF (nHterm.eq.0) RETURN
+      IF (mpirank.eq.mpi_prnt_rank .and. nHkeep.lt.nHterm) THEN
+          write(*,'(5X,A,ES16.8)') &
+            'retaining terms exceeding magnitude: ',hcut
+          write(*,'(5X,A,I0,A,I0,A)') 'retained ',nHkeep+nsubm,&
+            ' largest terms out of ',nHterm+nsubm,' terms total'
+      ENDIF
+
+      IF (nHkeep.eq.0) RETURN
 
       DO ipass=1,2
 
@@ -264,57 +286,61 @@
             DEALLOCATE(nbas)
 
 !           Loop over terms in H, find unique ones for this mode
+            m=0
             DO i=1,nHterm
-               T%qns(1,:)=0
-               nop=Ham%nt(im)%Hnop(i)
-               rk=SIZE(pop(j)%coef)
+               IF (abs(Ham%nt(im)%Hfacs(i)*falpha).gt.hcut) THEN
+                  m=m+1
+                  T%qns(1,:)=0
+                  nop=Ham%nt(im)%Hnop(i)
+                  rk=SIZE(pop(j)%coef)
 
-!              Construct the Config representation of the operator
-               DO k=1,nop
-!                 Operator belongs to subnode j
-                  IF (Ham%nt(im)%Hsubm(i,k).eq.j) THEN
-                     DO l=1,nsubdof
-                        IF (Ham%nt(im)%Hops(i,k,1).eq.Ham%nt(sm)%dofs(l)) THEN
-                           T%qns(1,l)=Ham%nt(im)%Hops(i,k,2)
-                           T%qns(1,l+nsubdof)=Ham%nt(im)%Hops(i,k,3)
-                        ENDIF
-                     ENDDO
-                  ENDIF
-               ENDDO
+!                 Construct the Config representation of the operator
+                  DO k=1,nop
+!                    Operator belongs to subnode j
+                     IF (Ham%nt(im)%Hsubm(i,k).eq.j) THEN
+                        DO l=1,nsubdof
+                           IF (Ham%nt(im)%Hops(i,k,1).eq.Ham%nt(sm)%dofs(l)) THEN
+                              T%qns(1,l)=Ham%nt(im)%Hops(i,k,2)
+                              T%qns(1,l+nsubdof)=Ham%nt(im)%Hops(i,k,3)
+                           ENDIF
+                        ENDDO
+                     ENDIF
+                  ENDDO
 
-               idx=findconfigindex(pop(j),T%qns(1,:),(/1,rk/)) 
-               IF (idx.eq.0) THEN
+                  idx=findconfigindex(pop(j),T%qns(1,:),(/1,rk/)) 
+                  IF (idx.eq.0) THEN
 
-                  IF (ipass.eq.1) THEN
-!                    First pass: increase the basis count (if a new 
-!                    larger index is found), add operator to list of
-!                    primitive operators, and resort list
-                     DO l=1,2*nsubdof
-                        IF (T%qns(1,l).gt.pop(j)%nbas(l)) &
-                            pop(j)%nbas(l)=T%qns(1,l)
-                     ENDDO
+                     IF (ipass.eq.1) THEN
+!                       First pass: increase the basis count (if a new 
+!                       larger index is found), add operator to list of
+!                       primitive operators, and resort list
+                        DO l=1,2*nsubdof
+                           IF (T%qns(1,l).gt.pop(j)%nbas(l)) &
+                               pop(j)%nbas(l)=T%qns(1,l)
+                        ENDDO
 
-                     call NewConfigs(T2,pop(j)%nbas,rk+1)
-                     call GenCopyConfigsWtoV(T2,pop(j),1,rk,1,rk)
-                     call GenCopyConfigsWtoV(T2,T,rk+1,rk+1,1,1)
-                     call SortConfigsByIndex(T2)
-                     call ReplaceConfigsVwithW(pop(j),T2)
+                        call NewConfigs(T2,pop(j)%nbas,rk+1)
+                        call GenCopyConfigsWtoV(T2,pop(j),1,rk,1,rk)
+                        call GenCopyConfigsWtoV(T2,T,rk+1,rk+1,1,1)
+                        call SortConfigsByIndex(T2)
+                        call ReplaceConfigsVwithW(pop(j),T2)
+                     ELSE
+!                       Second pass: error if operator not found
+                        call AbortWithError(&
+                             "GetPrimOpList(): operator not found")
+                     ENDIF
+
                   ELSE
-!                    Second pass: error if operator not found
-                     call AbortWithError(&
-                          "GetPrimOpList(): operator not found")
-                  ENDIF
-
-               ELSE
-!                 Second pass: record the operator in the list
-                  IF (ipass.eq.2) THEN
-                      call NewConfigs(opcs(i+nsubm,j),(/SIZE(pop(j)%coef)/),1)
-                      if (j.eq.1) then
-                         opcs(i+nsubm,j)%coef(1)=Ham%nt(im)%Hfacs(i)
-                      else
-                         opcs(i+nsubm,j)%coef(1)=1.d0
-                      endif
-                      opcs(i+nsubm,j)%qns(1,1)=idx
+!                    Second pass: record the operator in the list
+                     IF (ipass.eq.2) THEN
+                         call NewConfigs(opcs(m+nsubm,j),(/SIZE(pop(j)%coef)/),1)
+                         if (j.eq.1) then
+                            opcs(m+nsubm,j)%coef(1)=Ham%nt(im)%Hfacs(i)*falpha
+                         else
+                            opcs(m+nsubm,j)%coef(1)=1.d0
+                         endif
+                         opcs(m+nsubm,j)%qns(1,1)=idx
+                     ENDIF
                   ENDIF
                ENDIF
             ENDDO
@@ -727,7 +753,7 @@
          enddo
       enddo
 
-      call SortOPCSinner(key(ist:iend),arr)
+      call hsort2Drlist(key(ist:iend),arr)
 
       deallocate(cfg,arr)
 
@@ -781,63 +807,11 @@
          enddo
       enddo
 
-      call SortOPCSinner(key,arr)
+      call hsort2Drlist(key,arr)
 
       deallocate(cfg,arr)
 
       end subroutine SortOPCSmiddleA
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine SortOPCSinner(key,arr)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Rearranges the sort key for opcs in ascending order of operator ids
-! and coefs
-
-      implicit none
-      integer, intent(inout) :: key(:)
-      real(kind=8), intent(inout) :: arr(:,:)
-      integer, allocatable :: ist(:),iend(:),kx(:)
-      integer :: kl,kw,j,i
-
-      kl=SIZE(arr,1)
-      kw=SIZE(arr,2)
-      
-      IF (kl.eq.1) RETURN
-
-      ALLOCATE(ist(kw),iend(kw))
-      iend=0
-      iend(1)=kl
-      ist(1)=1
-      j=1
-      DO
-!        Sort the configurations by index j
-         kx=getsortkey(arr(ist(j):iend(j),j))
-         call sortbykey(arr(ist(j):iend(j),:),kx)
-         call sortbykey(key(ist(j):iend(j)),kx)
-         deallocate(kx)
-
-!        Update DOF index j
-         IF (j.lt.kw) j=j+1
-         DO
-            IF (j.eq.1) EXIT
-            IF (iend(j).lt.iend(j-1)) EXIT
-            j=j-1
-         ENDDO
-
-!        When j returns to 1, the entire array is sorted
-         IF (j.eq.1) EXIT
-
-!        Update the sort ranges
-         ist(j)=iend(j)+1
-         iend(j)=rbisectH(arr(ist(j):iend(j-1),j-1),&
-                          arr(ist(j),j-1))+ist(j)-1
-      ENDDO
-
-      DEALLOCATE(ist,iend)
-
-      end subroutine SortOPCSinner
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1218,95 +1192,6 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetRank1Inverse(H,Hi)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Computes approximate H^-1 by reducing H to rank-1 and inverting each
-! coordinate Hamiltonian. On input, H should be given as the full matrix 
-! rep'n, not the upper triangle, (sym=.FALSE.)
-
-      implicit none
-      TYPE (CP), INTENT(IN)  :: H
-      TYPE (CP), INTENT(OUT) :: Hi
-      real(kind=8), allocatable :: tmat(:,:),tmat1(:,:)
-      real(kind=8), allocatable :: tvec(:)
-      character(len=64), parameter :: solver='LU'
-      integer, allocatable :: nbas(:)
-      integer :: j,ndof,gi,gf
-
-      ndof=SIZE(H%nbas)
-      ALLOCATE(nbas(ndof))
-
-      DO j=1,ndof
-         nbas(j)=NINT(sqrt(REAL(H%nbas(j))))
-      ENDDO
-
-!     Initial guess: reduce Hi <- H, with Hi rank-1
-      call SetReductionParameters(1,30,1.d-12,.FALSE.,'SVD','SR1',&
-                                  1.d-10,solver)
-      call reduc(Hi,H)
-
-!     Invert each little-h in Hi
-      gi=1
-      DO j=1,ndof
-         gf=gi+Hi%nbas(j)-1
-         call Vec2Mat(Hi%base(gi:gf,1),tmat,nbas(j),nbas(j))
-         call MatrixPseudoinverse(tmat,tmat1)
-!        Symmetrize to correct small numerical errors that might result
-!        from ALS
-         call SymmetrizeMat(tmat1)
-         call Mat2Vec(tvec,tmat1,.FALSE.)
-         Hi%base(gi:gf,1)=tvec(1:Hi%nbas(j)) 
-         DEALLOCATE(tmat,tmat1,tvec)
-         gi=gf+1
-      ENDDO
-      Hi%coef(1)=1.d0/Hi%coef(1)
-
-      end subroutine GetRank1Inverse
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine ShiftHbyE(H,E,sym)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Adds a term to H corresponding to a shift of energy E. If only the
-! upper triangle of Hsym is stored, set sym to .TRUE.
-
-      implicit none
-      TYPE (CP), INTENT(INOUT) :: H
-      TYPE (CP) :: I
-      logical, intent(in)  :: sym
-      real(kind=8), intent(in)   :: E
-      logical, allocatable :: symm(:)
-      integer, allocatable :: nbas(:)
-      real(kind=8), allocatable  :: tmat(:,:),tvec(:)
-      integer :: j,ndof,gi,gf
-
-      ndof=SIZE(H%nbas)
-
-!     Find the number of basis functions per DOF from H
-      ALLOCATE(nbas(ndof),symm(ndof))
-      DO j=1,ndof
-         IF (sym) THEN
-            nbas(j)=GetSymN(H%nbas(j))
-         ELSE
-            nbas(j)=NINT(sqrt(REAL(H%nbas(j))))
-         ENDIF
-      ENDDO
-      symm(:)=sym
-
-!     Get an identity matrix in CP format
-      I=IdentityCPMatrix(nbas,nbas,symm)
-
-!     Hshifted = H + E*I
-      call SUMVECVEC(H,1.d0,I,E)
-      call FlushCP(I)
-      DEALLOCATE(nbas,symm)
-
-      end subroutine ShiftHbyE
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
       subroutine RepackHmats(T)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1341,6 +1226,65 @@
       ENDDO
 
       end subroutine RepackHmats
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine activate_hcoup(cpp,ia,na,falpha,hcut)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Computes scale factor and cutoff for activation step ia / na
+
+      implicit none
+      TYPE (CPpar), INTENT(IN) :: cpp
+      integer, intent(in) :: ia,na
+      real(kind=8), intent(out) :: falpha,hcut
+      real(kind=8) :: phi
+
+      phi=2.d0/(1.d0+sqrt(5.d0))
+
+      IF (TRIM(ADJUSTL(cpp%activation)).seq.'cut-log2') THEN
+         falpha=1.d0
+         hcut=cpp%hcut*2**(na-ia)
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'cut-loge') THEN
+         falpha=1.d0
+         hcut=cpp%hcut*exp(REAL(na-ia))
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'cut-logphi') THEN
+         falpha=1.d0
+         hcut=cpp%hcut*phi**(na-ia)
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'cut-log10') THEN
+         falpha=1.d0
+         hcut=cpp%hcut*10**(na-ia)
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'scale-log2') THEN
+         falpha=2.d0**(ia-na)
+         hcut=cpp%hcut
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'scale-loge') THEN
+         falpha=exp(REAL(ia-na))
+         hcut=cpp%hcut
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'scale-logphi') THEN
+         falpha=phi**(ia-na)
+         hcut=cpp%hcut
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'scale-log10') THEN
+         falpha=10.d0**(ia-na)
+         hcut=cpp%hcut
+      ELSEIF (TRIM(ADJUSTL(cpp%activation)).seq.'scale-linear') THEN
+         falpha=REAL(ia)/REAL(na)
+         hcut=cpp%hcut
+      ELSE
+         IF (mpirank.eq.mpi_prnt_rank .and. ia.lt.na) THEN
+            write(*,'(6X,3A)') 'Unknown activation function: "',&
+                               TRIM(ADJUSTL(cpp%activation)),'"'
+            write(*,'(6X,A)') '(activation functions implemented: '
+            write(*,'(9X,A)') '"cut-log2",   "cut-loge",   "cut-log10",'
+            write(*,'(7X,A)') &
+                            '"scale-log2", "scale-loge", "scale-log10",'
+            write(*,'(7X,A/)') &
+                           '"scale-linear"       <-selected by default)'
+         ENDIF
+         falpha=REAL(ia)/REAL(na)
+         hcut=cpp%hcut
+      ENDIF
+
+      end subroutine activate_hcoup
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

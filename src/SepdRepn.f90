@@ -857,19 +857,11 @@
       integer :: nbloc,ndofs,termlen
       integer :: p,b,i,j,ierr,totlen,ist,jst,nbas
 
+#if MPI_ENABLED
       nbloc=SIZE(Q)
 
 !     Number of CP-vecs on each MPI rank, and mpi offsets
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do b=1,nbloc
-         i=mod(b-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+1
-      enddo
-      moffs(1)=0
-      do p=2,mpinodes
-         moffs(p)=moffs(p-1)+mvecs(p-1)
-      enddo
+      call get_mpi_array_pointers(1,nbloc,mvecs,moffs)
 
 !     Array of CP-ranks depends on the CP-ranks of vectors distributed
 !     over different MPI-ranks
@@ -976,6 +968,7 @@
 
       deallocate(dims,syms,cpblock)
       deallocate(mvecs,moffs,ranks,starts,widths,mstarts,mwidths)
+#endif
 
       end subroutine MPI_Sync_CP_block
 

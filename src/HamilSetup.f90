@@ -60,7 +60,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine SetupHamiltonian(sys,trans,verbosity,afac,Ham,ML)
+      subroutine SetupHamiltonian(Ham,ML)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Master subroutine for building Hamiltonian matrix
@@ -69,9 +69,6 @@
       TYPE (MLtree)       :: ML
       TYPE (Hamiltonian)  :: Ham
       TYPE (Configs), ALLOCATABLE :: V(:),vtype(:)
-      character(len=*), intent(in) :: sys,trans
-      integer, intent(in) :: verbosity
-      real(kind=8), intent(in)  :: afac
       integer, allocatable :: opmap(:)
       real(kind=8), allocatable :: alpha(:),omega(:)
       real(kind=8) :: ti1,ti2
@@ -84,28 +81,28 @@
       write(*,'(/X,A)') 'Hamiltonian setup...'
 
 !     Compute PES or read from file
-      call GetPotential(V,sys,ML%nmode(1),verbosity)
+      call GetPotential(V,ML%system,ML%pes_path,ML%nmode(1),ML%dpp%verbosity)
 
 !     Generate the operator map and table
-      call AllocHamilOp(Ham,V,trans,opmap,verbosity)
+      call AllocHamilOp(Ham,V,ML%pe_transform,opmap,ML%dpp%verbosity)
 
 !     Extract harmonic constants from PES (for building KEO)
-      call ExtractOmegas(V,omega,verbosity)
+      call ExtractOmegas(V,omega,ML%dpp%verbosity)
 
 !     PES coordinate transformation (if requested)
-      call TransformPES(V,vtype,alpha,trans,afac,opmap,Ham%optable)
+      call TransformPES(V,vtype,alpha,ML%pe_transform,ML%pe_trans_fac,opmap,Ham%optable)
 
 !     Print out PES info (for debugging)
-      call ShowPESInfo(Ham,V,vtype,trans,opmap,verbosity)
+      call ShowPESInfo(Ham,V,vtype,ML%pe_transform,opmap,ML%dpp%verbosity)
 
 !     Construct node tree from ML tree
       call BuildNodeTree(Ham%nt,ML%modcomb,ML%modstart,ML%gdim,ML%nmode,ML%resort)
 
 !     Sort Hamiltonian into multilayer format
-      call FillHamilNodeTree(Ham%nt,V,vtype,omega,verbosity)
+      call FillHamilNodeTree(Ham%nt,V,vtype,omega,ML%dpp%verbosity)
 
 !     Get the unique primitive operator matrices
-      call GetPrimitiveOperators(Ham,ML,V,alpha,opmap,verbosity)
+      call GetPrimitiveOperators(Ham,ML,V,alpha,opmap,ML%dpp%verbosity)
 
 !     Construct bottom-layer mode operators from primitive operator
 !     matrices, then solve and update primitive operators
@@ -480,8 +477,6 @@
          oppowmax=i
       ENDDO
 
-      ALLOCATE(Ham%ops(ndof,oppowmax,noptyp))
-
 !     Generate operator matrices for this mode
       DO i=1,ndof
          m=ML%resort(i)
@@ -598,6 +593,31 @@
       ENDDO
 
       end subroutine SolveandUpdateFirstLayer
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine setnodeready(Ham,im)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets node readiness by making sure sub-nodes are ready
+
+      implicit none
+      TYPE (Hamiltonian), INTENT(INOUT) :: Ham
+      integer, intent(in) :: im
+      integer :: j,nsubm,sm
+      logical :: isready
+
+      nsubm=Ham%nt(im)%nsubm()
+
+      isready=.TRUE.
+      do j=1,nsubm
+         sm=Ham%nt(im)%subm(j)
+         isready=(isready.and.Ham%nt(sm)%done)
+      enddo
+
+      Ham%nt(im)%ready=isready
+
+      end subroutine setnodeready
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

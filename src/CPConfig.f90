@@ -85,7 +85,7 @@
 !                    '-----------------------'
 
       write(frmt,'(3(A,I0),A)') &
-            '(I',vmod,'A,X,',ndof,'(I',wmod,',X),f23.12)'
+            '(I',vmod,',A,X,',ndof,'(I',wmod,',X),ES16.8)'
       DO i=1,nconf
          write(*,frmt) i,')',(v%qns(i,j),j=1,ndof),v%coef(i)
       ENDDO
@@ -915,7 +915,6 @@
 !        Sort the configurations by DOF index j
          k=mod(imod+j-1,ndof)+1
          call SortConfigBlock(v,k,ist(j),iend(j))
-!         call SortConfigBlock(v,j,ist(j),iend(j))
 
 !        Update DOF index j
          IF (j.lt.ndof) j=j+1
@@ -932,7 +931,6 @@
          ist(j)=iend(j)+1
          k=mod(imod+j-2,ndof)+1
          iend(j)=ibisect(v%qns(ist(j):iend(j-1),k),1)+ist(j)-1
-!         iend(j)=ibisect(v%qns(ist(j):iend(j-1),j-1),1)+ist(j)-1
       ENDDO
 
       DEALLOCATE(ist,iend)

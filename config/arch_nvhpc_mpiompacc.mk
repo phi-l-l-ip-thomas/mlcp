@@ -1,9 +1,5 @@
-# arch.mk for NERSC Perlmutter; to set up environment:
-#
-# module load PrgEnv-nvidia
-
 # Fortran compiler
-FC = ftn
+FC = mpifort
 
 # Flags to always include
 FOPTS = -Mr8
@@ -19,7 +15,7 @@ MODULEFLG = -I
 
 # Flag to specify Message Passing Interface parallelization
 USEMPI = yes
-MPIFLG = 
+MPIFLG =
 
 # Flag to specify OpenMP parallelization
 USEOMP = yes
@@ -27,14 +23,15 @@ OMPFLG = -mp
 
 # Flag to specify OpenACC parallelization
 USEACC = yes
-ACCFLG = -cuda -acc -fast -Minfo=accel -cudalib=cublas,cusolver,cutensor,nvtx3 -gpu=cc80
+ACCFLG = -cuda -acc -fast -Minfo=accel -cudalib=cublas,cusolver,cutensor,nvtx3 -gpu=cc60
 
 # Preprocessor flag
 PREPROCFLG = -Mpreprocess
 
 # LAPACK and BLAS flags
-LAPACKLIB = 
+#LAPACKLIB = lib/liblapack.a lib/librefblas.a
+LAPACKLIB = -L/opt/nvidia/hpc_sdk/Linux_x86_64/24.11/compilers/lib -lblas -llapack
 
 # CUDA flags
-CULIB = 
+CULIB = #-L/opt/nvidia/hpc_sdk/Linux_x86_64/21.7/math_libs/lib64 -lcublas -lcusolver -lcutensor
 

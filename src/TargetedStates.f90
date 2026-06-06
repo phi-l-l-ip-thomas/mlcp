@@ -101,9 +101,9 @@
                           imin,imax)
       nranges(ndof)=0
       DO i=imin,imax
-         if (withinranges(nmode(i,ndof),nmsofar,nmtarget,nmranges(ndof,:))) then
-            if (withinranges(nexci(i,ndof),nexsofar,netarget,neranges(ndof,:))) then
-               if (withinranges(nexmx(i,ndof),mexsofar,mxtarget,mxranges(ndof,:))) then
+         if (withinranges(nmode(i,ndof),nmsofar,nmtarget,nmranges(ndof,1),nmranges(ndof,2))) then
+            if (withinranges(nexci(i,ndof),nexsofar,netarget,neranges(ndof,1),neranges(ndof,2))) then
+               if (withinranges(nexmx(i,ndof),mexsofar,mxtarget,mxranges(ndof,1),mxranges(ndof,2))) then
                   nranges(ndof)=nranges(ndof)+1
                   iranges(nranges(ndof),ndof)=i
                endif
@@ -137,9 +137,9 @@
 
             nranges(j)=0
             DO i=imin,imax
-               if (withinranges(nmode(i,j),nmsofar,nmtarget,nmranges(j,:))) then
-                  if (withinranges(nexci(i,j),nexsofar,netarget,neranges(j,:))) then
-                     if (withinranges(nexmx(i,j),mexsofar,mxtarget,mxranges(j,:))) then
+               if (withinranges(nmode(i,j),nmsofar,nmtarget,nmranges(j,1),nmranges(j,2))) then
+                  if (withinranges(nexci(i,j),nexsofar,netarget,neranges(j,1),neranges(j,2))) then
+                     if (withinranges(nexmx(i,j),mexsofar,mxtarget,mxranges(j,1),mxranges(j,2))) then
                         nranges(j)=nranges(j)+1
                         iranges(nranges(j),j)=i
                      endif
@@ -258,17 +258,17 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      function withinranges(val,sofar,targ,ranges) RESULT(within)
+      function withinranges(val,sofar,targ,rangelo,rangehi) RESULT(within)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
       implicit none
       logical :: within
-      integer, intent(in) :: val,sofar,targ(2),ranges(2)
+      integer, intent(in) :: val,sofar,targ(2),rangelo,rangehi
       integer :: limitlo,limithi
 
-      limitlo = targ(1)-sofar-ranges(2)
-      limithi = targ(2)-sofar-ranges(1)
+      limitlo = targ(1)-sofar-rangehi
+      limithi = targ(2)-sofar-rangelo
 
       within=.FALSE.
       IF (val.ge.limitlo .and. val.le.limithi) within=.TRUE.

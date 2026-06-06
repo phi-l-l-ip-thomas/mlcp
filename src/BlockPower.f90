@@ -7,14 +7,13 @@
 
       USE ERRORTRAP
       USE UTILS
+      USE CHEBLIB
       USE LINALG
       USE CPMMM
       USE MODVECVEC
       USE SEPDREPN
       USE REDUCTION
-!!!
       USE LINSOLVER
-!!!
       USE BLOCKUTILS
 
       CONTAINS
@@ -74,6 +73,104 @@
       enddo
 
       end subroutine InverseRecurse
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine RayleighQuotientItn(v,H,npow,nals,Eshift,which)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Solves (H-E1)v=w for vector v
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: v
+      TYPE (CP), INTENT(IN) :: H
+      TYPE (CP) :: w
+      integer, intent(in) :: npow,nals,which
+      real(kind=8), intent(in) :: Eshift
+      real(kind=8) :: l,m
+      integer :: i
+
+      m=Eshift
+
+      do i=1,npow
+!         write(*,'(A,I0,A,I0,A,f15.8)') 'ipow = (',i,'/',npow,&
+!               ') mu = ',m
+         w=CopyCP(v)
+         call LinSolver_alg(H,w,v,nals,1,m,which,.FALSE.)
+         l=PRODVV(v,w)
+         m=m+1.d0/l
+         call ReplaceVwithW(v,w)
+         call NORMALIZE(v)
+      enddo
+
+      end subroutine RayleighQuotientItn
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine RayleighQuotientIntertwining(v,H,npow,nals,Eshift,which)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Solves (H-E1)v=w for vector v
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: v
+      TYPE (CP), INTENT(IN) :: H
+      integer, intent(in) :: npow,nals,which
+      real(kind=8), intent(in) :: Eshift
+
+      if (which.eq.1) then
+         call LintertwinedInvItn_1(H,v,nals,1,Eshift,.TRUE.)
+      elseif (which.eq.2) then
+         call LintertwinedInvItn_2(H,v,nals,1,Eshift,.TRUE.)
+      else
+         write(*,*) 'Must choose {1,2} for RQ intertwining, not ',which
+         call &
+         AbortWithError('RayleighQuotientIntertwining(): bad choice')
+      endif
+
+      end subroutine RayleighQuotientIntertwining
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine FoldedRecurse(v,H,npow,Eshift,bounds)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Applies Hamiltonian (H-E)^npow*v to vector v
+! The ishift parameter controls the shifting
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: v
+      TYPE (CP), INTENT(IN) :: H
+      TYPE (CP) :: w
+      integer, intent(in) :: npow
+      real(kind=8), intent(in) :: Eshift
+      real(kind=8), intent(in) :: bounds(2)
+      real(kind=8) :: sh(2),s1,s2,sig
+      integer :: i
+
+      s1=(Eshift-bounds(1))**2
+      s2=(bounds(2)-Eshift)**2
+      sig=sqrt(0.5*(s1+s2))
+      sh(1)=Eshift+sig
+      sh(2)=Eshift-sig
+
+!      write(*,*) 'Etarget = ',Eshift,'; sh(1) = ',sh(1),'; sh(2) = ',sh(2)
+
+      do i=1,npow
+!        w <- (H-sigma(1)*I)*v; then v <- w
+         call CPMM(H,1,sh(1),.FALSE.,v,0,0.d0,.FALSE.,w)
+         call reduc(v,w)
+         call FlushCP(w)
+!         call ReplaceVwithW(v,w)
+!        w <- (H-sigma(2)*I)*v; then v <- w
+         call CPMM(H,1,sh(2),.FALSE.,v,0,0.d0,.FALSE.,w)
+         call reduc(v,w)
+         call FlushCP(w)
+!        Normalize v only after matrix-vector product pair
+         call NORMALIZE(v)
+      enddo
+
+      end subroutine FoldedRecurse
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

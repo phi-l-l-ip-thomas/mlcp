@@ -202,10 +202,11 @@
 
       write(*,*)
       do ir=1,rows
-         write(*,*) (mat(ir,ic),ic=1,cols)
+!         write(*,*) (mat(ir,ic),ic=1,cols)
 !         write(*,'(40(f15.8))') (mat(ir,ic),ic=1,cols)
 !         write(*,'(40(f13.6))') (mat(ir,ic),ic=1,cols)
-!         write(*,'(40(f6.2))') (mat(ir,ic),ic=1,cols)
+!         write(*,'(40(f7.3))') (mat(ir,ic),ic=1,cols)
+         write(*,'(40(f10.6))') (mat(ir,ic),ic=1,cols)
       enddo
       write(*,*)
 
@@ -1228,6 +1229,58 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine hsort2Drlist(key,arr)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Rearranges the sort key for opcs in ascending order of operator ids
+! and coefs
+
+      implicit none
+      integer, intent(inout) :: key(:)
+      real(kind=8), intent(inout) :: arr(:,:)
+      integer, allocatable :: ist(:),iend(:),kx(:)
+      integer :: kl,kw,j,i
+
+      kl=SIZE(arr,1)
+      kw=SIZE(arr,2)
+
+      IF (kl.eq.1) RETURN
+
+      ALLOCATE(ist(kw),iend(kw))
+      iend=0
+      iend(1)=kl
+      ist(1)=1
+      j=1
+      DO
+!        Sort the configurations by index j
+         kx=getsortkey(arr(ist(j):iend(j),j))
+         call sortbykey(arr(ist(j):iend(j),:),kx)
+         call sortbykey(key(ist(j):iend(j)),kx)
+         deallocate(kx)
+
+!        Update DOF index j
+         IF (j.lt.kw) j=j+1
+         DO
+            IF (j.eq.1) EXIT
+            IF (iend(j).lt.iend(j-1)) EXIT
+            j=j-1
+         ENDDO
+
+!        When j returns to 1, the entire array is sorted
+         IF (j.eq.1) EXIT
+
+!        Update the sort ranges
+         ist(j)=iend(j)+1
+         iend(j)=rbisectH(arr(ist(j):iend(j-1),j-1),&
+                          arr(ist(j),j-1))+ist(j)-1
+      ENDDO
+
+      DEALLOCATE(ist,iend)
+
+      end subroutine hsort2Drlist
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       integer function FACRL(n)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1348,6 +1401,28 @@
       GetSymN=n
 
       end function GetSymN
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine scrubstring(s)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Replaces ASCII characters with ordinary spaces in string
+
+      implicit none
+      character(LEN=*), intent(inout) :: s
+      integer :: i,l
+
+      l=len(s)
+      do i=1,l
+!         write(*,*) s(i:i),iachar(s(i:i))
+         if (iachar(s(i:i)).eq.0 .or. iachar(s(i:i)).eq.10 .or. &
+             iachar(s(i:i)).eq.9 .or. iachar(s(i:i)).eq.13 .or. &
+             iachar(s(i:i)).eq.96 .or. iachar(s(i:i)).eq.190) &
+             s(i:i) = ' '
+      enddo
+
+      end subroutine scrubstring
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1477,6 +1552,45 @@
       read(str,*) (num(i),i=1,n)
 
       end function string2integerarray
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      function stringcountintegers(str) result(n)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Count ints in string until EOL or 1st non-integer char is encountered
+
+      implicit none
+      character(len=*), intent(in) :: str
+      integer :: n,i,s
+
+      n=0
+
+      if (len(str).eq.0) return
+
+      i=1
+      s=0
+      do
+        if (str(i:i).ge.'0' .and. str(i:i).le.'9') then
+           if (s.eq.0) s=i  ! Start recording integer
+        elseif (str(i:i).eq.' ') then
+           if (s.gt.0) then ! Stop recording integer, increment count
+              s=0
+              n=n+1
+           endif
+        else ! Non-integer, non-space: finish any existing int and exit
+           if (s.gt.0) n=n+1
+           exit
+        endif
+        
+        if (i.eq.len(str)) then
+           if (s.gt.0) n=n+1
+           exit
+        endif
+        i=i+1
+      enddo
+
+      end function stringcountintegers
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

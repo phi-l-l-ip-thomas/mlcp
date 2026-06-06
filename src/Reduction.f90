@@ -21,8 +21,8 @@
       real(kind=8), allocatable, private :: redn_time(:)
       logical, private :: RED_SETUP=.FALSE.
       logical, private :: printredn=.FALSE.
-      character(3), private :: red2D='N/A',redND='N/A'
-      character(len=64), private :: als_solver='uninitialized'
+      character(len=128), private :: red2D='N/A',redND='N/A'
+      character(len=128), private :: als_solver='uninitialized'
 
       INTERFACE reduc
          MODULE PROCEDURE reduc_AA,reduc_AB
@@ -41,8 +41,7 @@
       integer, intent(in) :: rrnk,nals
       real(kind=8), intent(in) :: redtol,penalty
       logical, intent(in) :: prnt
-      character*3, intent(in) :: rtyp2D,rtypND
-      character(len=64), intent(in) :: solver
+      character(len=*), intent(in) :: rtyp2D,rtypND,solver
 
       if (penalty.gt.1.d0 .or. penalty.lt.0.d0) then
          write(*,'(A,ES11.4,A)') 'ALS regularization penalty ',&
@@ -53,11 +52,11 @@
       newrank=rrnk
       nloop=nals
       eps=redtol
-      printredn=prnt
-      red2D=rtyp2D
-      redND=rtypND
       als_penalty=penalty
-      als_solver=solver
+      printredn=prnt
+      red2D=TRIM(ADJUSTL(rtyp2D))
+      redND=TRIM(ADJUSTL(rtypND))
+      als_solver=TRIM(ADJUSTL(solver))
 
       end subroutine SetReductionParameters
 
@@ -133,7 +132,7 @@
 !     No reduction requested
       IF (newrank.eq.0 .or. SIZE(G%nbas).eq.1 .or. SIZE(G%coef).eq.1 &
          .or. (SIZE(G%coef).le.newrank .and. &
-         .not.(SIZE(G%nbas).eq.2 .and. red2D.eq.'SVD'))) THEN
+         .not.(SIZE(G%nbas).eq.2 .and. (red2D.seq.'SVD')))) THEN
          rederr=0.d0
          IF (printredn) write(*,'(7X,A,f20.12)') '||F-G||_2 = ',rederr
       ELSE
@@ -175,7 +174,7 @@
 
 !     SVD reduction for 2D case: determine which algorithm to use
 !     (depends on base-size and rank of G)
-      IF (SIZE(G%nbas).eq.2 .and. red2D.eq.'SVD') THEN
+      IF (SIZE(G%nbas).eq.2 .and. (red2D.seq.'SVD')) THEN
          call FlushCP(F)
          useA=whichSVDcode(G)
          IF (useA) THEN
@@ -185,8 +184,8 @@
          ENDIF
 
 !     ALS or RID reduction (set NALS=0 to do RID by itself)
-      ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'ALS') .or. &
-              (SIZE(G%nbas).ne.2 .and. redND.eq.'ALS')) THEN
+      ELSEIF ((SIZE(G%nbas).eq.2 .and. (red2D.seq.'ALS')) .or. &
+              (SIZE(G%nbas).ne.2 .and. (redND.seq.'ALS'))) THEN
 
 !        The initial guess is the existing vector F, but if the rank
 !        of F is too small then we must generate a new guess
@@ -199,8 +198,8 @@
          IF (SIZE(G%coef).gt.newrank) call reduc_ALS(G,F,abs(nloop))
 
 !     Successive rank-1 approximations (uses ALS code)
-      ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'SR1') .or. &
-              (SIZE(G%nbas).ne.2 .and. redND.eq.'SR1')) THEN
+      ELSEIF ((SIZE(G%nbas).eq.2 .and. (red2D.seq.'SR1')) .or. &
+              (SIZE(G%nbas).ne.2 .and. (redND.seq.'SR1'))) THEN
 
          IF (.not.ALLOCATED(F%coef)) THEN
             F=RandomCP(G,newrank)
@@ -211,20 +210,20 @@
          IF (SIZE(G%coef).gt.newrank) call reduc_SR1(G,F,abs(nloop))
 
 !     Orthogonal rank-1 projections plus sorting
-      ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'OPS') .or. &
-              (SIZE(G%nbas).ne.2 .and. redND.eq.'OPS')) THEN
+      ELSEIF ((SIZE(G%nbas).eq.2 .and. (red2D.seq.'OPS')) .or. &
+              (SIZE(G%nbas).ne.2 .and. (redND.seq.'OPS'))) THEN
          call FlushCP(F)
          call reduc_orthog(G,F,5*newrank)
          call reduc_bysorting(F,newrank)
 
 !     Rank-1 reduction with orthogonal rank-1 projection
-      ELSEIF ((SIZE(G%nbas).eq.2 .and. red2D.eq.'ROP') .or. &
-              (SIZE(G%nbas).ne.2 .and. redND.eq.'ROP')) THEN
+      ELSEIF ((SIZE(G%nbas).eq.2 .and. (red2D.seq.'ROP')) .or. &
+              (SIZE(G%nbas).ne.2 .and. (redND.seq.'ROP'))) THEN
          call FlushCP(F)
          call reduc_rop(G,F,newrank,abs(nloop))
 
 !     Error out if type is not recognized or SVD with >2D
-      ELSEIF (SIZE(G%nbas).gt.2 .and. redND.eq.'SVD') THEN
+      ELSEIF (SIZE(G%nbas).gt.2 .and. (redND.seq.'SVD')) THEN
          call AbortWithError('reduc(): SVD works only for D = 2')
       ELSE
          write(*,*) 'Reduction types :',red2D,',',redND
@@ -665,9 +664,6 @@
 ! Receives G (represented in reduced form) and F (trial vector to be
 ! reduced), and approximates G by F using alternating least squares.
 ! The subroutine optimizes F in dimensions k=1,ndim in succession.
-! Setting kortho equal to one of the DOFs will result in an orthogonal
-! set of fs for that DOF provided that the rank, rF, is equal to n, the
-! basis size for that DOF
  
       implicit none
       TYPE (CP), INTENT(IN) :: G

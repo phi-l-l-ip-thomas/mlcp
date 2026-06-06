@@ -21,6 +21,7 @@ DEBUGFLG = -O0 -traceback
 MODULEFLG = -I
 
 # Flag to specify Message Passing Interface parallelization
+USEMPI = yes
 MPIFLG = 
 
 # Flag to specify OpenMP parallelization

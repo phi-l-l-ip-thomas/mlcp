@@ -1,139 +1,267 @@
 ########################################################################
 #
-### Instructions for setting up and running MLCP, cpu-dev version    ###
+### Instructions for setting up and running MLCP                     ###
 #
 ########################################################################
 
-1) MLCP comes with libraries included (in the 'lib') directory and is
-   configured to be compiled using the gfortran compiler. To compile
-   the libraries and the main code, one can use the convenience script
+1) Copy an appropriate configuration file from the 'config/' directory
+   and edit as appropriate; rename the file as 'arch.mk' in the main
+   MLCP directory. Then compile MLCP using
+
+   $ make
+
+   Alternatively, MLCP comes with BLAS and LAPACK libraries included
+   (in the 'lib/' directory) which can be compiled and linked
+   using e.g. gfortran tools. After performing step 1 above, one can
+   use the script
 
    $ bash install
 
-   to compile and link everything. Alternatively, once can compile the
-   libraries individually and use the Makefile to compile MLCP (i.e. if
-   a different compiler such as ifort is desired)
+   to compile and link the libraries and to build MLCP.
 
-2) To run MLCP, two input files are read, as well as a number of 
-   potential files, depending on the PES used:
+2) MLCP requires an input file containing the calculation settings and
+   the layer structure of the system of interest. A number of potential
+   files containg the force constants are also read from the <pes_path>
+   directory. These files are named 'f<order><system>.dat', where
+   <order> is the order of the force constants (e.g quadratic, cubic...)
+   and <system> corresponds to the 'system' label in the input file.
 
-   a) The file 'layers.inp' is used to enter the structure of the 
-      multilayer tree:
+   To run MLCP, at the command line execute:
 
-      -In the $resort section, one chooses the order of the modes, where
-       the numbering corresponds to that in the potential files
-      -In the $basis section, one chooses the numbers of basis functions:
-       first line: number of 1D harmonic oscillator functions
-       subsequent lines: number of n-D eigenfunctions to keep in the 2nd,
-       3rd, ... layers, which must not exceed the size of the direct product 
-       basis of the previous layer
-      -In the $layers section, the grouping of the coordinates is provided,
-       beginning with the second layer
+   $ mlcp.x <input file>
 
-   b) The file "CP.inp" lists control parameters for the calculation:
+   The input file consists of five sections, each of which is initiated
+   by a '$<section>' tag and terminated with an '$end-<section>' tag.
 
-      -System: five-character name 'XXXXX' of the PES to use. Potential
-               files for the system must match the name given here.
-               For more details on how To add a new PES, see section 3 below.
-               -Systems 'dummy', 'Henon' (modified Henon-Heiles), and 'CpOsc'
-                are available for testing and require no potential files.
+   $control
 
-      -NCPU: number of processors to use
+       This section sets control parameters for the calculation and can
+       be used to set global defaults for settings used for the nodes:
 
-      -red2D: type of rank-reduction to use for modes containing two 
-              submodes. Acceptable choices are:
-              SVD-singular value decomposition (recommended)
-              ALS-alternating least squares
-              SR1-successive rank-1 updates
-              OPS-orthogonal rank-1 projections plus sorting
+       - 'system' (string): name of the potential energy surface to use.
+          Systems 'dummy', 'Henon' (modified Henon-Heiles), and 'CpOsc'
+          (2D coupled oscillators are built-in for testing and require 
+          no potential files.
 
-      -redND: type of rank-reduction to use for modes containing more
-              than two submodes. Acceptable choices are:
-              ALS-alternating least squares (recommended)
-              SR1-successive rank-1 updates 
-              OPS-orthogonal rank-1 projections plus sorting
+       - 'pes_path' (string, default='pes'): path to search for potental
+          energy constant files
 
-      -psirank: target rank for the wavefunction
+       - 'resfile' (string): name for files to write restart data to/read 
+          restart data from. Setting to 'none' bypasses writing
+          restart files; otherwise the following files are written:
+             <resfile>_1_eigv.rst, XXXXX_2_eigv.rst (two copies of eigenvalues)
+             <resfile>_1_oper.rst, XXXXX_2_oper.rst (two copies of operators)
+             <resfile>_1_psi.rst, XXXXX_2_psi.rst   (two copies of wavefunction blocks)
+             <resfile>_layers.rst                   (copy of input file used in run)
+             <resfile>_act_node_<nid>               (file storing activation counter
+                                                     for node <nid> if activations are
+                                                     used for this node)
+             (two copies of eigv, oper and psi are generated in case of system
+             failure during a write, which would result in a corrupt file)
 
-      -hrank: target rank for the Hamiltonian. Set hrank=0 to skip
-              reduction of the Hamiltonian (recommended)
+       - 'pe_transform (string): Type of potential energy surface to transform
+          to use. Current options include:
+          'none' - no transform, i.e. use polynomial potential (default)
+          'morse-tanh' - transform asymmetric potentials into Morse variables and
+              symmetric potentials into tanh variables
+          'poly-tanh' - use polynomial variables for asymmetric potential and
+              symmetric potentials into tanh variables
 
-      -psinals: number of ALS iterations used in wavefunction rank reduction
+       - 'pe_trans_fac' (float, default='1.d0'): scaling factor for alpha when 
+          pe_transform is set to either 'morse-tanh' or 'poly-tanh'. Larger
+          values decrease the amount of coupling between modes far from the
+          equilibrium geometry in the transformed potential.
 
-      -hnals: number of ALS iterations used in Hamiltonian rank reduction
+       - 'rs' (integer array): an array of 33 integers used to initialize the
+          random number generator (default= all zeros)
 
-      -solver: solver type to use. Acceptable values are:
-               powr-power method
-               cheb-Chebyshev-filtered power method
-               pals-intertwined power method ("intertwining")
-                    (for modes with D=2, setting red2D='SVD' implies
+   $resort 
+
+       This section sets the order of the modes in the tree, where the
+       numbering corresponds to that in the potential files. Modes must
+       be entered as an array of integers appearing on a single line
+
+   $basis 
+
+       This section sets the numbers of basis functions to be used at each node.
+       The first line lists the numbers of 1D harmonic oscillator functions to use
+          for single-coordinate nodes at the bottom of the tree.
+       Subsequent lines list numbers of n-D eigenfunctions to retain for nodes 
+          in the 2nd, 3rd, ... layers. For each node, the values entered must not
+          exceed the direct-product basis sizes of the sub-nodes of that node.
+       Constraints on the basis set in the '$node' section may cause these values
+          being overwritten with values that satisfy the constraints
+       The $basis section must be entered as a set of integer arrays, with each
+          line corresponding to a layer, in ascending order, beginnng with the
+          bottom layer.
+
+   $layers 
+
+       This section defines the grouping of the coordinates by nodes and sub nodes.
+       Each entry denotes the number of nodes in the previous layer to be contained
+          as sub-nodes in the current layer.
+       The $layers section must be entered as a set of integer arrays, with each
+          line corresponding to a layer, in ascending order, beginnng with the
+          second-to-bottom layer.
+
+   $node
+
+       This section sets control settings for individual nodes. Settings for a
+       node must be specified on a single line containing the 'layer-mode'
+       designation. Unless otherwise indicated, the following settings can also
+       be given in $control above. If a setting appears in both $control and in
+       $node, then the latter takes precedence.
+
+       - 'layer-mode' (string, required in $node, not allowed in $control):
+          entered as '<layer>-<mode>', with <layer> and <mode> given as integers;
+          this specifies the layer and mode for which to apply the settings 
+          on the current line.
+          Setting <mode> to a value of 0 applies the settings on the line to ALL
+             modes contained in <layer>. In this case, these settings can be 
+             superseded for individual nodes in <layer> by additional lines in
+             $node for said individual values of <mode>.
+
+      - 'donode' (logical, default='T'): perform the calculation for the node.
+         Note that setting this to 'F' for a node suppresses calculation for 
+         all nodes that are dependent on the results of this node.
+
+      - 'max_nmode' (integer, default='-1', not allowed in $control):
+         Maximum number of coupled modes in product functions generated by Guess module
+
+      - 'max_sum' (integer, default='-1', not allowed in $control):
+         Maximum sum of quantum numbers in product functions generated by Guess module
+
+      - 'max_qn' (integer, default='-1', not allowed in $control):
+         Maximum value of quantum numbers in product functions generated by Guess module
+
+      - 'Etarget' (float, default='0.d0', not allowed in $control):
+         Target energy (above the Zero Point Energy) for functions generated in the Guess
+            module and (if applicable) for the Solver module
+
+      - 'activation' (string, default='scale-linear', not allowed in $control):
+         Type of activation schedule to use when "activating" the coupled Hamiltonian
+            from the uncoupled Hamiltonian. Valid choices include:
+            'scale-linear': multiply coupling terms in Hamiltonian by iact/nactivations
+            'scale-log2': multiply coupling terms in Hamiltonian by 2**(iact-nactivations)
+            'scale-loge': multiply coupling terms in Hamiltonian by exp(iact-nactivations)
+            'scale-logphi': multiply coupling terms in Hamiltonian by phi**(iact-nactivations),
+                where phi is the Golden Ratio = 2.d0/(1.d0+sqrt(5.d0))
+            'scale-log10': multiply coupling terms in Hamiltonian by 10**(iact-nactivations)
+            'cut-log2': truncate coupling terms smaller than 'hcut' * 2**(iact-nactivations)
+            'cut-loge': truncate coupling terms smaller than 'hcut' * exp(iact-nactivations)
+            'cut-logphi': truncate coupling terms smaller than 'hcut' * phi**(iact-nactivations),
+                where phi is the Golden Ratio = 2.d0/(1.d0+sqrt(5.d0))
+            'cut-log10': truncate coupling terms smaller than 'hcut' * 10**(iact-nactivations)
+
+      - 'nactivations' (integer, default='1', not allowed in $control):
+         Number of activation steps to use.
+
+      - 'hcut' (float, default='0.d0'): truncate Hamiltonian coupling terms smaller than 'hcut'
+
+      - 'verbosity' (integer, default='0'): controls verbosity of printed output.
+         Valid values are: (less verbose) <- [0,1,2] -> (more verbose)
+
+      - 'algo' (integer, default='-1'): parallel algorithm to use. Valid options:
+           '-1' legacy parallelism (MPI+OpenMP over vectors). At present, this is the only
+                option for nodes with 2 sub-modes when SVD is used for rank-reduction
+            '0' CPU (MPI over vectors; OpenMP kernels on CPU)
+            '1' GPU (MPI over vectors; OpenACC kernels on GPU)
+
+      - 'lowmem' (integer, default='2'): memory-saving option.
+           When algo='-1', options range from 0 (fastest, most memory usage)
+                                           to 3 (slowest, least memory usage)
+           When algo='0,1' options include 1 (replicate Hamiltonian on each MPI rank)
+                                       and 3 (partition Hamiltonian over MPI ranks)
+      - 'h_sort_alg' (string, default='pack'): algorithm to compress Hamiltonian by
+           collecting common terms.
+           'sort': sort terms by mode and collect largest groups; decrease size of group
+                   to collect by a factor of 2 each sweep (fastest sorting algorithm)
+           'pack': sort terms by mode and collect largest groups; decrease size of group
+                   to collect by 1 each sweep (usually gives best compression)
+           'compare': compare terms one-by-one and sum if all factors except one are
+                   equal (legacy algorithm, should be used only for testing)
+
+      - 'calcbounds' (string, default='calc'): method for computing spectral bounds
+           'calc': calculate spectral bounds; if restarting, then read from file
+           'recalc': calculate spectral bounds; if restarting, then recompute bounds
+           'guess': guess spectral bounds using energies from uncoupled Hamiltonian
+                    (saves computational resources but bounds may be inaccurate)
+
+      - 'padbounds' (float, default = '0.d0'): pad the computed spectral bounds at each
+           end by this value; a suitable  may improve solver convergence if the bounds
+           are guessed or computed to lower accuracy than the target states.
+
+      - 'solver' (string, default='powr'): solver type to use. Acceptable values are:
+           'powr': power method
+           'pals': intertwined power method ("intertwining")
+                   (for modes with D=2, setting red2D='SVD' implies
                     'powr' for those modes)
-               pist-preconditioned inexact spectral transform
-                    (note that PIST only applies to top layer; this 
-                    choice implies 'powr' for lower layers)
+           'iitn': inverse iteration, users normal equation linear solver
+           'iitf': inverse iteration, uses fast linear solver
+           'fold': folded spectrum iteration
+           The following solvers are experimental and are currently only implemented
+              for algo='-1':
+           'RQIn': Rayleigh Quotient iteration, uses normal equation linear solver
+           'RQIf': Rayleigh Quotient iteration, uses fast linear solver
+           'RQIt': intertwined Rayleigh Quotient iteration
 
-      -ncycle: number of cycles. One cycle implies npow power iterations
-               + Gram Schmidt orthogonalization + vector updates
+      - 'solvtol' (float, default='1.d-10'): solver tolerence; calculation exits early if
+           abs((E_prev-iteration - E_this-iteration)/E_this-iteration) < solvtol for ALL eigenvalues
 
-      -npow: number of power/Chebyshev/intertwining/PIST iterations per
-             cycle
+      - 'ncycle' (integer, default='10'): number of cycles. One cycle implies 'npow' power iterations
+           + (optional) orthogonalization + (optional) subspace diagonalization. After each
+           cycle, energies are printed, convergence is tested, and wavefunction restarts are
+           written, if requested.
+       
+      - 'npow' (integer, default='10'): number of power/intertwining/inverse iterations per cycle
 
-      -lowmem: memory-saving option to use with intertwining (solver=pals).
-               Options range from 0 (fastest, most memory usage)
-                               to 3 (slowest, least memory usage)
-               Options 1 and 2 are recommended for high and low memory runs,
-                               respectively
+      - 'orthogalg' (string, default='gram'): orthogonalization algorithm, performed each cycle
+         after iterations and before subspace diagonalization.
+           'gram': Gram-Schmidt orthogonalization
+           'S-1/2': Orthogonalize by multiplying by the inverse square root of the overlap matrix
+           'none': skip orthogonalization
 
-      -update: set to 1 to use vector updates (recommended). Setting to 0
-               sorts vectors by Rayleigh Quotient instead of by eigenvalue
+      - 'diag' (logical, default='T'): perform subspace diagonalization at end of cycle
+         (recommended)
 
-      -optimize PES: rotate PES to minimize terms which couple multiple DOFs
-                     (recommended setting=F)
+      - 'reduceHQ' (logical, default='T'): reduce rank of result of matrix-vector product H*Q
+         from (rank-of-H)*psirank to psirank before computing overlaps with other vectors in 
+         the subspace. This can substantially reduce the cost of computing the Q^T*H*Q matrix
+         but may introduce errors in the matrix elements, particularly for small psirank values
 
-      -Etarget: target energy (only applicable for top-layer, solver=pist)
+      - 'update' (logical, default='T'): Replace vectors with eigenvectors of subspace Hamiltonian
+         at the end of each cycle (recommended). Setting to 'F' causes vectors to be sorted by 
+         Rayleigh Quotient.
 
-      -solvtol: solver tolerence; calculation exit earlier when
-                (E_previous-iteration - E_this-iteration)/E_this-iteration < solvtol
-                for ALL eigenvalues
+      - 'ovrlpenalty' (float, default='0.d0'): Tikhonov regularization penalty for solving
+         generalized eigenvalue problem during subspace diagonalization. 
 
-      -resfile: name for files to write restart data to/read restart data from. Choose
-                'none' to avoid generating restart files; otherwise the following
-                files are generated:
-                XXXXX_1_eigv.rst, XXXXX_2_eigv.rst (two copies of eigenvalues)
-                XXXXX_1_oper.rst, XXXXX_2_oper.rst (two copies of operators)
-                XXXXX_1_psi.rst, XXXXX_2_psi.rst   (two copies of wavefunction blocks)
-                XXXXX_CP.rst                       (copy of CP.inp used in run)
-                XXXXX_layers.rst                   (copy of layers.inp used in run)
-                (two copies of eigv, oper and psi are generated in case of system
-                failure during a write, which would result in a corrupt file)
+      - 'red2D' (string, default='SVD'): rank-reduction algorithm for nodes containing TWO
+         submodes.
+           'SVD': singular value decomposition (recommended)
+           'ALS': alternating least squares
+           'SR1': successive rank-1 approximations
+           'OPS': orthogonal rank-1 projections plus sorting (experimental)
 
-   c) Once everything is set up, run the code using the command
+      - 'redND' (string, default='ALS'): type of rank-reduction to use for modes containing MORE
+         THAN TWO submodes. Includes same choices as 'red2D' except that SVD is not included
 
-      $ mlcp.x > output.out &
+      - 'psirank' (integer, default='10'): target reducion rank for the wavefunction
 
-      Enjoy!
+      - 'psinals' (integer, default='10'): number of ALS iterations for wavefunction rank reduction
 
-3) Adding a new PES
+      - 'hrank' (integer, default='0'): target rank for the Hamiltonian. Set hrank to '0' to skip
+         reduction of the Hamiltonian (recommended, as reducing rank of H can cause errors in the energies)
 
-   Including a new PES requires following four steps:
+      - 'hnals' (integer, default='200'): number of ALS iterations used in Hamiltonian rank reduction
 
-   a) pick a five character name for the new PES, e.g. 'XXXXX'
+      - 'alspenalty' (float, default='1.d-10'): regularization penalty when solving linear system
+         during ALS
 
-   b) add the following files to the pes directory:
-      f2XXXXX.dat (quadratic constants)
-      f3XXXXX.dat (cubic constants)
-        ...
-      fnXXXXX.dat (n-th order constants)
-
-   c) Modify the subroutine GetPotential() in source file Source/FFPES.f90
-      by adding an 'ELSEIF' statement for the new PES. This includes a 
-      call to  ReadFFHamiltonian(V,'XXXXX',n,divide), where n is the highest
-      order for which terms are included. Setting the 'divide' parameter 
-      to .TRUE. causes potential terms to be divided by Taylor series factors
-      and then multiplied by degeneracy factors
-
-   d) recompile MLCP
+       -als_linsys_alg (string, default='LU'): algorithm used to solve linear systems during ALS
+           'LU': use LU-decomposition
+           'SVD' use Singular Value Decomposition
 
 ########################################################################
-#  Instructions by Phillip Thomas 14 September 2023
+#  Instructions by Phillip Thomas 07 March 2026
 ########################################################################

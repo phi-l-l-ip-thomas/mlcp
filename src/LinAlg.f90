@@ -490,6 +490,44 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine SolveEigV(avec,QHQ,JOBZ)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Given Lanczos a and b vectors (and possibly QHQ), solve the eigenvalue
+! problem with a call to the LAPACK subroutine DSTEQR
+! COMPZ is the problem type:
+! 'N' -> just eigvals
+! 'V' ->  " + eigvecs of original matrix (give QHQ for this)
+
+      implicit none
+      real(kind=8), intent(inout) :: QHQ(:,:)
+      real(kind=8), intent(inout) :: avec(:)
+      real(kind=8), allocatable   :: WORK(:)
+      integer     :: n,INFO,LWORK
+      real(kind=8)      :: t1,t2
+      character*1 :: JOBZ
+
+      IF (.NOT. EIGEN_SETUP) call Init_Eigen_Module()
+      call CPU_TIME(t1)
+
+      n=SIZE(avec)
+
+      LWORK=max(1,3*n-1)
+      ALLOCATE(WORK(LWORK))
+      call DSYEV(JOBZ,'L',n,QHQ,n,avec,WORK,LWORK,INFO)
+      DEALLOCATE(WORK)
+      if (INFO.ne.0) then
+         write(*,*)'error in the diagonalization, info=',INFO
+         call AbortWithError('error in DSYEV')
+      endif
+
+      call CPU_TIME(t2)
+      eigen_time=eigen_time+t2-t1
+
+      end subroutine SolveEigV
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine SolveGenEigval(avec,S,QHQ,COMPZ)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

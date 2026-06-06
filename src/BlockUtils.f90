@@ -20,61 +20,115 @@
       USE CPr8
       USE ALS8DRVR
 
-      contains
+      implicit none
+      real(kind=8), allocatable, private :: ortho_time(:),qhq_time(:)
+      real(kind=8), allocatable, private :: ovrl_time(:),upd_time(:)
+      logical, private :: MODULE_SETUP = .FALSE.
+
+      INTERFACE GetOverlaps
+        MODULE PROCEDURE GetOverlapsQ,GetOverlapsQQ
+      END INTERFACE
+
+      INTERFACE GetOverlaps_CP8
+        MODULE PROCEDURE GetOverlapsQ_CP8,GetOverlapsQQ_CP8
+      END INTERFACE
+
+      CONTAINS
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GRAMORTHO(Q)
+      subroutine Init_BlockUtils_Module()
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Gram-Schmidt orthogonalizes a block of CP-format vectors
+
+      implicit none
+
+      allocate(ortho_time(mpinodes),qhq_time(mpinodes))
+      allocate(ovrl_time(mpinodes),upd_time(mpinodes))
+      ortho_time(:) = 0.d0
+      qhq_time(:) = 0.d0
+      ovrl_time(:) = 0.d0
+      upd_time(:) = 0.d0
+      MODULE_SETUP = .TRUE.
+
+      end subroutine Init_BlockUtils_Module
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Dispose_BlockUtils_Module()
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      implicit none
+
+      IF (.NOT. MODULE_SETUP) call Init_BlockUtils_Module()
+      call Get_MPI_Timings('* BlockUtils module (Orthog.)',ortho_time)
+      call Get_MPI_Timings('* BlockUtils module (Q^T H Q)',qhq_time)
+      call Get_MPI_Timings('* BlockUtils module (Overlaps)',ovrl_time)
+      call Get_MPI_Timings('* BlockUtils module (Updates)',upd_time)
+      MODULE_SETUP = .FALSE.
+      deallocate(ortho_time,qhq_time,ovrl_time,upd_time)
+
+      end subroutine Dispose_BlockUtils_Module
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Orthogonalize(Q,nconv,intw,nals,lowmem,oalgo)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Control routine for orthogonalizing block of CP-format vectors
 
       implicit none
       TYPE (CP), INTENT(INOUT) :: Q(:)
-      TYPE (CP)  :: v
-      real*8, allocatable :: vivj(:)
-      integer :: i,j,nbloc
+      logical, intent(in) :: intw
+      integer, intent(in) :: nconv,nals,lowmem
+      character(len=64), intent(in) :: oalgo
+      real(kind=8), allocatable :: S(:,:),Si(:,:)
+      integer :: nbloc
+      real(kind=8) :: reg
+      real(kind=8) :: ti1,ti2
 
-      nbloc=size(Q)
-      ALLOCATE(vivj(nbloc))
+      IF (.NOT. MODULE_SETUP) call Init_BlockUtils_Module()
+      call CPU_TIME(ti1)
 
-!     Normalize the first vector
-      call NORMALIZE(Q(1))
+      IF (TRIM(ADJUSTL(oalgo)).seq.'gram') THEN ! Gram-Schmidt
 
-!     Loop through the remaining vectors
-!     for each, project out all preceding vectors
-      do i=2,nbloc
+         IF (intw) THEN
+            call ALS_ORTHO_alg(Q,nals,lowmem)
+         ELSE
+            call GRAMORTHO(Q,nconv)
+         ENDIF
 
-!        Normalize i-th vector
-         call NORMALIZE(Q(i))
+      ELSEIF (TRIM(ADJUSTL(oalgo)).seq.'S-1/2') THEN ! Form S^-1/2
 
-!        Get weights
-         vivj(i)=1.d0
+         nbloc=SIZE(Q)
+         ALLOCATE(S(nbloc,nbloc))
+         reg=0.d0
+         call GetOverlaps(Q,reg,S)
+         call MatrixPseudoInverse(S,Si)
+         IF (intw) THEN
+            call UpdateVecs_intw(Q,Si,nals,lowmem) ! Avoids long vectors
+         ELSE
+            call UpdateVecs(Q,Si)
+         ENDIF
+         DEALLOCATE(S,Si)
 
-!$omp parallel
-!$omp do private(j) schedule(static)
-         do j=1,i-1
-!           Q(i) <- Q(i) - <Q(i),Q(j)>*Q(j)
-            vivj(j)=-PRODVV(Q(i),Q(j))
-         enddo
-!$omp end do
-!$omp end parallel
+      ELSEIF (.not.(TRIM(ADJUSTL(oalgo)).seq.'none')) THEN
 
-!        Compute the orthogonalized vector
-         call SUMLCVEC(v,Q(1:i),vivj(1:i))
+         write(*,*) "Orthogonalize algorithm is '",TRIM(ADJUSTL(oalgo)),&
+                    "'; valid choices are 'gram', 'S-1/2', and 'none'."
+         call AbortWithError('Orthogonalize: unrecognized algorithm')
 
-!        Reduce v into Q(i), normalize
-         call reduc(Q(i),v)
-         call NORMALIZE(Q(i))
-      enddo
+      ENDIF
 
-      DEALLOCATE(vivj)
+      call CPU_TIME(ti2)
+      ortho_time=ortho_time+ti2-ti1
 
-      end subroutine GRAMORTHO
+      end subroutine Orthogonalize
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine pGRAMORTHO(Q,k)
+      subroutine GRAMORTHO(Q,k)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Orthogonalizes a block of CP-format vectors via Gram-Schmidt, assuming
@@ -91,7 +145,7 @@
 
       IF (k.eq.nbloc) RETURN
       IF (k.lt.0 .or. k.gt.nbloc) &
-         call AbortWithError('pGRAMORTHO(): k is out of range')
+         call AbortWithError('GRAMORTHO(): k is out of range')
 
       ALLOCATE(vivj(nbloc))
 
@@ -101,6 +155,8 @@
 
 !        Normalize i-th vector
          call NORMALIZE(Q(i))
+
+         IF (i.eq.1) CYCLE
 
 !        Get weights
          vivj(i)=1.d0
@@ -125,7 +181,7 @@
 
       DEALLOCATE(vivj)
 
-      end subroutine pGRAMORTHO
+      end subroutine GRAMORTHO
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -186,7 +242,8 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine Diagonalize(Q,H,avec,intw,nitn,lm)
+      subroutine Diagonalize(Q,H,eigv,intw,reduceHQ,update,nitn,lm,&
+                             nconv,Eref,reg)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! One-step function to solve the generalized eigenvalue problem and 
@@ -195,36 +252,56 @@
       implicit none
       TYPE (CP), INTENT(INOUT) :: Q(:)
       TYPE (CP), INTENT(IN) :: H
-      integer, intent(in)   :: nitn,lm
-      logical, intent(in)   :: intw
-      real*8, intent(inout) :: avec(:)
+      real(kind=8), intent(in) :: Eref,reg
+      integer, intent(in)    :: nitn,lm
+      integer, intent(inout) :: nconv
+      logical, intent(in)    :: intw,reduceHQ,update
+      real*8, intent(inout)  :: eigv(:)
       real*8, allocatable :: QHQ(:,:),S(:,:)
       integer :: nbloc,algo
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_BlockUtils_Module()
 
 !     Set parameters
       nbloc=SIZE(Q)
 
       allocate(QHQ(nbloc,nbloc),S(nbloc,nbloc))
 
-!     Calculate QHQ and S matrices
-      IF (intw) THEN
+!     Calculate Q^T*H*Q matrix
+      call CPU_TIME(ti1)
+      IF (.not.update) THEN
+         call GetQHQdiag(Q,H,eigv,nconv)
+      ELSEIF (intw.and.reduceHQ) THEN
          call GetQHQ_intw(Q,H,QHQ,nitn,lm)  ! Reduces H*Q, then calcs Q^THQ
-         call GetOverlaps(Q,S)
       ELSE
-         call GetQHQ(Q,H,QHQ)
-         call GetOverlaps(Q,S)
+         call GetQHQ(Q,H,QHQ,reduceHQ)
       ENDIF
+      call CPU_TIME(ti2)
+      qhq_time=qhq_time+ti2-ti1
+
+!     Calculate overlap matrix
+      call CPU_TIME(ti1)
+      IF (update) call GetOverlaps(Q,reg,S)
+      call CPU_TIME(ti2)
+      ovrl_time=ovrl_time+ti2-ti1
 
 !     Diagonalize QHQ, accounting for overlaps
-      call SolveGenEigval(avec,S,QHQ,'V')
+      IF (update) call SolveGenEigval(eigv,S,QHQ,'V')
 
-!     Update block vectors after diagonalization
+!     Replace old vectors with linear combinations of eigenvecs:
 !     q^n_{new} <- sum_{i=1} ^ m U_{im} q^i_{old}
-      IF (intw) THEN
+!     (or sort vectors by distance from Eref if no diagonalization)
+      call CPU_TIME(ti1)
+      IF (.not.update) THEN
+         call SortVecs(Q,eigv,nconv,Eref)
+      ELSEIF (intw) THEN
          call UpdateVecs_intw(Q,QHQ,nitn,lm) ! Avoids long vectors
       ELSE
          call UpdateVecs(Q,QHQ)
       ENDIF
+      call CPU_TIME(ti2)
+      upd_time=upd_time+ti2-ti1
 
       deallocate(QHQ,S)
 
@@ -232,7 +309,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetQHQ(Q,H,QHQ)
+      subroutine GetQHQ(Q,H,QHQ,reduceHQ)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Computes Q^T H Q for a block of vectors
@@ -242,8 +319,8 @@
       TYPE (CP), INTENT(IN)  :: Q(:)
       TYPE (CP), ALLOCATABLE :: HQ(:)
       real*8, intent(inout)  :: QHQ(:,:)
-      integer, allocatable   :: mvecs(:),moffs(:)
-      integer :: i,j,nbloc,sz,os,szmx,ierr
+      logical, intent(in) :: reduceHQ
+      integer :: i,j,nbloc,sz,os,szmx
 
       nbloc=SIZE(Q)
       QHQ=0.d0
@@ -256,6 +333,133 @@
 !        HQ=H*Q(os+j)
          call CPMM(H,.FALSE.,Q(os+j),.FALSE.,HQ(j))
 !        Reduce the rank of HQ to accelerate computing the dot products
+         if (reduceHQ) call reduc(HQ(j))
+!$omp parallel
+!$omp do
+         do i=1,os+j
+!           QHQ(i,j)=<Q(i),H(Q(os+j))>
+            QHQ(i,os+j)=PRODVV(Q(i),HQ(j))
+         enddo
+!$omp enddo
+!$omp end parallel
+         call FlushCP(HQ(j))
+      enddo
+
+      DEALLOCATE(HQ)
+
+      call MPIGatherBlockedMatrix(QHQ)
+
+      end subroutine GetQHQ
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine Diagonalizeshsq(Q,H,eigv,intw,update,nitn,lm,nconv,Eref,reg)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! One-step function to solve the generalized eigenvalue problem and 
+! update vectors. Setting intw=.T. uses intertwining for the update
+! Squared-and-shifted (around Eref) vsn for testing
+
+      implicit none
+      TYPE (CP), INTENT(INOUT) :: Q(:)
+      TYPE (CP), INTENT(IN) :: H
+      real(kind=8), intent(in) :: Eref,reg
+      integer, intent(in)    :: nitn,lm
+      integer, intent(inout) :: nconv
+      logical, intent(in)    :: intw,update
+      real*8, intent(inout)  :: eigv(:)
+      real*8, allocatable :: QHQ(:,:),S(:,:)
+      integer :: nbloc,algo,i
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_BlockUtils_Module()
+
+!     Set parameters
+      nbloc=SIZE(Q)
+
+      allocate(QHQ(nbloc,nbloc),S(nbloc,nbloc))
+
+!     Calculate Q^T*H*Q matrix
+      call CPU_TIME(ti1)
+!      IF (.not.update) THEN
+!         call GetQHQdiag(Q,H,eigv,nconv)
+!      ELSEIF (intw) THEN
+!         call GetQHQ_intw(Q,H,QHQ,nitn,lm)  ! Reduces H*Q, then calcs Q^THQ
+!      ELSE
+         call GetQHQshsq(Q,H,QHQ,Eref)
+!      ENDIF
+      call CPU_TIME(ti2)
+      qhq_time=qhq_time+ti2-ti1
+
+      write(*,*) 'QHQ'
+      call PrintMatrix(QHQ)
+      write(*,*)
+
+!     Calculate overlap matrix
+      call CPU_TIME(ti1)
+      IF (update) call GetOverlaps(Q,reg,S)
+      call CPU_TIME(ti2)
+      ovrl_time=ovrl_time+ti2-ti1
+
+!     Diagonalize QHQ, accounting for overlaps
+      IF (update) call SolveGenEigval(eigv,S,QHQ,'V')
+
+      write(*,*) 'eigenvals of the squared-and-shifted-H'
+      do i=1,nbloc
+         write(*,'(X,A,I0,A,ES15.8)') 'shsc(',i,'): ',eigv(i)
+      enddo
+
+!     Replace old vectors with linear combinations of eigenvecs:
+!     q^n_{new} <- sum_{i=1} ^ m U_{im} q^i_{old}
+!     (or sort vectors by distance from Eref if no diagonalization)
+      call CPU_TIME(ti1)
+!      IF (.not.update) THEN
+!         call SortVecs(Q,eigv,nconv,0.d0)
+!      ELSEIF (intw) THEN
+!         call UpdateVecs_intw(Q,QHQ,nitn,lm) ! Avoids long vectors
+!      ELSE
+!         call UpdateVecs(Q,QHQ)
+!      ENDIF
+      call UpdateVecs(Q,QHQ)          ! Update vecs from sqsh-H diag
+      call GetQHQdiag(Q,H,eigv,nconv) ! Overwrite sqsh-H evals w/ RQs
+      call SortVecs(Q,eigv,nconv,0.d0)! Sort by RQs
+
+      call CPU_TIME(ti2)
+      upd_time=upd_time+ti2-ti1
+
+      deallocate(QHQ,S)
+
+      end subroutine Diagonalizeshsq
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GetQHQshsq(Q,H,QHQ,Eref)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Computes Q^T (H-E*I)^2 Q for a block of vectors
+
+      implicit none
+      TYPE (CP), INTENT(IN)  :: H
+      TYPE (CP), INTENT(IN)  :: Q(:)
+      TYPE (CP) :: HT
+      TYPE (CP), ALLOCATABLE :: HQ(:)
+      real*8, intent(inout)  :: QHQ(:,:)
+      real(kind=8), intent(in) :: Eref
+      integer :: i,j,nbloc,sz,os,szmx
+
+      nbloc=SIZE(Q)
+      QHQ=0.d0
+      
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc,sz,os,szmx)
+      ALLOCATE(HQ(sz))
+
+      do j=1,sz
+!        HQ=H*Q(os+j)
+         call CPMM(H,1,Eref,.FALSE.,Q(os+j),0,0.d0,.FALSE.,HT)
+         call reduc(HT)
+         call CPMM(H,1,Eref,.FALSE.,HT,0,0.d0,.FALSE.,HQ(j))
+         call FlushCP(HT)
          call reduc(HQ(j))
 !$omp parallel
 !$omp do
@@ -270,24 +474,9 @@
 
       DEALLOCATE(HQ)
 
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do j=1,nbloc
-         i=mod(j-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+nbloc
-      enddo
-      moffs(1)=0
-      do i=2,mpinodes
-         moffs(i)=moffs(i-1)+mvecs(i-1)
-      enddo
+      call MPIGatherBlockedMatrix(QHQ)
 
-!     Gather the columns from all processors
-      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
-           QHQ,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
-
-      DEALLOCATE(mvecs,moffs)
- 
-      end subroutine GetQHQ
+      end subroutine GetQHQshsq
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -382,8 +571,7 @@
       TYPE (CP), ALLOCATABLE :: HQ(:)
       integer, intent(in)    :: nitn,lm
       real*8, intent(inout)  :: QHQ(:,:)
-      integer, allocatable   :: mvecs(:),moffs(:)
-      integer :: i,j,nbloc,sz,os,szmx,ierr
+      integer :: i,j,nbloc,sz,os,szmx
 
       nbloc=SIZE(Q)
       QHQ=0.d0
@@ -408,37 +596,22 @@
 
       DEALLOCATE(HQ)
 
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do j=1,nbloc
-         i=mod(j-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+nbloc
-      enddo
-      moffs(1)=0
-      do i=2,mpinodes
-         moffs(i)=moffs(i-1)+mvecs(i-1)
-      enddo
-
-!     Gather the columns from all processors
-      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
-           QHQ,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
-
-      DEALLOCATE(mvecs,moffs)
+      call MPIGatherBlockedMatrix(QHQ)
 
       end subroutine GetQHQ_intw
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetOverlaps(Q,S)
+      subroutine GetOverlapsQ(Q,reg,S)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Computes Q^T Q for a block of vectors
+! Computes Q^T Q (symmetric version) for a block of vectors
 
       implicit none
       TYPE (CP), INTENT(IN) :: Q(:)
-      real*8, intent(inout) :: S(:,:)
-      integer, allocatable   :: mvecs(:),moffs(:)
-      integer :: i,j,nbloc,sz,os,szmx,ierr
+      real(kind=8), intent(inout) :: S(:,:)
+      real(kind=8), intent(in) :: reg
+      integer :: i,j,nbloc,sz,os,szmx
 
       nbloc=SIZE(Q)
       S=0.d0
@@ -454,29 +627,51 @@
          do i=1,os+j
 !           S(i,os+j)=<Q(i),Q(os+j)>
             S(i,os+j)=PRODVV(Q(i),Q(os+j))
+            if (i.eq.j) S(i,os+j)=S(i,os+j)+reg
          enddo
 !$omp enddo
 !$omp end parallel
       enddo
 
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do j=1,nbloc
-         i=mod(j-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+nbloc
+      call MPIGatherBlockedMatrix(S)
+
+      end subroutine GetOverlapsQ
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GetOverlapsQQ(Q1,Q2,S)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Computes Q1^T Q2 (non-symmetric version) for a block of vectors
+
+      implicit none
+      TYPE (CP), INTENT(IN) :: Q1(:),Q2(:)
+      real(kind=8), intent(inout) :: S(:,:)
+      integer :: i,j,nbloc1,nbloc2,sz,os,szmx
+
+      nbloc1=SIZE(Q1)
+      nbloc2=SIZE(Q2)
+      S=0.d0
+
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc2,sz,os,szmx)
+
+!     Compute inner products between vectors on this rank and
+!     all others
+      do j=1,sz
+!$omp parallel
+!$omp do private(i)
+         do i=1,nbloc1
+!           S(i,os+j)=<Q(i),Q(os+j)>
+            S(i,os+j)=PRODVV(Q1(i),Q2(os+j))
+         enddo
+!$omp enddo
+!$omp end parallel
       enddo
-      moffs(1)=0
-      do i=2,mpinodes
-         moffs(i)=moffs(i-1)+mvecs(i-1)
-      enddo
 
-!     Gather the columns from all processors
-      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
-           S,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
+      call MPIGatherBlockedMatrix(S)
 
-      DEALLOCATE(mvecs,moffs)
-
-      end subroutine GetOverlaps
+      end subroutine GetOverlapsQQ
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -491,22 +686,9 @@
       TYPE (CP), INTENT(IN)  :: Q(:)
       integer, intent(in)    :: nconv
       real*8, intent(inout)  :: QHQd(:)
-      integer, allocatable   :: mvecs(:),moffs(:)
-      integer :: b,i,nbloc,sz,os,szmx,ierr
+      integer :: i,nbloc,sz,os,szmx
 
       nbloc=SIZE(Q)
-
-!     Shifts, number of (unconverged) vectors for MPI
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do b=1,nbloc-nconv
-         i=mod(b-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+1
-      enddo
-      moffs(1)=nconv
-      do i=2,mpinodes
-         moffs(i)=moffs(i-1)+mvecs(i-1)
-      enddo
 
 !     Assign vectors to this MPI rank
       call calc_mpi_partition(nbloc-nconv,sz,os,szmx)
@@ -516,10 +698,7 @@
          QHQd(os+i)=RayleighQuotient2(Q(os+i),H)   
       enddo
 
-      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
-              QHQd,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
-
-      DEALLOCATE(mvecs,moffs)
+      call MPIGatherBlockedVector(QHQd,nconv)
 
       end subroutine GetQHQdiag
 
@@ -685,6 +864,83 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine MatchVecs(Q1,Q2,eigv1,eigv2,esig,matches)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Given blocks of vecs Q1,Q2 with eigenvalues eigv1,eigv2, this returns
+! the indices of vecs in Q2 which most closely match those in Q1
+! Vectors in Q1, Q2 must be normalized on entry
+
+      implicit none
+      TYPE (CP), INTENT(IN) :: Q1(:),Q2(:)
+      real(kind=8), intent(in) :: eigv1(:),eigv2(:)
+      real(kind=8), intent(in) :: esig
+      real(kind=8), allocatable :: S(:,:),A(:,:)
+      real(kind=8) :: w
+      integer, allocatable, intent(out) :: matches(:)
+      integer :: i,j,nbloc1,nbloc2
+
+      nbloc1=SIZE(Q1)
+      nbloc2=SIZE(Q2)
+
+!     Error checking
+      IF (nbloc2.lt.nbloc1) THEN
+         write(*,*) 'nbloc1, nbloc2 = ',nbloc1,nbloc2
+         call AbortWithError("MatchVecs(): nbloc2 < nbloc1")
+      ENDIF
+
+      IF (SIZE(eigv1).ne.nbloc1) THEN
+         write(*,*) &
+         'Size of Q1(',nbloc1,'), eigv1(',SIZE(eigv1),') must match'
+         call AbortWithError("MatchVecs(): bad Q1, eigv1 sizes")
+      ENDIF
+
+      IF (SIZE(eigv2).ne.nbloc2) THEN
+         write(*,*) &
+         'Size of Q2(',nbloc2,'), eigv2(',SIZE(eigv2),') must match'
+         call AbortWithError("MatchVecs(): bad Q2, eigv2 sizes")
+      ENDIF
+
+!     Compute overlaps between blocks
+      ALLOCATE(S(nbloc1,nbloc2))
+      call GetOverlaps(Q1,Q2,S)
+
+!!!
+      write(*,*) 'Overlap matrix: old and new block'
+      call PrintMatrix(S)
+!!!
+
+!     Square coefs and weight by energy differences so that assignments
+!     which minimize the energy difference are preferred
+      DO j=1,nbloc2
+         DO i=1,nbloc1
+            w=1.d0/(1+((eigv1(i)-eigv2(j))/esig)**2)
+            S(i,j)=S(i,j)**2*w
+         ENDDO
+      ENDDO
+
+!!!
+      write(*,*) 'Weighted overlap matrix:'
+      call PrintMatrix(S)
+!!!
+
+!     Assign states
+      A=AssignMatrix(S)
+      matches=GetMunkresAssignVec(A)
+
+!!!
+      write(*,*) 'Munkres assignment vector'
+      DO j=1,SIZE(matches)
+         write(*,*) j,matches(j)
+      ENDDO
+!!!
+
+      DEALLOCATE(S,A)
+
+      end subroutine MatchVecs
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine AugmentQWithRandom(Q,nrk)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -797,7 +1053,51 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine pGRAMORTHO_CP8(Q,k,nals,algo)
+      subroutine Orthogonalize_CP8(Q,nconv,nals,algo,oalgo)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Control routine for orthogonalizing block of CP-format vectors
+
+      implicit none
+      TYPE (CP8), INTENT(INOUT) :: Q(:)
+      integer, intent(in) :: nconv,nals,algo
+      character(len=64), intent(in) :: oalgo
+      real(kind=8), allocatable :: S(:,:),Si(:,:)
+      integer :: nbloc
+      real(kind=8) :: reg
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_BlockUtils_Module()
+      call CPU_TIME(ti1)
+
+      IF (TRIM(ADJUSTL(oalgo)).seq.'gram') THEN ! Gram-Schmidt
+         call GRAMORTHO_CP8(Q,nconv,nals,algo)
+
+      ELSEIF (TRIM(ADJUSTL(oalgo)).seq.'S-1/2') THEN ! Form S^-1/2
+
+         nbloc=SIZE(Q)
+         ALLOCATE(S(nbloc,nbloc))
+         reg=0.d0
+         call GetOverlaps_CP8(Q,reg,S,algo)
+         call MatrixPseudoInverse(S,Si)
+         call UpdateVecs_CP8(Q,Si,nals,algo)
+         call GetOverlaps_CP8(Q,reg,S,algo)
+         DEALLOCATE(S,Si)
+
+      ELSEIF (.not.(TRIM(ADJUSTL(oalgo)).seq.'none')) THEN
+         write(*,*) "Orthogonalize algorithm is '",TRIM(ADJUSTL(oalgo)),&
+                    "'; valid choices are 'gram', 'S-1/2', and 'none'."
+         call AbortWithError('Orthogonalize_CP8: unrecognized algorithm')
+      ENDIF
+
+      call CPU_TIME(ti2)
+      ortho_time=ortho_time+ti2-ti1
+
+      end subroutine Orthogonalize_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GRAMORTHO_CP8(Q,k,nals,algo)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Orthogonalizes a block of CP-format vectors via Gram-Schmidt, assuming
@@ -816,9 +1116,9 @@
 
       IF (k.eq.nbloc) RETURN
       IF (k.lt.0 .or. k.gt.nbloc) &
-         call AbortWithError('pGRAMORTHO(): k is out of range')
+         call AbortWithError('GRAMORTHO_CP8(): k is out of range')
 
-      call nvtx_start('pGRAMORTHO')
+      call nvtx_start('GRAMORTHO')
 
       ALLOCATE(vivj(nbloc))
       call GetRankOffsetTable(Q,tab)
@@ -852,11 +1152,12 @@
       DEALLOCATE(vivj,tab)
       call nvtx_stop()
 
-      end subroutine pGRAMORTHO_CP8
+      end subroutine GRAMORTHO_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine Diagonalize_CP8(Q,H,avec,nals,algo,tiledH)
+      subroutine Diagonalize_CP8(Q,H,eigv,reg,Eref,nconv,nals,algo,&
+                                 reduceHQ,update,tiledH)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! One-step function to solve the generalized eigenvalue problem and 
@@ -865,27 +1166,52 @@
       implicit none
       TYPE (CP8), INTENT(INOUT) :: Q(:)
       TYPE (CP8), INTENT(IN) :: H
-      integer, intent(in)   :: nals,algo
-      logical, intent(in)   :: tiledH
-      real(kind=8), intent(inout) :: avec(:)
+      real(kind=8), intent(in) :: reg,Eref
+      integer, intent(inout)   :: nconv
+      integer, intent(in) :: nals,algo
+      logical, intent(in) :: reduceHQ,update,tiledH
+      real(kind=8), intent(inout) :: eigv(:)
       real(kind=8), allocatable :: QHQ(:,:),S(:,:)
       integer :: nbloc
+      real(kind=8) :: ti1,ti2
+
+      IF (.NOT. MODULE_SETUP) call Init_BlockUtils_Module()
 
 !     Set parameters
       nbloc=SIZE(Q)
 
       allocate(QHQ(nbloc,nbloc),S(nbloc,nbloc))
 
-!     Calculate QHQ and S matrices
-      call GetQHQ_CP8(Q,H,QHQ,nals,algo,tiledH)
-      call GetOverlaps_CP8(Q,S,algo)
+!     Calculate Q^T*H*Q matrix
+      call CPU_TIME(ti1)
+      IF (update) THEN
+         call GetQHQ_CP8(Q,H,QHQ,nals,algo,reduceHQ,tiledH)
+      ELSE
+         call GetQHQdiag_CP8(Q,H,eigv,nconv,algo,tiledH)
+      ENDIF
+      call CPU_TIME(ti2)
+      qhq_time=qhq_time+ti2-ti1
+
+!     Calculate overlap matrix
+      call CPU_TIME(ti1)
+      IF (update) call GetOverlaps_CP8(Q,reg,S,algo)
+      call CPU_TIME(ti2)
+      ovrl_time=ovrl_time+ti2-ti1
 
 !     Diagonalize QHQ, accounting for overlaps
-      call SolveGenEigval(avec,S,QHQ,'V')
+      IF (update) call SolveGenEigval(eigv,S,QHQ,'V')
 
 !     Update block vectors after diagonalization
 !     q^n_{new} <- sum_{i=1} ^ m U_{im} q^i_{old}
-      call UpdateVecs_CP8(Q,QHQ,nals,algo)
+!     (or sort vectors by distance from Eref if no diagonalization)
+      call CPU_TIME(ti1)
+      IF (update) THEN
+         call UpdateVecs_CP8(Q,QHQ,nals,algo)
+      ELSE
+         call SortVecs_CP8(Q,eigv,nconv,Eref)
+      ENDIF
+      call CPU_TIME(ti2)
+      upd_time=upd_time+ti2-ti1
 
       deallocate(QHQ,S)
 
@@ -893,7 +1219,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetQHQ_CP8(Q,H,QHQ,nitn,algo,tiledH)
+      subroutine GetQHQ_CP8(Q,H,QHQ,nitn,algo,reduceHQ,tiledH)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Computes Q^T H Q for a block of vectors. The matrix-vector product H*Q
@@ -904,7 +1230,7 @@
       TYPE (CP8), INTENT(IN)  :: Q(:)
       TYPE (CP8) :: HQ,HQr,w,Qdummy
       integer, intent(in) :: nitn,algo
-      logical, intent(in) :: tiledH
+      logical, intent(in) :: reduceHQ,tiledH
       real(kind=8), intent(inout) :: QHQ(:,:)
       real(kind=8), allocatable   :: vivj(:)
       real(kind=8) :: qhqdummy
@@ -912,7 +1238,6 @@
       integer :: i,j,k,nbloc,sz,os,szmx,conv
       logical :: reduceH
 
-      reduceH=.TRUE.
       nbloc=SIZE(Q)
       QHQ=0.d0
 
@@ -934,7 +1259,7 @@
             else
 !              HQ=H*Q(k), then reduce rank
                call CPMM_CP8(H,Q(k),HQ,.FALSE.,algo)
-               if (reduceH) then
+               if (reduceHQ) then
                   call HQr%copyfrom(Q(k))
                   conv=ALS_reduce_CP8(HQr,HQ,nitn,algo)
                   call HQ%replace(HQr)
@@ -1030,14 +1355,13 @@
 
       implicit none
       TYPE (CP8), INTENT(IN)  :: H
-      TYPE (CP8), INTENT(IN)  :: Q(:)
+      TYPE (CP8), INTENT(INOUT) :: Q(:)
       TYPE (CP8) :: Qdummy
       integer, intent(in) :: nconv,algo
       logical, intent(in) :: tiledH
       real(kind=8), intent(inout) :: QHQd(:)
       real(kind=8) :: qhqdummy
-      integer, allocatable   :: mvecs(:),moffs(:)
-      integer :: b,i,k,nbloc,sz,os,szmx,ierr
+      integer :: i,k,nbloc,sz,os,szmx
 
       nbloc=SIZE(Q)
 
@@ -1062,36 +1386,22 @@
 
       call nvtx_stop()
 
-!     Shifts, number of (unconverged) vectors for MPI
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do b=1,nbloc-nconv
-         i=mod(b-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+1
-      enddo
-      moffs(1)=nconv
-      do i=2,mpinodes
-         moffs(i)=moffs(i-1)+mvecs(i-1)
-      enddo
-
-      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
-              QHQd,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
-
-      DEALLOCATE(mvecs,moffs)
+      call MPIGatherBlockedVector(QHQd,nconv)
 
       end subroutine GetQHQdiag_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetOverlaps_CP8(Q,S,algo)
+      subroutine GetOverlapsQ_CP8(Q,reg,S,algo)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Computes Q^T Q for a block of vectors.
+! Computes Q^T Q for a block of vectors, symmetric version.
 
       implicit none
       TYPE (CP8), INTENT(IN) :: Q(:)
       TYPE (CP8) :: w
       integer, intent(in) :: algo
+      real(kind=8), intent(in) :: reg
       real(kind=8), intent(inout) :: S(:,:)
       real(kind=8), allocatable   :: vivj(:)
       integer, allocatable :: tab(:,:)
@@ -1116,6 +1426,7 @@
             call w%sumlccp(Q(1:k),vivj(1:k))
 !           Get overlaps between Q(k) and those in w
             call GetBlockOverlaps_CP8(Q(k),w,tab(1:k,:),S(1:k,k),algo)
+            S(k,k)=S(k,k)+reg
             call w%flush()
          enddo
 
@@ -1125,7 +1436,55 @@
 
       call MPIGatherBlockedMatrix(S)
 
-      end subroutine GetOverlaps_CP8
+      end subroutine GetOverlapsQ_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GetOverlapsQQ_CP8(Q1,Q2,S,algo)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Computes Q1^T Q2 for blocks of vectors, non-symmetric version.
+
+      implicit none
+      TYPE (CP8), INTENT(IN) :: Q1(:),Q2(:)
+      TYPE (CP8) :: w
+      integer, intent(in) :: algo
+      real(kind=8), intent(inout) :: S(:,:)
+      real(kind=8), allocatable   :: vivj(:)
+      integer, allocatable :: tab(:,:)
+      integer :: i,j,k,nbloc1,nbloc2,sz,os,szmx
+
+      nbloc1=SIZE(Q1)
+      nbloc2=SIZE(Q2)
+      S=0.d0
+
+!     Assign vectors to this MPI rank
+      call calc_mpi_partition(nbloc2,sz,os,szmx)
+
+!     Rank offsets for vectors in packed array
+      if (sz.gt.0) then
+         call nvtx_start('GetOverlaps')
+         ALLOCATE(vivj(nbloc1))
+         vivj(:)=1.d0
+         call GetRankOffsetTable(Q1,tab)
+
+!        Pack vectors in Q1 into w
+         call w%sumlccp(Q1,vivj)
+
+         do j=1,sz
+            k=os+j
+!           Get overlaps between Q2(k) and those in w
+            call GetBlockOverlaps_CP8(Q2(k),w,tab,S(:,k),algo)
+         enddo
+
+         call w%flush()
+         DEALLOCATE(vivj,tab)
+         call nvtx_stop()
+      endif
+
+      call MPIGatherBlockedMatrix(S)
+
+      end subroutine GetOverlapsQQ_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1316,39 +1675,6 @@
       enddo
 
       end subroutine GetRankOffsetTable
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-      subroutine MPIGatherBlockedMatrix(M)
-
-!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Gathers matrix M with cols stored on different MPI ranks
-
-      implicit none
-      real(kind=8), intent(inout) :: M(:,:)
-      integer, allocatable :: mvecs(:),moffs(:),tab(:,:)
-      integer :: i,j,nbloc,sz,os,ierr
-
-      nbloc=SIZE(M,2)
-
-      ALLOCATE(mvecs(mpinodes),moffs(mpinodes))
-      mvecs(:)=0
-      do j=1,nbloc
-         i=mod(j-1,mpinodes)+1
-         mvecs(i)=mvecs(i)+nbloc
-      enddo
-      moffs(1)=0
-      do i=2,mpinodes
-         moffs(i)=moffs(i-1)+mvecs(i-1)
-      enddo
-
-!     Gather the columns from all processors
-      call MPI_ALLGATHERV(MPI_IN_PLACE,0,MPI_DATATYPE_NULL,&
-           M,mvecs,moffs,mpi_r8,mpi_comm_wd,ierr)
-
-      DEALLOCATE(mvecs,moffs)
-
-      end subroutine MPIGatherBlockedMatrix
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
