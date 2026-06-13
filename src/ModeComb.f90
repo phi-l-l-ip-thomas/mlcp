@@ -985,7 +985,7 @@
 !     Character parameters
       ML%pe_transform='none'
       ML%system='none'
-      ML%pes_path='pes'
+      ML%pes_path='./'
       ML%resfile='none'
       
 !     Array parameters
