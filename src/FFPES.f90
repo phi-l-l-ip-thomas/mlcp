@@ -324,8 +324,8 @@
 
          IF (mpirank.eq.mpi_io_rank) THEN
 
-            write(fname,'(A,I0,A,A)') 'pes/f',k,&
-                                        trim(adjustl(id)),'.dat'
+            write(fname,'(2A,I0,2A)') &
+            trim(adjustl(path)),'/f',k,trim(adjustl(id)),'.dat'
             u=LookForFreeUnit()
             open(u,status='old',file=trim(adjustl(fname)))
 
