@@ -70,7 +70,7 @@ Blank lines are ignored, and lines beginning with `#` are treated as comments.
 # Control section: system designation and default solver settings
 
 $control
-system='ch3cn' pes_path='pes'
+system='ch3cn' pes_path='pes' dividefc='F'
 rs='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 14 2 2022 20 21 13 0'
 $end-control
 
