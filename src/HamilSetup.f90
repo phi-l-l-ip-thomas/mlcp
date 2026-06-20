@@ -81,7 +81,8 @@
       write(*,'(/X,A)') 'Hamiltonian setup...'
 
 !     Compute PES or read from file
-      call GetPotential(V,ML%system,ML%pes_path,ML%nmode(1),ML%dpp%verbosity)
+      call GetPotential(V,ML%system,ML%pes_path,ML%nmode(1),&
+                        ML%dividefc,ML%dpp%verbosity)
 
 !     Generate the operator map and table
       call AllocHamilOp(Ham,V,ML%pe_transform,opmap,ML%dpp%verbosity)

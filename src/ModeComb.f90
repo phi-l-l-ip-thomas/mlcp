@@ -24,13 +24,14 @@
            character(len=128), allocatable :: keyfields(:), keyvalues(:)
            ! Control parameters
            character(len=128) :: system,pes_path,resfile,pe_transform
-           logical            :: dorestart
+           logical            :: dorestart,dividefc
            integer            :: rs(33)
            real(kind=8)       :: pe_trans_fac
-           character(len=128), dimension(6) :: &
+           character(len=128), dimension(7) :: &
            fieldlist=[character(len=128) :: &
                        'pe_trans_fac',&
                        'pe_transform',&
+                       'dividefc',&
                        'system',&
                        'pes_path',&
                        'resfile',&
@@ -616,6 +617,8 @@
                              TRIM(ADJUSTL(ML%resfile))
       write(*,'(X,A,2X,A)') 'PES transformation type (pe_transform):',&
                              TRIM(ADJUSTL(ML%pe_transform))
+      write(*,'(X,A,2X,L5)') 'Divide out force constants  (dividefc):',&
+                             ML%dividefc
       write(*,'(X,A,X,ES11.4)') &
               'PE transform factor     (pe_trans_fac):',ML%pe_trans_fac
       write(*,'(X,A,2X,33(I0,X))') &
@@ -870,6 +873,7 @@
       call bcast(ML%resfile,mpi_io_rank)
       call bcast(ML%pe_transform,mpi_io_rank)
       call bcast(ML%pe_trans_fac,mpi_io_rank)
+      call bcast(ML%dividefc,mpi_io_rank)
       call bcast(ML%rs,mpi_io_rank)
 
       IF (mpirank.ne.mpi_io_rank) THEN
@@ -935,6 +939,7 @@
       MLout%resfile=MLin%resfile
       MLout%pe_transform=MLin%pe_transform
       MLout%pe_trans_fac=MLin%pe_trans_fac
+      MLout%dividefc=MLin%dividefc
       MLout%rs(:)=MLin%rs(:)
       MLout%dpp=MLin%dpp
       
@@ -978,6 +983,9 @@
       TYPE (MLtree), INTENT(INOUT) :: ML
 
       call SetCPPDefaults(ML%dpp,0,0)
+
+!     Logical parameters
+      ML%dividefc=.TRUE.
 
 !     Real parameters
       ML%pe_trans_fac=1.d0
@@ -1037,6 +1045,10 @@
       IF (cppct.gt.0) call processcppfields(ML%dpp,cppfields(1:cppct),&
                                                    cppvalues(1:cppct))
       DEALLOCATE(cppfields,cppvalues)
+
+!     Logical fields
+      call get_field(ML%keyfields,ML%keyvalues,'dividefc',thevalue,fcount)
+      if (fcount.eq.1) ML%dividefc=string2logical(thevalue)
 
 !     Real fields
       call get_field(ML%keyfields,ML%keyvalues,'pe_trans_fac',thevalue,fcount)

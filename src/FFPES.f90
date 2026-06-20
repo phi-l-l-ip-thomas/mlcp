@@ -17,7 +17,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetPotential(V,sys,pespath,ndof,verbosity)
+      subroutine GetPotential(V,sys,pespath,ndof,dividefc,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Makes a call to the appropriate PES routine or reads potential
@@ -26,6 +26,7 @@
       implicit none
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: V(:)
       integer, intent(in) :: ndof,verbosity
+      logical, intent(in) :: dividefc
       character(len=*), intent(in) :: sys,pespath
 
 !     Get the constants for the PES of choice
@@ -42,19 +43,9 @@
       ELSEIF (trim(adjustl(sys)).seq.'Henon') THEN
          call HenonHeilesHamiltonian(V,ndof)
 
-!     Formaldehyde QFF (level of theory and source uncertain)
-      ELSEIF (trim(adjustl(sys)).seq.'forma') THEN
-         call ReadFFHamiltonian(V,sys,pespath,.FALSE.)
-
-!     CH3CN CCSD(T)/cc-pVTZ harmonic + B3LYP/cc-pVTZ cubic/quartic QFF
-!     Original: Begue et al, JPCA 109 (2005) 4611.
-!     interpreted by: Avila and Carrington, JCP 134 (2011) 054126.
-      ELSEIF (trim(adjustl(sys)).seq.'ch3cn') THEN
-         call ReadFFHamiltonian(V,sys,pespath,.FALSE.)
-
 !     Arbitrary QFF, e.g. Gaussian format
       ELSE
-         call ReadFFHamiltonian(V,sys,pespath,.TRUE.)
+         call ReadFFHamiltonian(V,sys,pespath,dividefc)
       ENDIF
 
       call PrintPotentialConstants(V,verbosity)

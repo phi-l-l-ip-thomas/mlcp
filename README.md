@@ -153,6 +153,10 @@ pe_transform is set to either 'morse-tanh' or 'poly-tanh'. Larger
 values decrease the amount of coupling between modes far from the
 equilibrium geometry in the transformed potential.
 
+* 'dividefc' (logical, default='T'): divide force constants by factors from
+the Taylor expansion, i.e. divide by n_i!, where n_i is the number of times 
+that mode i appears in a given term.
+
 * 'rs' (integer array): an array of 33 integers used to initialize the
 random number generator (default= all zeros)
 

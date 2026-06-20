@@ -1,7 +1,7 @@
 # Control section: system designation and default solver settings
 
 $control
-system='ch3cn' ncycle='25' npow='20' psirank='20'
+system='ch3cn' ncycle='25' npow='20' psirank='20' dividefc='F'
 rs='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 14 2 2022 20 21 13 0'
 $end-control
 

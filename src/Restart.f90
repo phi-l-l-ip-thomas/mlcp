@@ -132,6 +132,14 @@
          'ValidateRestart(): System change not allowed in a restart!')
       ENDIF
 
+      IF (ML%dividefc.ne.MLrst%dividefc) THEN
+         IF (mpirank.eq.mpi_prnt_rank) &
+            write(*,*) 'Old dividefc: ',MLrst%dividefc,&
+                     '; New dividefc: ',ML%dividefc
+         call AbortWithError(&
+         'ValidateRestart(): dividefc must be same in restart!')
+      ENDIF
+
       IF (ML%pe_transform.ne.MLrst%pe_transform) THEN
          IF (mpirank.eq.mpi_prnt_rank) &
             write(*,*) 'Old pe_transform: ',MLrst%pe_transform,&
