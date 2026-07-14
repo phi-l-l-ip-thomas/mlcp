@@ -331,9 +331,9 @@
       ELSEIF (id.eq.1) THEN
          GetFunctionLabel='tanh(a*q)'
       ELSEIF (id.eq.2) THEN
-         GetFunctionLabel='1-exp(-a*q)'
+         GetFunctionLabel='1-exp(-b*q)'
       ELSEIF (id.eq.3) THEN
-         GetFunctionLabel='sqrt(1-exp(-a*q^2))'
+         GetFunctionLabel='sqrt(1-exp(-c*q^2))'
       ELSE
          write(*,*) 'function id = ',id
          call AbortWithError("GetFunctionLabel(): unknown function id")

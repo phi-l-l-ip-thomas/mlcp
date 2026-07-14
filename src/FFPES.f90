@@ -17,7 +17,8 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetPotential(V,sys,pespath,ndof,dividefc,verbosity)
+      subroutine GetPotential(V,omega,alpha,beta,sys,pespath,&
+                              ndof,dividefc,trans,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Makes a call to the appropriate PES routine or reads potential
@@ -25,9 +26,10 @@
 
       implicit none
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: V(:)
+      real(kind=8), allocatable, intent(out) :: omega(:),alpha(:),beta(:)
       integer, intent(in) :: ndof,verbosity
       logical, intent(in) :: dividefc
-      character(len=*), intent(in) :: sys,pespath
+      character(len=*), intent(in) :: sys,pespath,trans
 
 !     Get the constants for the PES of choice
 
@@ -51,9 +53,24 @@
       call PrintPotentialConstants(V,verbosity)
 
       IF (ndof.ne.V(1)%nbas(1)) THEN
-         write(*,'(X,A,X,I0)') '# DOF from input:',ndof
-         write(*,'(X,A,X,I0)') '# DOF from read :',V(1)%nbas(1)
+         write(*,'(X,A,X,I0)') '# DOF from input file:',ndof
+         write(*,'(X,A,X,I0)') '# DOF from PES files :',V(1)%nbas(1)
          call AbortWithError('Wrong # DOF for this PES!')
+      ENDIF
+
+      IF (trans .seq. 'read-morse-tanh') THEN
+!        Read parameters for PES pre-defined in Morse-tanh coordinates
+         call ReadMorseParameters(omega,alpha,beta,sys,pespath,verbosity)
+
+         IF (ndof.ne.SIZE(omega)) THEN
+            write(*,'(X,A,X,I0)') '# DOF from input file:',ndof
+            write(*,'(X,A,X,I0)') '# DOF from Morse file:',SIZE(omega)
+            call AbortWithError('Wrong # DOF for this PES!')
+         ENDIF
+
+      ELSE
+!        Extract harmonic constants from PES (for building KEO)
+         call ExtractOmegas(V,omega,alpha,beta,verbosity)
       ENDIF
 
       end subroutine GetPotential
@@ -345,6 +362,86 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+      subroutine ReadMorseParameters(omega,alpha,beta,id,path,verbosity)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Reads parameters to define PES in asymptotically-decaying coordinates 
+! (Morse/tanh for asymmetric/symmetric potential shape, respectively)
+
+      implicit none
+      real(kind=8), allocatable, intent(out) :: omega(:),alpha(:),beta(:)
+      character(len=*), intent(in) :: id,path
+      integer, intent(in) :: verbosity
+      integer :: i,itmp,u,ndof,InpStat,ReadStat
+      real(kind=8) :: otmp,atmp,btmp
+      character(len=128) :: fname
+
+      IF (mpirank.eq.mpi_prnt_rank) THEN
+         write(*,'(/X,A,A)') '--> Reading Morse parameters for: ',&
+                              trim(adjustl(id))
+      ENDIF
+
+!     Count the number of modes
+      ndof=0
+      IF (mpirank.eq.mpi_io_rank) THEN
+
+         write(fname,'(4A)') &
+         trim(adjustl(path)),'/Morse_',trim(adjustl(id)),'.dat'
+         u=LookForFreeUnit()
+         open(u,status='old',file=trim(adjustl(fname)),IOSTAT=InpStat)
+         if (InpStat.ne.0) then
+            write(*,*) 'Morse parameter file, "',fname,'" is missing!'
+            call AbortWithError('ReadMorseParameters(): file not found')
+         endif
+
+         DO
+            read(u,*,IOSTAT=ReadStat) itmp,otmp,atmp,btmp
+            IF (ReadStat /= 0) EXIT
+            ndof=ndof+1
+         ENDDO
+
+      ENDIF
+
+      call bcast(ndof)
+      allocate(omega(ndof),alpha(ndof),beta(ndof))
+
+!     Fill the array
+      IF (mpirank.eq.mpi_io_rank) THEN
+
+         rewind(u)
+         DO i=1,ndof
+            read(u,*,IOSTAT=ReadStat) itmp,otmp,atmp,btmp
+            IF (itmp.lt.1 .or. itmp.gt.ndof) THEN
+               write(*,'(2(A,I0),A)') &
+               'mode number :',itmp,' must be in range [1,',ndof,']'
+               call AbortWithError('Error in ReadMorseParameters()')
+            ENDIF
+            omega(itmp)=otmp
+            alpha(itmp)=atmp
+            beta(itmp)=btmp
+         ENDDO
+         close(u)
+
+      ENDIF
+
+      call bcast(omega,mpi_io_rank)
+      call bcast(alpha,mpi_io_rank)
+      call bcast(beta,mpi_io_rank)
+
+      IF (mpirank.eq.mpi_prnt_rank .and. verbosity.ge.1) THEN
+         write(*,*) 'Morse/tanh parameters extracted from PES:'
+         write(*,*)
+         write(*,'(X,A,3(9X,A,9X))') 'DOF','Omega','Alpha','Beta'
+         DO i=1,ndof
+            write(*,'(X,I3,3(X,f22.12))') i,omega(i),alpha(i),beta(i)
+         ENDDO
+         write(*,*)
+      ENDIF
+
+      end subroutine ReadMorseParameters
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       subroutine FF2Configs(V,C)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -408,15 +505,16 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine ExtractOmegas(V,omega,verbosity)
+      subroutine ExtractOmegas(V,omega,alpha,beta,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-! Transforms potential into "Morsified" coordinates with asymptotic long
-! range behavior
+! Extracts omegas from polynomial potential (used for defining KEO)
+! before potential is transformed. Also allocates arrays for alpha and
+! beta constants
 
       implicit none
       TYPE (Configs), INTENT(INOUT) :: V(:)
-      real(kind=8), allocatable, intent(out) :: omega(:)
+      real(kind=8), allocatable, intent(out) :: omega(:),alpha(:),beta(:)
       integer, intent(in)  :: verbosity
       integer, allocatable :: modpowr(:,:)
       integer :: i,ndof,ndf,mode
@@ -424,10 +522,13 @@
 !     Set parameters
       ndof=V(1)%nbas(1)
 
-      ALLOCATE(omega(ndof))
+      ALLOCATE(omega(ndof),alpha(ndof),beta(ndof))
       omega=0.d0
+      alpha=1.d0
+      beta=0.d0
 
 !     Extract the harmonic constant from the quadratic terms
+!     (alpha and beta are determined later, if needed)
       DO i=1,SIZE(V(2)%coef)
          call DistribModePower(V(2)%qns(i,:),modpowr)
          ndf=SIZE(modpowr,1)
@@ -453,7 +554,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine TransformPES(V,vtype,alpha,trans,afac,opmap,optable)
+      subroutine TransformPES(V,vtype,alpha,beta,trans,afac,opmap,optable)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Transforms potential into "Morsified" coordinates with asymptotic long
@@ -464,13 +565,14 @@
       TYPE (Configs), ALLOCATABLE, INTENT(OUT) :: vtype(:)
       character(len=64), intent(in) :: trans
       real(kind=8), intent(in) :: afac
-      real(kind=8), allocatable, intent(out) :: alpha(:)
+      real(kind=8), intent(inout) :: alpha(:),beta(:)
       integer, intent(in)    :: opmap(:)
       logical, intent(inout) :: optable(:,:,:)
       integer, allocatable :: modpowr(:,:)
       integer :: i,j,k,l,ndof,ndf,ncoup,ot
       real(kind=8), allocatable  :: v1d(:,:)
       logical, allocatable :: sympes(:)
+      real(kind=8), parameter :: tol=1.d-8
       real(kind=8) :: am1
 
 !     Set parameters
@@ -486,8 +588,7 @@
          ENDIF
       ENDIF
 
-      ALLOCATE(v1d(ndof,ncoup),alpha(ndof),sympes(ndof),vtype(ncoup))
-      alpha(:)=1.d0
+      ALLOCATE(v1d(ndof,ncoup),sympes(ndof),vtype(ncoup))
       v1d(:,:)=0.d0
       sympes(:)=.FALSE.
 
@@ -501,7 +602,9 @@
          IF (SIZE(V(k)%coef).eq.1 .and. V(k)%coef(1).eq.0.d0) CYCLE
 
 !        Extract the 1D potentials if transformation is to be made
-         IF (.not.(trans .seq. 'none')) THEN
+!        (skip for 'read-morse-tanh' as parameters are read from file)
+         IF ((trans .seq. 'poly-tanh') .or. &
+             (trans .seq. 'morse-tanh')) THEN
             DO i=1,SIZE(V(k)%coef)
                call DistribModePower(V(k)%qns(i,:),modpowr)
                ndf=SIZE(modpowr,1)
@@ -514,25 +617,29 @@
          ENDIF
       ENDDO
 
-      IF (.not.(trans .seq. 'none')) THEN
+      IF ((trans .seq. 'poly-tanh') .or. &
+          (trans .seq. 'morse-tanh')) THEN
 
 !        Compute the value of the alpha parameter and transform the 1D PES
          DO i=1,ndof
+
 !           Symmetric potential: compute alpha for coupling terms only
             IF (v1d(i,3).eq.0.d0) THEN
-               sympes(i)=.TRUE.
+               beta(i)=0.d0
                alpha(i)=-1.5d0*v1d(i,4)/v1d(i,2)
                alpha(i)=SIGN(sqrt(abs(alpha(i))),alpha(i))
+               sympes(i)=.TRUE.
 
 !           Asymmetric potential: compute alpha and morsify 1D terms
             ELSE
-               alpha(i)=-v1d(i,3)/v1d(i,2)
-               am1=1.d0/alpha(i)
+               beta(i)=-v1d(i,3)/v1d(i,2)
+               alpha(i)=beta(i)
+               am1=1.d0/beta(i)
 !              Morse series reversal defs
                v1d(i,4) = am1*(am1*(am1*(am1*v1d(i,4) + 1.5d0*v1d(i,3)) + &
                               (11.d0/12.d0)*v1d(i,2)) + 0.25d0*v1d(i,1))
-!              Alpha is chosen to give v1d(i,3) = 0. Enforce v1d(i,3) = 0
-!              here since the expression below may give a nonzero alpha
+!              Beta is chosen to give v1d(i,3) = 0. Enforce v1d(i,3) = 0
+!              here since the expression below may give a nonzero beta
 !              due to roundoff error
 !               v1d(i,3) = am1*(am1*(am1*v1d(i,3) + v1d(i,2)) + &
 !                              (1.d0/3.d0)*v1d(i,1))
@@ -543,33 +650,54 @@
             alpha(i)=abs(afac*alpha(i)) ! Scaled alpha
          ENDDO
 
+      ELSEIF (trans .seq. 'read-morse-tanh') THEN
+
+!        Determine symmetry of read potential from magnitude of beta
+         DO i=1,ndof
+            sympes(i)=(abs(beta(i)).lt.tol)
+         ENDDO
+
       ENDIF
 
       IF (mpirank.eq.mpi_prnt_rank .and. &
           (.not.(trans .seq. 'none'))) THEN
-         write(*,'(/X,A,A/)') '--> The PES will be transformed ',&
+         IF (trans .seq. 'read-morse-tanh') THEN
+            write(*,'(X,A,A/)') &
+              '--> The PES is expressed in asymptotically-decaying ',&
+                  'coordinates from user-defined parameters'
+            write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
+                               ' y_i = 1-exp(-beta_i*q_i)'
+            write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
+                               ' y_i =  tanh(alpha_i*q_i)'
+            write(*,'(X,A,A)') ' d-D coupling potentials :',&
+                               ' y_i =  tanh(alpha_i*q_i)'
+         ELSE
+            write(*,'(X,A,A/)') &
+              '--> The PES will be transformed ',&
               'into asymptotically-decaying coordinates'
-         IF (trans .seq. 'poly-tanh') THEN 
-            write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
-                               ' y_i = q_i'
-            write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
-                               ' y_i = q_i' 
-            write(*,'(X,A,A)') ' d-D coupling potentials :',&
-                               ' y_i = tanh(alpha_i*q_i)'
-         ELSEIF (trans .seq. 'morse-tanh') THEN
-            write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
-                               ' y_i = 1-exp(-alpha_i*q_i)'
-            write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
-                               ' y_i = q_i' 
-            write(*,'(X,A,A)') ' d-D coupling potentials :',&
-                               ' y_i = tanh(alpha_i*q_i)'
+            IF (trans .seq. 'poly-tanh') THEN 
+               write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
+                                  ' y_i = q_i'
+               write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
+                                  ' y_i = q_i' 
+               write(*,'(X,A,A)') ' d-D coupling potentials :',&
+                                  ' y_i = tanh(alpha_i*q_i)'
+            ELSEIF (trans .seq. 'morse-tanh') THEN
+               write(*,'(X,A,A)') 'Asymmetric 1D potentials :',&
+                                  ' y_i = 1-exp(-alpha_i*q_i)'
+               write(*,'(X,A,A)') ' Symmetric 1D potentials :',&
+                                  ' y_i = q_i' 
+               write(*,'(X,A,A)') ' d-D coupling potentials :',&
+                                  ' y_i = tanh(alpha_i*q_i)'
+            ENDIF
+            write(*,'(/X,A)') 'DOF Sym   Alpha-values     Beta-values'
+            DO i=1,ndof
+               write(*,'(X,I3,2X,L1,2(2X,ES15.8))') &
+                     i,sympes(i),alpha(i),beta(i)
+            ENDDO
+            write(*,'(X,A,f10.6,A)') '(Alpha scaled by ',afac,')'
+            write(*,*)
          ENDIF
-         write(*,'(/X,A,f10.6,A)') &
-                           'DOF Sym Alpha-values (scaled by ',afac,')'
-         DO i=1,ndof
-            write(*,'(X,I3,2X,L1,2X,ES15.8)') i,sympes(i),alpha(i)
-         ENDDO
-         write(*,*)
       ENDIF
 
 !     Check which PEO are present and transform the PES, if requested
@@ -585,24 +713,39 @@
 !           1D potential terms:
             IF (ndf.eq.1) THEN
 
-!              Symmetric 1D potential or no transformation
-               IF (sympes(modpowr(1,1)).or.(trans .seq. 'none')) THEN
+!              No transformation
+               IF (trans .seq. 'none') THEN
                   ot=findival(opmap,0) ! Leave as power of q
-!              Asymmetric 1D potential, poly-tanh
+!              1D potential, poly-tanh
                ELSEIF (trans .seq. 'poly-tanh') THEN
                   ot=findival(opmap,0) ! Leave as power of q
-!              Asymmetric 1D potential, morse-tanh
+!              1D potential, morse-tanh
                ELSEIF (trans .seq. 'morse-tanh') THEN
-                  V(k)%coef(i)=v1d(modpowr(1,1),modpowr(1,2))
-                  ot=findival(opmap,2) ! morse
+                  IF (sympes(modpowr(1,1))) THEN
+                     ot=findival(opmap,0) ! symmetric; leave as power of q
+                  ELSE
+                     V(k)%coef(i)=v1d(modpowr(1,1),modpowr(1,2))
+                     ot=findival(opmap,2) ! asymmetric; transform to morse
+                  ENDIF
+!              Morse-tanh, parameters read from file
+!              (note that this differs from tranformed case; here, 1D
+!               potentials are represented as powers of tanh, not q)
+               ELSEIF (trans .seq. 'read-morse-tanh') THEN
+                  IF (sympes(modpowr(1,1))) THEN        
+                     ot=findival(opmap,1) ! tanh
+                  ELSE
+                     ot=findival(opmap,2) ! morse
+                  ENDIF
                ENDIF
 
             ELSE
 !              Coupling terms
                IF (trans .seq. 'none') THEN
                   ot=findival(opmap,0) ! Leave as power of q
+               ELSEIF (trans .seq. 'read-morse-tanh') THEN
+                  ot=findival(opmap,1) ! tanh, no transform
                ELSE
-                  ot=findival(opmap,1) ! tanh
+                  ot=findival(opmap,1) ! tanh, with transform
                   DO j=1,ndf
                      V(k)%coef(i)=V(k)%coef(i)/&
                                   alpha(modpowr(j,1))**modpowr(j,2)

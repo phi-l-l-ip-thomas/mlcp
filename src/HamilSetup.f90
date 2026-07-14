@@ -70,7 +70,7 @@
       TYPE (Hamiltonian)  :: Ham
       TYPE (Configs), ALLOCATABLE :: V(:),vtype(:)
       integer, allocatable :: opmap(:)
-      real(kind=8), allocatable :: alpha(:),omega(:)
+      real(kind=8), allocatable :: omega(:),alpha(:),beta(:)
       real(kind=8) :: ti1,ti2
 
       IF (.NOT. MODULE_SETUP) call Init_HamilSetup_Module()
@@ -81,17 +81,18 @@
       write(*,'(/X,A)') 'Hamiltonian setup...'
 
 !     Compute PES or read from file
-      call GetPotential(V,ML%system,ML%pes_path,ML%nmode(1),&
-                        ML%dividefc,ML%dpp%verbosity)
+      call GetPotential(V,omega,alpha,beta,ML%system,ML%pes_path,&
+                        ML%nmode(1),ML%dividefc,ML%pe_transform,&
+                        ML%dpp%verbosity)
 
 !     Generate the operator map and table
       call AllocHamilOp(Ham,V,ML%pe_transform,opmap,ML%dpp%verbosity)
 
 !     Extract harmonic constants from PES (for building KEO)
-      call ExtractOmegas(V,omega,ML%dpp%verbosity)
+!      call ExtractOmegas(V,omega,ML%dpp%verbosity) !!! MODIFY: dont do if read-morse-tanh
 
 !     PES coordinate transformation (if requested)
-      call TransformPES(V,vtype,alpha,ML%pe_transform,ML%pe_trans_fac,opmap,Ham%optable)
+      call TransformPES(V,vtype,alpha,beta,ML%pe_transform,ML%pe_trans_fac,opmap,Ham%optable)
 
 !     Print out PES info (for debugging)
       call ShowPESInfo(Ham,V,vtype,ML%pe_transform,opmap,ML%dpp%verbosity)
@@ -103,13 +104,13 @@
       call FillHamilNodeTree(Ham%nt,V,vtype,omega,ML%dpp%verbosity)
 
 !     Get the unique primitive operator matrices
-      call GetPrimitiveOperators(Ham,ML,V,alpha,opmap,ML%dpp%verbosity)
+      call GetPrimitiveOperators(Ham,ML,V,alpha,beta,opmap,ML%dpp%verbosity)
 
 !     Construct bottom-layer mode operators from primitive operator
 !     matrices, then solve and update primitive operators
 !      call SolveandUpdateFirstLayer(Ham)
 
-      DEALLOCATE(V,vtype,alpha,omega,opmap)
+      DEALLOCATE(V,vtype,omega,alpha,beta,opmap)
 
       call CPU_TIME(ti2)
       module_time=module_time+ti2-ti1
@@ -168,7 +169,8 @@
          ntyp=3
          allocate(opmap(ntyp))
          opmap=(/-1,0,1/)
-      ELSEIF (trans .seq. 'morse-tanh') THEN
+      ELSEIF ((trans .seq. 'morse-tanh') .or. &
+              (trans .seq. 'read-morse-tanh')) THEN
          ntyp=4
          allocate(opmap(ntyp))
          opmap=(/-1,0,1,2/)
@@ -191,7 +193,7 @@
                    '[',i,'] = (tanh(alpha_i*q_i))^n'
                case(2)
                    write(*,'(X,A,I0,A)') &
-                   '[',i,'] = (1-exp(-alpha_i*q_i))^n'
+                   '[',i,'] = (1-exp(-beta_i*q_i))^n'
             end select
          ENDDO
          write(*,*)
@@ -446,7 +448,7 @@
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-      subroutine GetPrimitiveOperators(Ham,ML,V,alpha,opmap,verbosity)
+      subroutine GetPrimitiveOperators(Ham,ML,V,alpha,beta,opmap,verbosity)
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! Determines which operators are unique in the Hamiltonian and gets
@@ -456,7 +458,7 @@
       TYPE (Hamiltonian), INTENT(INOUT) :: Ham
       TYPE (MLtree), INTENT(IN)  :: ML
       TYPE (Configs), INTENT(IN) :: V(:)
-      real(kind=8), intent(in)   :: alpha(:)
+      real(kind=8), intent(in)   :: alpha(:),beta(:)
       integer, intent(in) :: opmap(:)
       integer, intent(in) :: verbosity
       integer :: i,j,k,l,m,gdim,ndof,ncoup,oppowmax,noptyp
@@ -485,8 +487,16 @@
          DO k=1,noptyp
             l=opmap(k)
             DO j=1,oppowmax
-               if (Ham%optable(m,j,k)) &
-               Ham%ops(m,j,k)=GetPrimitiveOperMat(m,gdim,j,l,alpha(m))
+               IF (l.lt.2) THEN
+                  if (Ham%optable(m,j,k)) &
+                  Ham%ops(m,j,k)=GetPrimitiveOperMat(m,gdim,j,l,alpha(m))
+               ELSEIF (l.eq.2) THEN
+                  if (Ham%optable(m,j,k)) &
+                  Ham%ops(m,j,k)=GetPrimitiveOperMat(m,gdim,j,l,beta(m))
+               ELSE
+                  write(*,*) 'l has current max value of 2; l = ',l
+                  call AbortWithError('GetPrimitiveOperators() bad l')
+               ENDIF
             ENDDO
          ENDDO
       ENDDO
