@@ -416,7 +416,7 @@
                'mode number :',itmp,' must be in range [1,',ndof,']'
                call AbortWithError('Error in ReadMorseParameters()')
             ENDIF
-            omega(itmp)=otmp
+            omega(itmp)=0.5d0*otmp
             alpha(itmp)=atmp
             beta(itmp)=btmp
          ENDDO
@@ -433,7 +433,7 @@
          write(*,*)
          write(*,'(X,A,3(9X,A,9X))') 'DOF','Omega','Alpha','Beta'
          DO i=1,ndof
-            write(*,'(X,I3,3(X,f22.12))') i,omega(i),alpha(i),beta(i)
+            write(*,'(X,I3,3(X,f22.12))') i,2*omega(i),alpha(i),beta(i)
          ENDDO
          write(*,*)
       ENDIF
@@ -541,7 +541,7 @@
 
       IF (mpirank.eq.mpi_prnt_rank .and. verbosity.ge.1) THEN
          write(*,*) 'Harmonic constants extracted from PES:',&
-                    '(used to construct KEO)'
+                    ' (used to construct KEO)'
          write(*,*)
          write(*,'(X,A,9X,A)') 'DOF','Omega'
          DO i=1,ndof

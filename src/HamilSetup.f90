@@ -88,9 +88,6 @@
 !     Generate the operator map and table
       call AllocHamilOp(Ham,V,ML%pe_transform,opmap,ML%dpp%verbosity)
 
-!     Extract harmonic constants from PES (for building KEO)
-!      call ExtractOmegas(V,omega,ML%dpp%verbosity) !!! MODIFY: dont do if read-morse-tanh
-
 !     PES coordinate transformation (if requested)
       call TransformPES(V,vtype,alpha,beta,ML%pe_transform,ML%pe_trans_fac,opmap,Ham%optable)
 
