@@ -614,7 +614,7 @@
       TYPE (CP8), INTENT(IN)    :: M1,M2
       TYPE (CP8), INTENT(INOUT) :: M3
       INTEGER, INTENT(IN)       :: ish1,ish2,algo
-      REAL(KIND=8), INTENT(IN)  :: Esh1,Esh2
+      real(kind=8), INTENT(IN)  :: Esh1,Esh2
       LOGICAL, INTENT(IN)  :: t1,t2,t3
 
       call U%new(M1,ish1,Esh1,t1,M2,ish2,Esh2,t2,M3,t3,algo)
@@ -637,7 +637,7 @@
       TYPE (CP8), INTENT(IN)    :: M1,M2
       TYPE (CP8), INTENT(INOUT) :: M3
       INTEGER, INTENT(IN)       :: ish1,ish2,imode,algo
-      REAL(KIND=8), INTENT(IN)  :: Esh1,Esh2
+      real(kind=8), INTENT(IN)  :: Esh1,Esh2
       LOGICAL, INTENT(IN)  :: t1,t2,t3
 
       call U%new(M1,ish1,Esh1,t1,M2,ish2,Esh2,t2,M3,t3,algo)

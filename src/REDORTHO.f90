@@ -495,7 +495,7 @@
       integer :: rF,rG,i,j,k,l,ndof,ndiff,idiff,gst,pos
       real*8  :: norm1D,cuttol
       logical :: found
-      REAL*8, PARAMETER :: tol=1.d-12
+      real(kind=8), PARAMETER :: tol=1.d-12
 
       ndof=SIZE(G%nbas)
       rG=SIZE(G%coef)
@@ -592,7 +592,7 @@
       integer, intent(out) :: ndiff,idiff,pos
       integer :: ndof,gst,gi,k,l,bsign
       logical :: same
-      REAL*8, PARAMETER :: tol=1.d-12
+      real(kind=8), PARAMETER :: tol=1.d-12
       ndof=SIZE(G%nbas)
       ndiff=0
       idiff=0

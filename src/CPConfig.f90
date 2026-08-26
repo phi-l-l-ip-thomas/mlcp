@@ -12,7 +12,7 @@
 
       TYPE Configs
          INTEGER, ALLOCATABLE :: nbas(:),qns(:,:)
-         REAL(KIND=8), ALLOCATABLE :: coef(:)
+         real(kind=8), ALLOCATABLE :: coef(:)
       END TYPE Configs
 
       CONTAINS
@@ -765,7 +765,7 @@
       implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       TYPE (Configs) :: w
-      REAL*8, ALLOCATABLE :: tabindx(:),rndnr(:)
+      real(kind=8), ALLOCATABLE :: tabindx(:),rndnr(:)
       INTEGER :: nrk,i
 
       nrk=SIZE(v%qns,1)
@@ -803,7 +803,7 @@
       TYPE (Configs), INTENT(INOUT) :: v
       INTEGER, INTENT(IN)  :: i,j
       INTEGER, ALLOCATABLE :: qnt(:)
-      REAL*8  :: ct
+      real(kind=8)  :: ct
       INTEGER :: ndof,nrk
 
 !     Set parameters
@@ -839,7 +839,7 @@
       implicit none
       TYPE (Configs), INTENT(INOUT) :: v
       INTEGER, ALLOCATABLE :: qnt(:,:)
-      REAL*8, ALLOCATABLE  :: ord(:)
+      real(kind=8), ALLOCATABLE  :: ord(:)
       INTEGER :: i,ndof,nrk
 
 !     Set parameters

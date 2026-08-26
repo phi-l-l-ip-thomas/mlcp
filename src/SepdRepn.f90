@@ -11,7 +11,7 @@
       USE, INTRINSIC :: ISO_C_BINDING
 
       TYPE CP
-         REAL*8,  ALLOCATABLE :: base(:,:), coef(:)
+         real(kind=8),  ALLOCATABLE :: base(:,:), coef(:)
          INTEGER, ALLOCATABLE :: nbas(:), ibas(:), fbas(:)
          INTEGER, ALLOCATABLE :: rows(:), cols(:)
          LOGICAL, ALLOCATABLE :: sym(:)
@@ -473,7 +473,7 @@
       TYPE (CP), INTENT(IN) :: w
       INTEGER, INTENT(IN), OPTIONAL :: rk
       INTEGER :: i,rv,d
-      REAL*8  :: fac
+      real(kind=8)  :: fac
 
       IF (present(rk)) THEN
          rv=rk
@@ -1115,9 +1115,9 @@
 
       implicit none
       TYPE (CP), INTENT(IN) :: v
-      REAL*8, ALLOCATABLE :: M(:,:)
+      real(kind=8), ALLOCATABLE :: M(:,:)
       INTEGER :: i,j,k,nr,nc,rk
-      REAL*8  :: fac
+      real(kind=8)  :: fac
 
       IF (SIZE(v%nbas).ne.2) THEN
          write(*,*) 'Error: must have 2 DOFs in CP-to-matrix transform'
@@ -1160,7 +1160,7 @@
 
       implicit none
       TYPE (CP), INTENT(IN) :: v
-      REAL*8, ALLOCATABLE, INTENT(OUT) :: U(:,:),W(:,:)
+      real(kind=8), ALLOCATABLE, INTENT(OUT) :: U(:,:),W(:,:)
       INTEGER :: i,j,nu,nw,rk
 
       IF (SIZE(v%nbas).ne.2) THEN
@@ -1246,8 +1246,8 @@
 
       implicit none
       TYPE (CP), INTENT(INOUT) :: v
-      REAL*8, ALLOCATABLE :: pows(:)
-      REAL*8  :: fac,div
+      real(kind=8), ALLOCATABLE :: pows(:)
+      real(kind=8)  :: fac,div
       INTEGER :: d,i,ndof
 
       ndof=SIZE(v%nbas)

@@ -27,7 +27,7 @@
          INTEGER, ALLOCATABLE :: nbas(:)
          INTEGER, ALLOCATABLE :: rows(:)
          INTEGER, ALLOCATABLE :: cols(:)
-         REAL(KIND=8), ALLOCATABLE :: base(:),coef(:)
+         real(kind=8), ALLOCATABLE :: base(:),coef(:)
          CONTAINS
             PROCEDURE :: new => NewGen_CP8
             PROCEDURE :: new0 => ZeroGen_CP8
@@ -41,6 +41,8 @@
             PROCEDURE :: clonerand => RandomRef_CP8
             PROCEDURE :: flush => Flush_CP8
             PROCEDURE :: zero => SetZero_CP8
+            PROCEDURE :: setbase => SetBase_CP8
+            PROCEDURE :: setcoef => SetCoef_CP8
             PROCEDURE :: show => ShowStats_CP8
             PROCEDURE :: printvec => PrintVec_CP8
             PROCEDURE :: printmat => PrintMat_CP8
@@ -289,15 +291,52 @@
 
       implicit none
       CLASS (CP8) :: v
-      integer :: j,ndof
 
-      IF (.not.ALLOCATED(v%base)) THEN
-         call AbortWithError("SetZero_CP8(): v not allocated")
-      ENDIF
-      v%base=0.d0
-      v%coef=0.d0
+      call v%setbase(0.d0)
+      call v%setcoef(0.d0)
 
       end subroutine SetZero_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SetBase_CP8(v,val)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets ALL entries of CP-vector base to 'val'
+
+      implicit none
+      CLASS (CP8) :: v
+      real(kind=8), intent(in) :: val
+
+      IF (.not.ALLOCATED(v%base)) THEN
+         call AbortWithError("SetBase_CP8(): v base not allocated")
+      ENDIF
+      v%base(:)=val
+
+      end subroutine SetBase_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine SetCoef_CP8(v,val)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Sets ALL coefs of CP-vector to 'val'
+
+      implicit none
+      CLASS (CP8) :: v
+      real(kind=8), intent(in) :: val
+
+      IF (.not.ALLOCATED(v%coef)) THEN
+         call AbortWithError("SetCoef_CP8(): v coef not allocated")
+      ENDIF
+
+      IF (val.lt.0.d0) THEN
+         call AbortWithError("SetCoef_CP8(): set value must be >= 0")
+      ENDIF
+
+      v%coef(:)=val
+
+      end subroutine SetCoef_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -536,10 +575,10 @@
       integer :: res
 
       IF (r.lt.1 .or. r.gt.v%R()) THEN
-         write(*,*) 'GetBaseStart(): r (',r,') out of range: [1,',v%R(),']'
+         write(*,*) 'GetBasisStart(): r (',r,') out of range: [1,',v%R(),']'
       ENDIF
       IF (d.lt.1 .or. d.gt.v%D()) THEN
-         write(*,*) 'GetBaseStart(): d (',d,') out of range: [1,',v%D(),']'
+         write(*,*) 'GetBasisStart(): d (',d,') out of range: [1,',v%D(),']'
       ENDIF
 
       IF (ALLOCATED(v%look)) THEN
@@ -563,10 +602,10 @@
       integer :: res
 
       IF (r.lt.1 .or. r.gt.v%R()) THEN
-         write(*,*) 'GetBaseFinish(): r (',r,') out of range: [1,',v%R(),']'
+         write(*,*) 'GetBasisFinish(): r (',r,') out of range: [1,',v%R(),']'
       ENDIF
       IF (d.lt.1 .or. d.gt.v%D()) THEN
-         write(*,*) 'GetBaseFinish(): d (',d,') out of range: [1,',v%D(),']'
+         write(*,*) 'GetBasisFinish(): d (',d,') out of range: [1,',v%D(),']'
       ENDIF
 
       IF (ALLOCATED(v%look)) THEN
@@ -1304,7 +1343,7 @@
       TYPE (CP8), INTENT(IN) :: w
       INTEGER, INTENT(IN), OPTIONAL :: rk
       INTEGER :: rv,d,ndof,ms,mf
-      REAL(kind=8)  :: fac
+      real(kind=8)  :: fac
 
       IF (present(rk)) THEN
          rv=rk
@@ -1670,8 +1709,8 @@
 
       implicit none
       CLASS (CP8), INTENT(INOUT) :: v
-      REAL(kind=8), ALLOCATABLE :: pows(:)
-      REAL(kind=8) :: fac,div
+      real(kind=8), ALLOCATABLE :: pows(:)
+      real(kind=8) :: fac,div
       INTEGER :: d,ndof,r,rk,bs,bf
 
       ndof=v%D()
@@ -2259,9 +2298,9 @@
 
       implicit none
       TYPE (CP8), INTENT(IN) :: v
-      REAL(kind=8), ALLOCATABLE :: M(:,:)
+      real(kind=8), ALLOCATABLE :: M(:,:)
       INTEGER :: r,rk,j,k,nr,nc
-      REAL(kind=8) :: fac
+      real(kind=8) :: fac
 
       IF (v%D().ne.2) THEN
          write(*,*) 'Error: must have 2 DOFs in CP-to-matrix transform'
@@ -2311,7 +2350,7 @@
 
       implicit none
       TYPE (CP8), INTENT(IN) :: v
-      REAL(kind=8), ALLOCATABLE, INTENT(OUT) :: U(:,:),W(:,:)
+      real(kind=8), ALLOCATABLE, INTENT(OUT) :: U(:,:),W(:,:)
       INTEGER :: r,rk,j,nu,nw,us,uf,ws,wf
 
       IF (v%D().ne.2) THEN
@@ -2661,6 +2700,69 @@
       enddo
 
       end subroutine thisfromCP_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine GetModeTerm_CP8(v,iterm,imode,M)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Copies array in M to term iterm of mode impde in v
+
+      implicit none
+      CLASS (CP8) :: v
+      integer, intent(in) :: iterm,imode
+      real(kind=8), allocatable, intent(out) :: M(:) ! Need for multiple types
+      real(kind=8) :: ti1,ti2
+      integer :: bs,bf
+
+      IF (.NOT. MODULE_SETUP) call Init_CPr8_Module()
+
+      bs=v%BS(iterm,imode)
+      bf=v%BF(iterm,imode)
+      ALLOCATE(M(bf-bs+1))
+
+      call CPU_TIME(ti1)
+      call nvtx_start('CP8 term copy')
+      M(:)=v%base(bs:bf)
+      call nvtx_stop()
+      call CPU_TIME(ti2)
+      copy_time=copy_time+ti2-ti1
+
+      end subroutine GetModeTerm_CP8
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+      subroutine PutModeTerm_CP8(v,iterm,imode,M)
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+! Copies array in M to term iterm of mode impde in v
+
+      implicit none
+      CLASS (CP8) :: v
+      integer, intent(in) :: iterm,imode
+      real(kind=8), intent(in) :: M(:) ! Need for multiple types
+      real(kind=8) :: ti1,ti2
+      integer :: bs,bf
+
+      IF (.NOT. MODULE_SETUP) call Init_CPr8_Module()
+
+      bs=v%BS(iterm,imode)
+      bf=v%BF(iterm,imode)
+
+      IF ((bf-bs+1).ne.SIZE(M)) THEN
+         write(*,'(2(A,I0))') 'M has size ',SIZE(M),&
+                              ' but CP object v expects size ',bf-bs+1
+         call AbortWithError("PutModeTerm_CP8(): wrong size M")
+      ENDIF
+
+      call CPU_TIME(ti1)
+      call nvtx_start('CP8 term copy')
+      v%base(bs:bf)=M(:)
+      call nvtx_stop()
+      call CPU_TIME(ti2)
+      copy_time=copy_time+ti2-ti1
+
+      end subroutine PutModeTerm_CP8
 
 !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

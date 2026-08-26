@@ -1242,7 +1242,7 @@
                successitems(13)=(InpStat.eq.0)
                if (.not.successitems(13)) exit
 
-               read(u,IOSTAT=InpStat) Qt(i)%base
+               read(u,IOSTAT=InpStat) Qt(i)%base !!! FIX: read prec earlier, then baseX into array of correct type, then convert
                successitems(14)=(InpStat.eq.0)
                if (.not.successitems(14)) exit
 
@@ -1417,7 +1417,7 @@
             write(u) Q(i)%rows
             write(u) Q(i)%cols
             write(u) Q(i)%coef
-            write(u) Q(i)%base
+            write(u) Q(i)%base !!! FIX: write prec and corresponding array to psi file
          ENDDO
 
          close(u)

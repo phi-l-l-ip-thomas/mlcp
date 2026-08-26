@@ -473,13 +473,13 @@
 !        Guesses for highest and lowest eigenvectors
          DO j=1,2
             call Qt(j)%clone0(Q(1))
-            Qt(j)%coef(1)=1.d0
-            Qt(j)%base(:)=smallnr
+            call Qt(j)%setcoef(1.d0)
+            call Qt(j)%setbase(smallnr)
          ENDDO
 
          DO i=1,ndof
-            Qt(1)%base(Qt(1)%BS(1,i))=1.d0
-            Qt(2)%base(Qt(2)%BF(1,i))=1.d0
+            call Qt(1)%Put(1,1,1,i,1.d0)
+            call Qt(2)%Put(Qt(2)%M(i),Qt(2)%N(i),1,i,1.d0)
          ENDDO
 
          DO j=1,2

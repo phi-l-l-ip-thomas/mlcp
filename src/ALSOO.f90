@@ -14,15 +14,15 @@
 
       TYPE ALS
          TYPE (CP) :: ATA,ATG
-         REAL*8, ALLOCATABLE :: B(:,:),P(:,:)
+         real(kind=8), ALLOCATABLE :: B(:,:),P(:,:)
          LOGICAL, ALLOCATABLE :: dofincluded(:)
-         REAL*8  :: FF,FG,GG,CN,conver,del
+         real(kind=8) :: FF,FG,GG,CN,conver,del
          CHARACTER(LEN=64) :: alsnm
          CHARACTER(LEN=64) :: solver
          ! Options
-         REAL*8  :: penalty ! penalty on LHS to prevent ill-conditioning
-         REAL*8  :: thresh  ! fractional tolerance for convergence
-         REAL*8  :: dthresh ! fractional derivative tolerance
+         real(kind=8) :: penalty ! penalty on LHS to prevent ill-conditioning
+         real(kind=8) :: thresh  ! fractional tolerance for convergence
+         real(kind=8) :: dthresh ! fractional derivative tolerance
          LOGICAL :: AisI    ! .T. for ALS, .F. for linear solver
          LOGICAL :: weights ! .T. weights rows by weights matrix
          LOGICAL :: update  ! .T. up/downdates B,P; .F. always builds

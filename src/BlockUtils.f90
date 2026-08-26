@@ -1636,14 +1636,14 @@
       if (algo.eq.1) call P%createondevice()
 
 !     Compute inner products on all vecs in w
-      call CONSTPVV_CP8(v,w,P%base,algo)
+      call CONSTPVV_CP8(v,w,P%base,algo) !!! FIX: so that base is not passed
 
 !     Accumulate terms from each Q(i) in QHQ
       do i=1,nbloc
 !        vivj=<v,w(pst:pfi)>
          pst=P%BS(tab(i,1),1)
          pfi=P%BF(tab(i,2),1)
-         vivj(i)=ReduceP_CP8(P%base(pst:pfi),algo)
+         vivj(i)=ReduceP_CP8(P%base(pst:pfi),algo) !!! FIX: so that base is not passed
       enddo
       call P%flush()
 

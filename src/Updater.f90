@@ -170,7 +170,7 @@
       real(kind=8), allocatable :: QXQ(:,:),tmat(:,:),tvec(:)
       integer, allocatable :: rows(:),cols(:)
       integer, intent(in)  :: imode,algo
-      integer :: i,k,nbloc,rk,gi,gf,bs,bf
+      integer :: i,nbloc
 
       nbloc=SIZE(Q)
 
@@ -181,24 +181,12 @@
       call Vec2SymPackMat(mat,tmat)
       call Mat2Vec(tvec,tmat,.FALSE.)
       call X8%identity(Q(1)%rows,Q(1)%rows)
-      X8%base(X8%BS(1,imode):X8%BF(1,imode))=tvec(:)
+      call PutModeTerm_CP8(X8,1,imode,tvec)
       DEALLOCATE(mat,tmat,tvec)
 
 !     Put Q into CP8 structure
-      gi=1
-      DO i=2,imode
-         gi=gi+Q(1)%nbas(i-1)
-      ENDDO
-      gf=gi+Q(1)%nbas(imode)-1
-
       do i=1,nbloc
          call Qmode(i)%fromCP(Q(i))
-         rk=Qmode(i)%R()
-         do k=1,rk
-            bs=Qmode(i)%BS(k,imode)
-            bf=Qmode(i)%BF(k,imode)
-            Qmode(i)%base(bs:bf)=Q(i)%base(gi:gf,k)
-         enddo
       enddo
 
       if (algo.eq.1) then

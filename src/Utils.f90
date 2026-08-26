@@ -9,7 +9,7 @@
 
 !     Vector classes (hack for creating ragged multi-dimensional arrays)
       TYPE RVEC
-         REAL*8, ALLOCATABLE :: v(:)
+         real(kind=8), ALLOCATABLE :: v(:)
          CONTAINS
             PROCEDURE :: new => Newrvec
             PROCEDURE :: flush => Flushrvec
